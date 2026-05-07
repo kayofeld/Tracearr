@@ -11,6 +11,7 @@ import { ServerBandwidthChart } from '@/components/charts/BandwidthChart';
 import { useDashboardStats, useActiveSessions } from '@/hooks/queries';
 import { useServerStatistics, useServerBandwidth } from '@/hooks/queries/useServers';
 import { useServer } from '@/hooks/useServer';
+import { useServerColorMap } from '@/hooks/useServerColorMap';
 import type { ActiveSession } from '@tracearr/shared';
 
 export function Dashboard() {
@@ -23,11 +24,7 @@ export function Dashboard() {
   const [selectedSession, setSelectedSession] = useState<ActiveSession | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // Build server color map for multi-server attribution
-  const serverColorMap = useMemo(
-    () => new Map(selectedServers.map((s) => [s.id, s.color ?? null])),
-    [selectedServers]
-  );
+  const serverColorMap = useServerColorMap();
 
   // Sort sessions by server display order so cards group by server
   const sortedSessions = useMemo(() => {
