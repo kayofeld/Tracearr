@@ -6,6 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import type { ActiveSession, LocationStats } from '@tracearr/shared';
 import { cn, formatLocationCompact } from '@/lib/utils';
 import { ActiveSessionBadge } from '@/components/sessions/ActiveSessionBadge';
+import { ServerLegend } from '@/components/server';
 import { useTheme } from '@/components/theme-provider';
 import { User, MapPin } from 'lucide-react';
 import { getAvatarUrl } from '@/components/users/utils';
@@ -208,47 +209,6 @@ const TILE_URLS = {
   light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
 };
 
-// Legend overlay showing server names with color swatches
-function ServerLegend({
-  sessions,
-  serverColorMap,
-}: {
-  sessions?: ActiveSession[];
-  serverColorMap?: Map<string, string | null>;
-}) {
-  // Deduplicate servers from active sessions
-  const servers = useMemo(() => {
-    if (!sessions) return [];
-    const seen = new Map<string, string>();
-    for (const s of sessions) {
-      if (s.server && !seen.has(s.server.id)) {
-        seen.set(s.server.id, s.server.name);
-      }
-    }
-    return [...seen.entries()].map(([id, name]) => ({
-      id,
-      name,
-      color: serverColorMap?.get(id) ?? DEFAULT_MARKER_COLOR,
-    }));
-  }, [sessions, serverColorMap]);
-
-  if (servers.length < 2) return null;
-
-  return (
-    <div className="bg-card/90 border-border absolute right-2 bottom-2 z-10 rounded-md border px-2.5 py-1.5 text-xs shadow-sm backdrop-blur-sm">
-      {servers.map((server) => (
-        <div key={server.id} className="flex items-center gap-1.5 py-0.5">
-          <span
-            className="inline-block h-2 w-2 shrink-0 rounded-full"
-            style={{ backgroundColor: server.color }}
-          />
-          <span className="text-foreground">{server.name}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function StreamCard({
   sessions,
   locations,
@@ -259,6 +219,20 @@ export function StreamCard({
 }: StreamCardProps) {
   const hasData =
     sessions?.some((s) => s.geoLat && s.geoLon) || locations?.some((l) => l.lat && l.lon);
+  const legendServers = useMemo(() => {
+    if (!sessions) return [];
+    const seen = new Map<string, { id: string; name: string; color: string | null }>();
+    for (const s of sessions) {
+      if (s.server && !seen.has(s.server.id)) {
+        seen.set(s.server.id, {
+          id: s.server.id,
+          name: s.server.name,
+          color: serverColorMap?.get(s.server.id) ?? null,
+        });
+      }
+    }
+    return [...seen.values()];
+  }, [sessions, serverColorMap]);
   const { theme } = useTheme();
   const resolvedTheme =
     theme === 'system'
@@ -400,9 +374,7 @@ export function StreamCard({
       )}
 
       {/* Server legend for multi-server mode */}
-      {isMultiServer && hasData && (
-        <ServerLegend sessions={sessions} serverColorMap={serverColorMap} />
-      )}
+      {isMultiServer && hasData && <ServerLegend variant="floating" servers={legendServers} />}
     </div>
   );
 }
