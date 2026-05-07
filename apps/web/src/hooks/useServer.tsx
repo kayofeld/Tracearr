@@ -29,9 +29,20 @@ interface ServerContextValue {
   deselectAllExcept: (serverId: string) => void;
   refetch: () => Promise<unknown>;
 
-  // Backward compat (for pages not yet migrated to multi-select)
+  /**
+   * @deprecated Use `selectedServerIds` and the multi-server query pattern.
+   * Returns null when more than one server is selected. Excluded pages
+   * (/users, /stats/users, /settings/*) still consume this; everything
+   * else should migrate to `selectedServerIds`.
+   */
   selectedServerId: string | null;
+  /**
+   * @deprecated Use `selectedServers`. Returns null when multi-server is active.
+   */
   selectedServer: Server | null;
+  /**
+   * @deprecated Use `toggleServer`/`selectAllServers`/`deselectAllExcept`.
+   */
   selectServer: (serverId: string) => void;
 }
 
@@ -225,7 +236,9 @@ export function useSelectedServerIds(): string[] {
   return selectedServerIds;
 }
 
-// Backward compat convenience hook
+/**
+ * @deprecated Use `useSelectedServerIds()` and the multi-server query pattern.
+ */
 export function useSelectedServerId(): string | null {
   const { selectedServerId } = useServer();
   return selectedServerId;

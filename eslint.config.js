@@ -68,6 +68,8 @@ export default tseslint.config(
       '@typescript-eslint/prefer-nullish-coalescing': 'off',
       '@typescript-eslint/no-empty-object-type': 'off',
       '@typescript-eslint/no-invalid-void-type': 'off',
+      // Transitional: warn on @deprecated usage during multi-server migration
+      '@typescript-eslint/no-deprecated': 'warn',
     },
   },
   {
