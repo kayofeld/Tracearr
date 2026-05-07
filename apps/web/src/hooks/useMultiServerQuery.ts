@@ -20,7 +20,7 @@ export function useMultiServerQuery<T>(
     if (r) byServer.set(id, r);
   });
 
-  const isLoading = results.some((r) => r.isLoading);
+  const isLoading = results.some((r) => r.isFetching);
   const error = results.find((r) => r.error)?.error;
 
   return { byServer, isLoading, error };

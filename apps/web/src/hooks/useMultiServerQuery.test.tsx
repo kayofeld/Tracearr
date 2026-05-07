@@ -29,7 +29,7 @@ describe('useMultiServerQuery', () => {
     expect(result.current.byServer.get('b')?.data).toBe('payload-b');
   });
 
-  it('reports isLoading=true while any per-server query is loading', async () => {
+  it('reports isLoading=true while any per-server query is fetching', async () => {
     let resolveA: (v: string) => void = () => {};
     const promiseA = new Promise<string>((r) => {
       resolveA = r;
@@ -57,5 +57,36 @@ describe('useMultiServerQuery', () => {
     );
     expect(result.current.byServer.size).toBe(0);
     expect(result.current.isLoading).toBe(false);
+  });
+
+  it('reports isLoading=false when all queries are disabled', () => {
+    const { result } = renderHook(
+      () =>
+        useMultiServerQuery(['a'], (id) => ({
+          queryKey: ['t', id],
+          queryFn: () => Promise.resolve(id),
+          enabled: false,
+        })),
+      { wrapper: wrapper() }
+    );
+
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it('surfaces a rejected query as the error and exposes the per-server error', async () => {
+    const oops = new Error('oops');
+    const { result } = renderHook(
+      () =>
+        useMultiServerQuery(['a', 'b'], (id) => ({
+          queryKey: ['t', id],
+          queryFn: () => (id === 'a' ? Promise.reject(oops) : Promise.resolve('b')),
+        })),
+      { wrapper: wrapper() }
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.error).toBe(oops);
+    expect(result.current.byServer.get('a')?.error).toBe(oops);
+    expect(result.current.byServer.get('b')?.data).toBe('b');
   });
 });
