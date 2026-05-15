@@ -499,6 +499,67 @@ describe('LibrarySyncService', () => {
         }),
       ]);
     });
+
+    it('should collapse duplicate ratingKeys, keeping the last occurrence', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const libraryId = '1';
+      const items = [
+        createMockLibraryItem({ ratingKey: 'dup', title: 'First' }),
+        createMockLibraryItem({ ratingKey: 'unique', title: 'Other' }),
+        createMockLibraryItem({ ratingKey: 'dup', title: 'Second' }),
+      ];
+
+      const { insertChain } = mockTransaction();
+
+      await service.upsertItems(serverId, libraryId, items);
+
+      const valuesArg = insertChain.values.mock.calls[0]![0] as Array<{
+        ratingKey: string;
+        title: string;
+      }>;
+      expect(valuesArg).toHaveLength(2);
+      const dup = valuesArg.find((v) => v.ratingKey === 'dup');
+      expect(dup?.title).toBe('Second');
+      expect(valuesArg.find((v) => v.ratingKey === 'unique')?.title).toBe('Other');
+    });
+
+    it('should drop items with empty ratingKey and skip insert when batch becomes empty', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const libraryId = '1';
+      const items = [
+        createMockLibraryItem({ ratingKey: '', title: 'No ID 1' }),
+        createMockLibraryItem({ ratingKey: '', title: 'No ID 2' }),
+      ];
+
+      mockTransaction();
+
+      await service.upsertItems(serverId, libraryId, items);
+
+      expect(db.transaction).not.toHaveBeenCalled();
+    });
+
+    it('should drop empty-ratingKey items but still insert valid ones', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const libraryId = '1';
+      const items = [
+        createMockLibraryItem({ ratingKey: '', title: 'No ID' }),
+        createMockLibraryItem({ ratingKey: 'real', title: 'Real Item' }),
+      ];
+
+      const { insertChain } = mockTransaction();
+
+      await service.upsertItems(serverId, libraryId, items);
+
+      const valuesArg = insertChain.values.mock.calls[0]![0] as Array<{
+        ratingKey: string;
+        title: string;
+      }>;
+      expect(valuesArg).toHaveLength(1);
+      expect(valuesArg[0]!.ratingKey).toBe('real');
+    });
   });
 
   describe('createSnapshot', () => {

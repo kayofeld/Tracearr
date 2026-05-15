@@ -60,6 +60,7 @@ export interface SyncResult {
   itemsProcessed: number;
   itemsAdded: number;
   itemsRemoved: number;
+  itemsSkipped: number; // items dropped because the upstream parser produced an empty ratingKey
   snapshotId: string | null; // null when snapshot skipped due to incomplete sync
 }
 
@@ -181,6 +182,10 @@ export class LibrarySyncService {
       const totalItems = results.reduce((sum, r) => sum + r.itemsProcessed, 0);
       const totalAdded = results.reduce((sum, r) => sum + r.itemsAdded, 0);
       const totalRemoved = results.reduce((sum, r) => sum + r.itemsRemoved, 0);
+      const totalSkipped = results.reduce((sum, r) => sum + r.itemsSkipped, 0);
+
+      const skippedSuffix =
+        totalSkipped > 0 ? `, ${totalSkipped} skipped (missing rating_key)` : '';
 
       onProgress({
         serverId,
@@ -190,7 +195,7 @@ export class LibrarySyncService {
         processedLibraries: totalLibraries,
         totalItems,
         processedItems: totalItems,
-        message: `Sync complete: ${totalItems} items, ${totalAdded} added, ${totalRemoved} removed`,
+        message: `Sync complete: ${totalItems} items, ${totalAdded} added, ${totalRemoved} removed${skippedSuffix}`,
         startedAt,
         completedAt: new Date().toISOString(),
       });
@@ -309,6 +314,7 @@ export class LibrarySyncService {
             itemsProcessed: 0,
             itemsAdded: 0,
             itemsRemoved: 0,
+            itemsSkipped: 0,
             snapshotId: snapshot?.id ?? null,
           };
         }
@@ -327,11 +333,13 @@ export class LibrarySyncService {
 
         const allItems: MediaLibraryItem[] = [];
         const combinedItems = [...newItems, ...newLeaves];
+        let totalSkippedEmpty = 0;
 
         for (let i = 0; i < combinedItems.length; i += BATCH_SIZE) {
           const batch = combinedItems.slice(i, i + BATCH_SIZE);
           allItems.push(...batch);
-          await this.upsertItems(serverId, libraryId, batch);
+          const { skippedEmpty } = await this.upsertItems(serverId, libraryId, batch);
+          totalSkippedEmpty += skippedEmpty;
 
           if (i + BATCH_SIZE < combinedItems.length) {
             await delay(BATCH_DELAY_MS_INCREMENTAL);
@@ -361,6 +369,7 @@ export class LibrarySyncService {
           itemsProcessed: allItems.length,
           itemsAdded: allItems.length,
           itemsRemoved: 0,
+          itemsSkipped: totalSkippedEmpty,
           snapshotId: snapshot?.id ?? null,
         };
       } catch (error) {
@@ -385,6 +394,7 @@ export class LibrarySyncService {
     const previousKeys = await this.getPreviousItemKeys(serverId, libraryId);
     const currentKeys = new Set<string>();
     const allItems: MediaLibraryItem[] = [];
+    let totalSkippedEmpty = 0;
 
     // Fetch items in batches with pagination
     let offset = 0;
@@ -406,7 +416,8 @@ export class LibrarySyncService {
       }
 
       // Upsert batch to database
-      await this.upsertItems(serverId, libraryId, items);
+      const itemsRes = await this.upsertItems(serverId, libraryId, items);
+      totalSkippedEmpty += itemsRes.skippedEmpty;
 
       processedItems += items.length;
       offset += BATCH_SIZE;
@@ -479,7 +490,8 @@ export class LibrarySyncService {
         }
 
         // Upsert episodes to database
-        await this.upsertItems(serverId, libraryId, episodes);
+        const epRes = await this.upsertItems(serverId, libraryId, episodes);
+        totalSkippedEmpty += epRes.skippedEmpty;
 
         episodesProcessed += episodes.length;
         episodeOffset += BATCH_SIZE;
@@ -555,7 +567,8 @@ export class LibrarySyncService {
         }
 
         // Upsert tracks to database
-        await this.upsertItems(serverId, libraryId, tracks);
+        const trkRes = await this.upsertItems(serverId, libraryId, tracks);
+        totalSkippedEmpty += trkRes.skippedEmpty;
 
         tracksProcessed += tracks.length;
         trackOffset += BATCH_SIZE;
@@ -595,12 +608,16 @@ export class LibrarySyncService {
       await this.markItemsRemoved(serverId, libraryId, removedKeys);
     }
 
+    const uniqueAllItems = Array.from(
+      new Map(allItems.filter((i) => i.ratingKey).map((i) => [i.ratingKey, i])).values()
+    );
+
     // Validate sync completeness before creating snapshot
     // TV libraries with shows should have episodes, Music libraries with artists should have tracks
-    const showCount = allItems.filter((i) => i.mediaType === 'show').length;
-    const episodeCount = allItems.filter((i) => i.mediaType === 'episode').length;
-    const artistCount = allItems.filter((i) => i.mediaType === 'artist').length;
-    const trackCount = allItems.filter((i) => i.mediaType === 'track').length;
+    const showCount = uniqueAllItems.filter((i) => i.mediaType === 'show').length;
+    const episodeCount = uniqueAllItems.filter((i) => i.mediaType === 'episode').length;
+    const artistCount = uniqueAllItems.filter((i) => i.mediaType === 'artist').length;
+    const trackCount = uniqueAllItems.filter((i) => i.mediaType === 'track').length;
 
     if (showCount > 0 && episodeCount === 0) {
       console.warn(
@@ -613,6 +630,7 @@ export class LibrarySyncService {
         itemsProcessed: processedItems,
         itemsAdded: addedKeys.length,
         itemsRemoved: removedKeys.length,
+        itemsSkipped: totalSkippedEmpty,
         snapshotId: null,
       };
     }
@@ -628,6 +646,7 @@ export class LibrarySyncService {
         itemsProcessed: processedItems,
         itemsAdded: addedKeys.length,
         itemsRemoved: removedKeys.length,
+        itemsSkipped: totalSkippedEmpty,
         snapshotId: null,
       };
     }
@@ -647,12 +666,13 @@ export class LibrarySyncService {
         itemsProcessed: processedItems,
         itemsAdded: addedKeys.length,
         itemsRemoved: removedKeys.length,
+        itemsSkipped: totalSkippedEmpty,
         snapshotId: null,
       };
     }
 
     // Create snapshot (may return null if data is invalid - e.g., no file sizes)
-    const snapshot = await this.createSnapshot(serverId, libraryId, allItems);
+    const snapshot = await this.createSnapshot(serverId, libraryId, uniqueAllItems);
 
     await this.saveSyncState(serverId, libraryId, totalCount, 0);
 
@@ -663,6 +683,7 @@ export class LibrarySyncService {
       itemsProcessed: processedItems,
       itemsAdded: addedKeys.length,
       itemsRemoved: removedKeys.length,
+      itemsSkipped: totalSkippedEmpty,
       snapshotId: snapshot?.id ?? null,
     };
   }
@@ -733,15 +754,46 @@ export class LibrarySyncService {
    * Conflict target: serverId + ratingKey
    * Wrapped in transaction for atomicity - partial failures will rollback.
    */
-  async upsertItems(serverId: string, libraryId: string, items: MediaLibraryItem[]): Promise<void> {
-    if (items.length === 0) return;
+  async upsertItems(
+    serverId: string,
+    libraryId: string,
+    items: MediaLibraryItem[]
+  ): Promise<{ skippedEmpty: number; collapsedDuplicates: number }> {
+    if (items.length === 0) return { skippedEmpty: 0, collapsedDuplicates: 0 };
+
+    let skippedEmpty = 0;
+    const deduped = new Map<string, MediaLibraryItem>();
+    for (const item of items) {
+      if (!item.ratingKey) {
+        skippedEmpty++;
+        continue;
+      }
+      deduped.set(item.ratingKey, item);
+    }
+    const uniqueItems = Array.from(deduped.values());
+    const collapsedDuplicates = items.length - skippedEmpty - uniqueItems.length;
+
+    if (skippedEmpty > 0) {
+      console.warn(
+        `[LibrarySync] Dropped ${skippedEmpty} item(s) with empty rating_key ` +
+          `for server ${serverId} library ${libraryId}`
+      );
+    }
+    if (collapsedDuplicates > 0) {
+      console.warn(
+        `[LibrarySync] Collapsed ${collapsedDuplicates} duplicate rating_key(s) ` +
+          `for server ${serverId} library ${libraryId} (${items.length} → ${uniqueItems.length})`
+      );
+    }
+
+    if (uniqueItems.length === 0) return { skippedEmpty, collapsedDuplicates };
 
     // Bulk upsert with transaction for atomicity
     await db.transaction(async (tx) => {
       await tx
         .insert(libraryItems)
         .values(
-          items.map((item) => {
+          uniqueItems.map((item) => {
             // Defensive: ensure addedAt is a valid Date before passing to Drizzle.
             // An Invalid Date object (from malformed API data) would crash toISOString()
             let createdAt = item.addedAt;
@@ -808,6 +860,8 @@ export class LibrarySyncService {
           },
         });
     });
+
+    return { skippedEmpty, collapsedDuplicates };
   }
 
   /**

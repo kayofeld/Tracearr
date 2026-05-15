@@ -181,6 +181,7 @@ export function startLibrarySyncWorker(): void {
           totalItems: results.reduce((sum, r) => sum + r.itemsProcessed, 0),
           added: results.reduce((sum, r) => sum + r.itemsAdded, 0),
           removed: results.reduce((sum, r) => sum + r.itemsRemoved, 0),
+          skipped: results.reduce((sum, r) => sum + r.itemsSkipped, 0),
         });
 
         return { success: true, results };
