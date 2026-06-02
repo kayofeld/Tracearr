@@ -35,12 +35,12 @@ const LIBRARY_STALE_TIME = 1000 * 60 * 5;
  * Fetch current library statistics (item counts, size, quality breakdown).
  * Backend deduplicates item counts and sums storage across servers.
  */
-export function useLibraryStats(serverIds: string[], libraryId?: string | null, period?: string) {
+export function useLibraryStats(serverIds: string[], libraryId?: string | null) {
   const timezone = getBrowserTimezone();
   const sortedIds = [...serverIds].sort().join(',');
   return useQuery<LibraryStatsResponse>({
-    queryKey: ['library', 'stats', sortedIds, libraryId, period, timezone],
-    queryFn: () => api.library.stats(serverIds, libraryId ?? undefined, period),
+    queryKey: ['library', 'stats', sortedIds, libraryId, timezone],
+    queryFn: () => api.library.stats(serverIds, libraryId ?? undefined),
     staleTime: LIBRARY_STALE_TIME,
     enabled: serverIds.length > 0,
   });

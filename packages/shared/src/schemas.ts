@@ -938,7 +938,6 @@ export const libraryStatsQuerySchema = z.object({
   serverId: z.uuid().optional(),
   serverIds: serverIdsQuerySchema,
   libraryId: z.uuid().optional(),
-  period: z.enum(['7d', '30d', '90d', '1y', 'all']).optional(),
   timezone: timezoneSchema,
 });
 

@@ -2060,8 +2060,6 @@ export interface LibraryStatsResponse {
   movieCount: number;
   episodeCount: number;
   showCount: number;
-  /** Distinct titles (deduped by external id) added within the requested period */
-  itemsAdded: number;
   qualityBreakdown: {
     count4k: number;
     count1080p: number;
