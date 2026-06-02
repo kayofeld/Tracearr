@@ -46,6 +46,7 @@ import { formatDuration } from '@/lib/formatters';
 import { getAvatarUrl } from '@/components/users/utils';
 import { useTheme } from '@/components/theme-provider';
 import { StreamDetailsPanel } from './StreamDetailsPanel';
+import { ServerColumnCell } from '@/components/server';
 
 import type {
   SessionWithDetails,
@@ -264,11 +265,7 @@ function SegmentTable({
 }
 
 // Inner content component — keeps state hooks and derived values together
-function SessionContent({
-  session,
-}: {
-  session: SessionWithDetails | ActiveSession;
-}) {
+function SessionContent({ session }: { session: SessionWithDetails | ActiveSession }) {
   const [locationOpen, setLocationOpen] = useState(false);
   const [segmentsOpen, setSegmentsOpen] = useState(false);
 
@@ -389,12 +386,10 @@ function SessionContent({
         {/* Server */}
         <Section icon={Server} title="Server">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Server</span>
-            <span className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">
               <span className={serverConfig.color}>{serverConfig.label}</span>
-              <span className="text-muted-foreground">·</span>
-              {session.server.name}
             </span>
+            <ServerColumnCell server={session.server} />
           </div>
         </Section>
 
@@ -567,9 +562,7 @@ function SessionContent({
             {session.deviceId && (
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Device ID</span>
-                <span className="max-w-[160px] truncate font-mono text-xs">
-                  {session.deviceId}
-                </span>
+                <span className="max-w-[160px] truncate font-mono text-xs">{session.deviceId}</span>
               </div>
             )}
           </div>

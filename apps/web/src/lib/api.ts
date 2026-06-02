@@ -661,13 +661,17 @@ class ApiClient {
      * Query history with cursor-based pagination and advanced filters.
      * Supports infinite scroll patterns with aggregate stats.
      */
-    history: (params: Partial<HistoryQueryInput> & { cursor?: string }) => {
+    history: (params: Partial<HistoryQueryInput> & { cursor?: string; serverIds?: string[] }) => {
       const searchParams = new URLSearchParams();
       if (params.cursor) searchParams.set('cursor', params.cursor);
       if (params.pageSize) searchParams.set('pageSize', String(params.pageSize));
       if (params.serverUserIds?.length)
         searchParams.set('serverUserIds', params.serverUserIds.join(','));
-      if (params.serverId) searchParams.set('serverId', params.serverId);
+      if (params.serverIds?.length) {
+        for (const id of params.serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
       if (params.state) searchParams.set('state', params.state);
       if (params.mediaTypes?.length) searchParams.set('mediaTypes', params.mediaTypes.join(','));
       if (params.startDate) searchParams.set('startDate', params.startDate.toISOString());
@@ -694,11 +698,17 @@ class ApiClient {
      * Get aggregate stats for history (total plays, watch time, unique users/content).
      * Called separately from history() so sorting changes don't refetch these stats.
      */
-    historyAggregates: (params: Partial<HistoryAggregatesQueryInput>) => {
+    historyAggregates: (
+      params: Partial<HistoryAggregatesQueryInput> & { serverIds?: string[] }
+    ) => {
       const searchParams = new URLSearchParams();
       if (params.serverUserIds?.length)
         searchParams.set('serverUserIds', params.serverUserIds.join(','));
-      if (params.serverId) searchParams.set('serverId', params.serverId);
+      if (params.serverIds?.length) {
+        for (const id of params.serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
       if (params.state) searchParams.set('state', params.state);
       if (params.mediaTypes?.length) searchParams.set('mediaTypes', params.mediaTypes.join(','));
       if (params.startDate) searchParams.set('startDate', params.startDate.toISOString());
@@ -725,9 +735,13 @@ class ApiClient {
      * Get available filter values for dropdowns on the History page.
      * Accepts optional date range to match history query filters.
      */
-    filterOptions: (params?: { serverId?: string; startDate?: Date; endDate?: Date }) => {
+    filterOptions: (params?: { serverIds?: string[]; startDate?: Date; endDate?: Date }) => {
       const searchParams = new URLSearchParams();
-      if (params?.serverId) searchParams.set('serverId', params.serverId);
+      if (params?.serverIds?.length) {
+        for (const id of params.serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
       if (params?.startDate) searchParams.set('startDate', params.startDate.toISOString());
       if (params?.endDate) searchParams.set('endDate', params.endDate.toISOString());
       return this.request<HistoryFilterOptions>(

@@ -1,19 +1,10 @@
-/**
- * React Query hooks for the History page.
- * Provides infinite scroll queries and filter options.
- */
-
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import type { HistoryQueryInput, HistoryAggregatesQueryInput } from '@tracearr/shared';
 import { api } from '@/lib/api';
 
-/**
- * Filter parameters for history queries.
- * Omits cursor and pageSize as those are handled by infinite query.
- */
 export interface HistoryFilters {
   serverUserIds?: string[];
-  serverId?: string;
+  serverIds?: string[];
   state?: 'playing' | 'paused' | 'stopped';
   mediaTypes?: ('movie' | 'episode' | 'track' | 'live')[];
   startDate?: Date;
@@ -34,15 +25,12 @@ export interface HistoryFilters {
   orderDir?: 'asc' | 'desc';
 }
 
-/**
- * Infinite query for history sessions with cursor-based pagination.
- * Supports all history filters and provides aggregate stats.
- */
 export function useHistorySessions(filters: HistoryFilters = {}, pageSize = 50) {
+  const serverIdsKey = filters.serverIds?.length ? [...filters.serverIds].sort().join(',') : 'all';
   return useInfiniteQuery({
-    queryKey: ['sessions', 'history', filters, pageSize],
+    queryKey: ['sessions', 'history', { ...filters, serverIds: serverIdsKey }, pageSize],
     queryFn: async ({ pageParam }) => {
-      const params: Partial<HistoryQueryInput> & { cursor?: string } = {
+      const params: Partial<HistoryQueryInput> & { cursor?: string; serverIds?: string[] } = {
         ...filters,
         pageSize,
         cursor: pageParam,
@@ -51,44 +39,37 @@ export function useHistorySessions(filters: HistoryFilters = {}, pageSize = 50) 
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
-    staleTime: 1000 * 30, // 30 seconds
+    staleTime: 1000 * 30,
   });
 }
 
-/**
- * Filters for aggregates query - excludes sorting/pagination params.
- * Uses the schema-derived type from shared package for consistency.
- */
-export type AggregateFilters = Partial<HistoryAggregatesQueryInput>;
+export type AggregateFilters = Partial<HistoryAggregatesQueryInput> & { serverIds?: string[] };
 
-/**
- * Query for aggregate stats (total plays, watch time, unique users/content).
- * Called separately from useHistorySessions so sorting changes don't refetch stats.
- */
 export function useHistoryAggregates(filters: AggregateFilters = {}) {
+  const serverIdsKey = filters.serverIds?.length ? [...filters.serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['sessions', 'history', 'aggregates', filters],
+    queryKey: ['sessions', 'history', 'aggregates', { ...filters, serverIds: serverIdsKey }],
     queryFn: () => api.sessions.historyAggregates(filters),
-    staleTime: 1000 * 60, // 1 minute - aggregates can be cached longer
+    staleTime: 1000 * 60,
   });
 }
 
-/**
- * Query for filter options (platforms, products, devices, countries, etc.).
- * Used to populate filter dropdowns.
- * Accepts optional date range to match the current history filter.
- */
-export function useFilterOptions(params?: { serverId?: string; startDate?: Date; endDate?: Date }) {
+export function useFilterOptions(params?: {
+  serverIds?: string[];
+  startDate?: Date;
+  endDate?: Date;
+}) {
+  const serverIdsKey = params?.serverIds?.length ? [...params.serverIds].sort().join(',') : 'all';
   return useQuery({
     queryKey: [
       'sessions',
       'filter-options',
-      params?.serverId,
+      serverIdsKey,
       params?.startDate?.toISOString(),
       params?.endDate?.toISOString(),
     ],
     queryFn: () => api.sessions.filterOptions(params),
-    staleTime: 1000 * 60 * 5, // 5 minutes - filter options don't change often
+    staleTime: 1000 * 60 * 5,
   });
 }
 

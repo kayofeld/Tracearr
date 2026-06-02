@@ -12,6 +12,7 @@ import {
   sessionQuerySchema,
   historyQuerySchema,
   historyAggregatesQuerySchema,
+  filterOptionsQuerySchema,
   sessionIdParamSchema,
   serverIdFilterSchema,
   terminateSessionBodySchema,
@@ -59,6 +60,7 @@ function buildHistoryFilterConditions(
   const {
     serverUserIds,
     serverId,
+    serverIds: rawServerIds,
     state,
     mediaTypes,
     startDate,
@@ -79,15 +81,17 @@ function buildHistoryFilterConditions(
 
   const conditions: ReturnType<typeof sql>[] = [];
 
-  // Filter by user's accessible servers (owners see all)
-  if (authUser.role !== 'owner') {
-    if (authUser.serverIds.length === 0) {
-      return null; // No server access
-    } else if (authUser.serverIds.length === 1) {
-      conditions.push(sql`s.server_id = ${authUser.serverIds[0]}`);
+  // Resolve effective server IDs (handles owner bypass + access intersection)
+  const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds);
+  if (resolvedIds !== undefined && resolvedIds.length === 0) {
+    return null; // No accessible servers after intersection
+  }
+  if (resolvedIds !== undefined) {
+    if (resolvedIds.length === 1) {
+      conditions.push(sql`s.server_id = ${resolvedIds[0]}`);
     } else {
-      const serverIdList = authUser.serverIds.map((id: string) => sql`${id}`);
-      conditions.push(sql`s.server_id IN (${sql.join(serverIdList, sql`, `)})`);
+      const ids = resolvedIds.map((id) => sql`${id}`);
+      conditions.push(sql`s.server_id IN (${sql.join(ids, sql`, `)})`);
     }
   }
 
@@ -100,7 +104,6 @@ function buildHistoryFilterConditions(
       conditions.push(sql`s.server_user_id IN (${sql.join(userIdList, sql`, `)})`);
     }
   }
-  if (serverId) conditions.push(sql`s.server_id = ${serverId}`);
   if (state) conditions.push(sql`s.state = ${state}`);
   if (mediaTypes && mediaTypes.length > 0) {
     const types = mediaTypes as string[];
@@ -894,13 +897,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
 
     const authUser = request.user;
 
-    // Validate serverId access if provided (consistent with /filter-options)
-    const { serverId } = query.data;
-    if (serverId && !hasServerAccess(authUser, serverId)) {
-      return reply.forbidden('You do not have access to this server');
-    }
-
-    // Build WHERE clause using shared helper
+    // Build WHERE clause using shared helper (also enforces server access via resolveServerIds)
     const filterResult = buildHistoryFilterConditions(query.data, authUser);
     if (!filterResult) {
       // No server access - return empty result
@@ -914,14 +911,28 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     }
     const { whereClause } = filterResult;
 
-    // Get aggregates
+    // Unique Titles KPI uses cross-server dedup: join library_items to get external IDs
+    // (imdb→tmdb→tvdb→normalized-title) so the same title on Plex+Jellyfin counts once.
+    // Sessions join library_items on (server_id, rating_key); sessions without a rating_key
+    // or with no matching library_items row fall back to a normalized title key derived
+    // directly from the session's media_title column.
     const aggregateResult = await db.execute(sql`
       SELECT
         COUNT(DISTINCT COALESCE(s.reference_id, s.id))::int as play_count,
         COALESCE(SUM(s.duration_ms), 0)::bigint as total_watch_time_ms,
         COUNT(DISTINCT s.server_user_id)::int as unique_users,
-        COUNT(DISTINCT s.media_title)::int as unique_content
+        COUNT(DISTINCT
+          COALESCE(
+            -- Prefer library_items external ID key for cross-server dedup
+            CASE WHEN li.imdb_id IS NOT NULL AND li.imdb_id <> '' THEN 'imdb:' || li.imdb_id END,
+            CASE WHEN li.tmdb_id IS NOT NULL THEN 'tmdb:' || li.tmdb_id::text END,
+            CASE WHEN li.tvdb_id IS NOT NULL THEN 'tvdb:' || li.tvdb_id::text END,
+            -- Fall back to normalized session title (handles unmatched or no library sync)
+            NULLIF('title:' || LOWER(REGEXP_REPLACE(COALESCE(s.media_title, ''), '[^a-zA-Z0-9]', '', 'g')), 'title:')
+          )
+        )::int as unique_content
       FROM sessions s
+      LEFT JOIN library_items li ON li.server_id = s.server_id AND li.rating_key = s.rating_key
       ${whereClause}
     `);
 
@@ -957,33 +968,57 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
    *                        countries with sessions (for history page).
    */
   app.get('/filter-options', { preHandler: [app.authenticate] }, async (request, reply) => {
-    const query = request.query as {
-      serverId?: string;
-      startDate?: string;
-      endDate?: string;
-      includeAllCountries?: string;
-    };
-    const serverId = query.serverId;
-    const startDate = query.startDate ? new Date(query.startDate) : undefined;
-    const endDate = query.endDate ? new Date(query.endDate) : undefined;
-    const includeAllCountries = query.includeAllCountries === 'true';
+    const query = filterOptionsQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return reply.badRequest('Invalid query parameters');
+    }
 
-    if (startDate && isNaN(startDate.getTime())) {
-      return reply.badRequest('Invalid startDate format. Use ISO 8601 format.');
-    }
-    if (endDate && isNaN(endDate.getTime())) {
-      return reply.badRequest('Invalid endDate format. Use ISO 8601 format.');
-    }
-    if (startDate && endDate && startDate > endDate) {
-      return reply.badRequest('startDate must be before endDate');
-    }
+    const {
+      serverId,
+      serverIds: rawServerIds,
+      startDate,
+      endDate,
+      includeAllCountries,
+    } = query.data;
 
     const authUser = request.user;
+
+    // Resolve effective server IDs (handles owner bypass + access intersection)
+    const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds);
+    if (resolvedIds !== undefined && resolvedIds.length === 0) {
+      // No accessible servers — return empty filter options
+      if (includeAllCountries) {
+        const emptyRulesResponse: RulesFilterOptions = {
+          platforms: [],
+          products: [],
+          devices: [],
+          countries: [],
+          cities: [],
+          users: [],
+          servers: [],
+        };
+        return emptyRulesResponse;
+      }
+      const emptyResponse: HistoryFilterOptions = {
+        platforms: [],
+        products: [],
+        devices: [],
+        countries: [],
+        cities: [],
+        users: [],
+      };
+      return emptyResponse;
+    }
 
     // Check cache
     const cacheService = getCacheService();
     const filterScopeHash = buildCacheFingerprint(
-      { serverId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString(), includeAllCountries },
+      {
+        resolvedIds: resolvedIds ? [...resolvedIds].sort() : null,
+        startDate: startDate?.toISOString(),
+        endDate: endDate?.toISOString(),
+        includeAllCountries,
+      },
       authUser.userId
     );
     if (cacheService) {
@@ -993,41 +1028,13 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    // Build server access conditions
+    // Build server access conditions from resolved IDs
     const serverConditions: ReturnType<typeof sql>[] = [];
-    if (serverId) {
-      if (!hasServerAccess(authUser, serverId)) {
-        return reply.forbidden('You do not have access to this server');
-      }
-      serverConditions.push(sql`s.server_id = ${serverId}`);
-    } else if (authUser.role !== 'owner') {
-      if (authUser.serverIds.length === 0) {
-        // Return empty response for users with no server access
-        if (includeAllCountries) {
-          const emptyRulesResponse: RulesFilterOptions = {
-            platforms: [],
-            products: [],
-            devices: [],
-            countries: [],
-            cities: [],
-            users: [],
-            servers: [],
-          };
-          return emptyRulesResponse;
-        }
-        const emptyResponse: HistoryFilterOptions = {
-          platforms: [],
-          products: [],
-          devices: [],
-          countries: [],
-          cities: [],
-          users: [],
-        };
-        return emptyResponse;
-      } else if (authUser.serverIds.length === 1) {
-        serverConditions.push(sql`s.server_id = ${authUser.serverIds[0]}`);
+    if (resolvedIds !== undefined) {
+      if (resolvedIds.length === 1) {
+        serverConditions.push(sql`s.server_id = ${resolvedIds[0]}`);
       } else {
-        const serverIdList = authUser.serverIds.map((id: string) => sql`${id}`);
+        const serverIdList = resolvedIds.map((id) => sql`${id}`);
         serverConditions.push(sql`s.server_id IN (${sql.join(serverIdList, sql`, `)})`);
       }
     }
@@ -1196,7 +1203,11 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
 
       // Cache the result
       if (cacheService) {
-        void cacheService.setFilterOptions(authUser.userId, filterScopeHash, JSON.stringify(rulesResponse));
+        void cacheService.setFilterOptions(
+          authUser.userId,
+          filterScopeHash,
+          JSON.stringify(rulesResponse)
+        );
       }
 
       return rulesResponse;
@@ -1215,7 +1226,11 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
 
     // Cache the result
     if (cacheService) {
-      void cacheService.setFilterOptions(authUser.userId, filterScopeHash, JSON.stringify(response));
+      void cacheService.setFilterOptions(
+        authUser.userId,
+        filterScopeHash,
+        JSON.stringify(response)
+      );
     }
 
     return response;

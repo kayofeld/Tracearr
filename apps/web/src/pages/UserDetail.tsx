@@ -64,6 +64,7 @@ export function UserDetail() {
       date: true,
       user: false,
       content: true,
+      server: false,
       platform: true,
       location: true,
       ip: false,

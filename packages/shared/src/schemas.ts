@@ -198,8 +198,9 @@ export const historyQuerySchema = z.object({
   // User filter - supports multi-select (comma-separated UUIDs in query string)
   serverUserIds: commaSeparatedArray(uuidSchema),
 
-  // Server filter
+  // Server filter - serverIds takes precedence over serverId when both are provided
   serverId: uuidSchema.optional(),
+  serverIds: serverIdsQuerySchema,
   state: z.enum(['playing', 'paused', 'stopped']).optional(),
 
   // Media type filter - supports multi-select
@@ -243,6 +244,25 @@ export const historyAggregatesQuerySchema = historyQuerySchema.omit({
   orderBy: true,
   orderDir: true,
 });
+
+// Filter options query - scoping params for /sessions/filter-options dropdowns
+export const filterOptionsQuerySchema = z
+  .object({
+    serverId: uuidSchema.optional(),
+    serverIds: serverIdsQuerySchema,
+    startDate: z.coerce.date().optional(),
+    endDate: z.coerce.date().optional(),
+    includeAllCountries: booleanStringSchema.optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        return data.startDate <= data.endDate;
+      }
+      return true;
+    },
+    { message: 'startDate must be before endDate' }
+  );
 
 export const sessionIdParamSchema = z.object({
   id: uuidSchema,
@@ -1070,6 +1090,7 @@ export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type SessionQueryInput = z.infer<typeof sessionQuerySchema>;
 export type HistoryQueryInput = z.infer<typeof historyQuerySchema>;
 export type HistoryAggregatesQueryInput = z.infer<typeof historyAggregatesQuerySchema>;
+export type FilterOptionsQueryInput = z.infer<typeof filterOptionsQuerySchema>;
 export type CreateRuleInput = z.infer<typeof createRuleSchema>;
 export type UpdateRuleInput = z.infer<typeof updateRuleSchema>;
 

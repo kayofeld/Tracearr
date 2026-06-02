@@ -287,6 +287,7 @@ export {
   sessionQuerySchema,
   historyQuerySchema,
   historyAggregatesQuerySchema,
+  filterOptionsQuerySchema,
   sessionIdParamSchema,
   terminateSessionBodySchema,
   // Rule
@@ -362,6 +363,7 @@ export type {
   SessionQueryInput,
   HistoryQueryInput,
   HistoryAggregatesQueryInput,
+  FilterOptionsQueryInput,
   CreateRuleInput,
   UpdateRuleInput,
   // Rule V2 types

@@ -46,6 +46,7 @@ export const HISTORY_COLUMNS = [
   { id: 'date', label: 'Date', defaultVisible: true },
   { id: 'user', label: 'User', defaultVisible: true },
   { id: 'content', label: 'Content', defaultVisible: true },
+  { id: 'server', label: 'Server', defaultVisible: true },
   { id: 'platform', label: 'Platform', defaultVisible: true },
   { id: 'location', label: 'Location', defaultVisible: true },
   { id: 'ip', label: 'IP Address', defaultVisible: false },
@@ -69,6 +70,7 @@ interface Props {
   isLoading?: boolean;
   columnVisibility: ColumnVisibility;
   onColumnVisibilityChange: (visibility: ColumnVisibility) => void;
+  isMultiServer?: boolean;
 }
 
 // Convert TimeRangeValue to Date filters
@@ -159,6 +161,7 @@ export function HistoryFiltersBar({
   isLoading,
   columnVisibility,
   onColumnVisibilityChange,
+  isMultiServer = false,
 }: Props) {
   const [searchInput, setSearchInput] = useState(filters.search ?? '');
 
@@ -628,7 +631,7 @@ export function HistoryFiltersBar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {HISTORY_COLUMNS.map((column) => (
+            {HISTORY_COLUMNS.filter((col) => col.id !== 'server' || isMultiServer).map((column) => (
               <DropdownMenuCheckboxItem
                 key={column.id}
                 checked={columnVisibility[column.id]}
