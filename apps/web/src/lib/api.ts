@@ -1199,9 +1199,13 @@ class ApiClient {
       params.set('sortOrder', sortOrder);
       return this.request<StaleResponse>(`/library/stale?${params.toString()}`);
     },
-    watch: (serverId?: string, libraryId?: string, page: number = 1, pageSize: number = 20) => {
+    watch: (serverIds?: string[], libraryId?: string, page: number = 1, pageSize: number = 20) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       if (libraryId) params.set('libraryId', libraryId);
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
@@ -1224,9 +1228,13 @@ class ApiClient {
       if (mediaType) params.set('mediaType', mediaType);
       return this.request<CompletionResponse>(`/library/completion?${params.toString()}`);
     },
-    patterns: (serverId?: string, libraryId?: string, periodWeeks: number = 12) => {
+    patterns: (serverIds?: string[], libraryId?: string, periodWeeks: number = 12) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       if (libraryId) params.set('libraryId', libraryId);
       params.set('periodWeeks', String(periodWeeks));
       params.set('timezone', getBrowserTimezone());
@@ -1257,7 +1265,7 @@ class ApiClient {
       return this.request<RoiResponse>(`/library/roi?${params.toString()}`);
     },
     topMovies: (
-      serverId?: string,
+      serverIds?: string[],
       period: string = '30d',
       sortBy: string = 'plays',
       sortOrder: string = 'desc',
@@ -1265,7 +1273,11 @@ class ApiClient {
       pageSize: number = 20
     ) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       params.set('period', period);
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
@@ -1274,7 +1286,7 @@ class ApiClient {
       return this.request<TopMoviesResponse>(`/library/top-movies?${params.toString()}`);
     },
     topShows: (
-      serverId?: string,
+      serverIds?: string[],
       period: string = '30d',
       sortBy: string = 'plays',
       sortOrder: string = 'desc',
@@ -1282,7 +1294,11 @@ class ApiClient {
       pageSize: number = 20
     ) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       params.set('period', period);
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);

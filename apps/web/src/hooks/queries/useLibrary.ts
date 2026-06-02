@@ -166,18 +166,22 @@ export function useLibraryStale(
 }
 
 /**
- * Fetch per-item watch statistics
+ * Fetch per-item watch statistics across one or more servers.
+ * Summary counts (watchedCount, totalItems, completedCount) are deduped by the backend.
+ * totalWatchMs is summed. Items are deduped per title with serverIds[] attached.
  */
 export function useLibraryWatch(
-  serverId?: string | null,
+  serverIds: string[],
   libraryId?: string | null,
   page: number = 1,
   pageSize: number = 20
 ) {
+  const sortedIds = [...serverIds].sort().join(',');
   return useQuery<WatchResponse>({
-    queryKey: ['library', 'watch', serverId, libraryId, page, pageSize],
-    queryFn: () => api.library.watch(serverId ?? undefined, libraryId ?? undefined, page, pageSize),
+    queryKey: ['library', 'watch', sortedIds, libraryId, page, pageSize],
+    queryFn: () => api.library.watch(serverIds, libraryId ?? undefined, page, pageSize),
     staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
   });
 }
 
@@ -217,18 +221,21 @@ export function useLibraryCompletion(
 }
 
 /**
- * Fetch watch patterns analysis (binge shows, peak times, trends)
+ * Fetch watch patterns analysis (binge shows, peak times, trends) across one or more servers.
+ * Hourly/monthly/peak are aggregated by the backend. BingeShow rows are deduped by show.
  */
 export function useLibraryPatterns(
-  serverId?: string | null,
+  serverIds: string[],
   libraryId?: string | null,
   periodWeeks: number = 12
 ) {
   const timezone = getBrowserTimezone();
+  const sortedIds = [...serverIds].sort().join(',');
   return useQuery<PatternsResponse>({
-    queryKey: ['library', 'patterns', serverId, libraryId, periodWeeks, timezone],
-    queryFn: () => api.library.patterns(serverId ?? undefined, libraryId ?? undefined, periodWeeks),
+    queryKey: ['library', 'patterns', sortedIds, libraryId, periodWeeks, timezone],
+    queryFn: () => api.library.patterns(serverIds, libraryId ?? undefined, periodWeeks),
     staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
   });
 }
 
@@ -275,40 +282,42 @@ export function useLibraryRoi(
 }
 
 /**
- * Fetch top movies by engagement metrics
+ * Fetch top movies by engagement metrics across one or more servers.
  */
 export function useTopMovies(
-  serverId?: string | null,
+  serverIds: string[],
   period: string = '30d',
   sortBy: string = 'plays',
   sortOrder: string = 'desc',
   page: number = 1,
   pageSize: number = 20
 ) {
+  const sortedIds = [...serverIds].sort().join(',');
   return useQuery<TopMoviesResponse>({
-    queryKey: ['library', 'top-movies', serverId, period, sortBy, sortOrder, page, pageSize],
-    queryFn: () =>
-      api.library.topMovies(serverId ?? undefined, period, sortBy, sortOrder, page, pageSize),
+    queryKey: ['library', 'top-movies', sortedIds, period, sortBy, sortOrder, page, pageSize],
+    queryFn: () => api.library.topMovies(serverIds, period, sortBy, sortOrder, page, pageSize),
     staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
   });
 }
 
 /**
- * Fetch top TV shows by engagement metrics
+ * Fetch top TV shows by engagement metrics across one or more servers.
  */
 export function useTopShows(
-  serverId?: string | null,
+  serverIds: string[],
   period: string = '30d',
   sortBy: string = 'plays',
   sortOrder: string = 'desc',
   page: number = 1,
   pageSize: number = 20
 ) {
+  const sortedIds = [...serverIds].sort().join(',');
   return useQuery<TopShowsResponse>({
-    queryKey: ['library', 'top-shows', serverId, period, sortBy, sortOrder, page, pageSize],
-    queryFn: () =>
-      api.library.topShows(serverId ?? undefined, period, sortBy, sortOrder, page, pageSize),
+    queryKey: ['library', 'top-shows', sortedIds, period, sortBy, sortOrder, page, pageSize],
+    queryFn: () => api.library.topShows(serverIds, period, sortBy, sortOrder, page, pageSize),
     staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
   });
 }
 

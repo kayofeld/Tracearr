@@ -1,5 +1,6 @@
 import { Film, ArrowUpDown, ArrowUp, ArrowDown, BarChart3 } from 'lucide-react';
 import type { TopMoviesResponse } from '@tracearr/shared';
+import type { Server } from '@tracearr/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -10,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ServerBadge } from '@/components/server';
 import { EmptyState } from '@/components/library';
 
 type MovieSortBy = 'plays' | 'watch_hours' | 'viewers' | 'completion_rate';
@@ -23,6 +25,8 @@ interface TopMoviesTableProps {
   sortBy: MovieSortBy;
   sortOrder: SortOrder;
   onSortChange: (sortBy: MovieSortBy, sortOrder: SortOrder) => void;
+  selectedServers?: Server[];
+  isMultiServer?: boolean;
 }
 
 /**
@@ -38,6 +42,7 @@ function getCompletionBadge(rate: number) {
 /**
  * Table component for displaying top movies by engagement metrics.
  * Server-side sortable by plays, watch hours, viewers, and completion rate.
+ * In multi-server mode renders per-title color dots for each server that owns the title.
  */
 export function TopMoviesTable({
   data,
@@ -47,6 +52,8 @@ export function TopMoviesTable({
   sortBy,
   sortOrder,
   onSortChange,
+  selectedServers = [],
+  isMultiServer = false,
 }: TopMoviesTableProps) {
   const handleSort = (field: MovieSortBy) => {
     if (sortBy === field) {
@@ -143,6 +150,15 @@ export function TopMoviesTable({
                     <span className="font-medium">{item.title}</span>
                     {item.year && <span className="text-muted-foreground ml-1">({item.year})</span>}
                   </div>
+                  {isMultiServer && item.serverIds && item.serverIds.length > 0 && (
+                    <div className="flex items-center gap-0.5">
+                      {item.serverIds.map((sid) => {
+                        const server = selectedServers.find((s) => s.id === sid);
+                        if (!server) return null;
+                        return <ServerBadge key={sid} server={server} variant="compact" />;
+                      })}
+                    </div>
+                  )}
                 </div>
               </TableCell>
               <TableCell className="font-medium">{item.totalPlays}</TableCell>

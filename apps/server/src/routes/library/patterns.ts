@@ -3,8 +3,13 @@
  *
  * GET /patterns - Analyze viewing patterns including binge behavior, peak times, and seasonal trends
  *
+ * Multi-server support:
+ * - Hourly/monthly aggregates: SUM across all accessible servers (events).
+ * - Binge shows: deduped by show matchKey (same show on two servers = one journey).
+ *   The `primaryServerId` is the server with the most episodes watched in that binge.
+ *   The `serverIds` array lists all servers involved.
+ *
  * Uses episode_continuity_stats view for binge detection and sessions table for time distribution.
- * Returns composite analysis useful for content scheduling and library curation decisions.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -16,25 +21,28 @@ import {
   type LibraryPatternsQueryInput,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { validateServerAccess } from '../../utils/serverFiltering.js';
-import { buildLibraryServerFilter, buildLibraryCacheKey } from './utils.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
+import { buildLibraryCacheKey } from './utils.js';
 
-/** Show with binge metrics */
+/** Show with binge metrics (deduped across servers by show matchKey) */
 interface BingeShow {
   showTitle: string;
-  serverId: string;
+  /** Server where the most episodes were watched in this binge journey. */
+  primaryServerId: string;
   thumbPath: string | null;
   totalEpisodeWatches: number;
   consecutiveEpisodes: number;
   consecutivePct: number;
   avgGapMinutes: number;
-  bingeScore: number; // 0-100 composite score
+  bingeScore: number;
   maxEpisodesInOneDay: number;
+  /** All server IDs involved in this binge journey. */
+  serverIds: string[];
 }
 
 /** Hourly viewing distribution */
 interface HourlyDistribution {
-  hour: number; // 0-23
+  hour: number;
   watchCount: number;
   totalWatchMs: number;
   pctOfTotal: number;
@@ -42,7 +50,7 @@ interface HourlyDistribution {
 
 /** Monthly viewing trends */
 interface MonthlyTrend {
-  month: string; // YYYY-MM format
+  month: string;
   watchCount: number;
   totalWatchMs: number;
   uniqueItems: number;
@@ -55,7 +63,7 @@ interface PatternsResponse {
   peakTimes: {
     hourlyDistribution: HourlyDistribution[];
     peakHour: number;
-    peakDayOfWeek: number; // 0=Sunday
+    peakDayOfWeek: number;
   };
   seasonalTrends: {
     monthlyTrends: MonthlyTrend[];
@@ -72,7 +80,7 @@ interface PatternsResponse {
 /** Raw binge row from database */
 interface RawBingeRow {
   show_title: string;
-  server_id: string;
+  primary_server_id: string;
   thumb_path: string | null;
   total_episode_watches: string;
   consecutive_episodes: string;
@@ -80,6 +88,7 @@ interface RawBingeRow {
   avg_gap_minutes: string | null;
   max_episodes_in_one_day: string | null;
   binge_score: string;
+  server_ids: string;
 }
 
 /** Raw hourly row from database */
@@ -88,12 +97,6 @@ interface RawHourlyRow {
   watch_count: string;
   total_watch_ms: string;
   pct_of_total: string;
-}
-
-/** Raw peak row from database */
-interface _RawPeakRow {
-  peak_hour: string;
-  peak_day_of_week: string;
 }
 
 /** Raw monthly row from database */
@@ -117,9 +120,9 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
    * GET /patterns - Watch pattern analysis
    *
    * Analyzes viewing patterns including:
-   * - Binge shows with composite binge scores
-   * - Peak viewing times (hour and day of week)
-   * - Seasonal trends (monthly patterns)
+   * - Binge shows deduped by show identity across servers
+   * - Peak viewing times (hour and day of week) aggregated across servers
+   * - Seasonal trends (monthly patterns) aggregated across servers
    */
   app.get<{ Querystring: LibraryPatternsQueryInput }>(
     '/patterns',
@@ -132,6 +135,7 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
 
       const {
         serverId,
+        serverIds: rawServerIds,
         libraryId,
         periodWeeks,
         includeBinge,
@@ -141,26 +145,23 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
         limit,
         timezone,
       } = query.data;
-      // Default to UTC for backwards compatibility
       const tz = timezone ?? 'UTC';
       const authUser = request.user;
 
-      // Validate server access if specific server requested
-      if (serverId) {
-        const error = validateServerAccess(authUser, serverId);
-        if (error) {
-          return reply.forbidden(error);
-        }
-      }
+      const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds);
+      // Build fragment for sessions (no table alias needed for raw joins below)
+      const serverFragmentLi = buildMultiServerFragment(resolvedIds, 'li.server_id');
+      // For queries filtering directly on sessions
+      const serverFragmentSess = buildMultiServerFragment(resolvedIds, 'sess.server_id');
 
-      // Build cache key with all varying params
+      // Build cache key
+      const serverCacheKey = resolvedIds ? resolvedIds.slice().sort().join(',') : 'all';
       const cacheKey = buildLibraryCacheKey(
         REDIS_KEYS.LIBRARY_PATTERNS,
-        serverId,
-        `${libraryId ?? 'all'}-${periodWeeks}-${bingeThreshold}-${limit}-${includeBinge}-${includePeakTimes}-${includeSeasonalTrends}`
+        serverCacheKey,
+        `${libraryId ?? 'all'}-${periodWeeks}-${bingeThreshold}-${limit}-${includeBinge}-${includePeakTimes}-${includeSeasonalTrends}-${tz}`
       );
 
-      // Try cache first
       const cached = await app.redis.get(cacheKey);
       if (cached) {
         try {
@@ -170,11 +171,8 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
         }
       }
 
-      // Build server filter for library_items
-      const serverFilter = buildLibraryServerFilter(serverId, authUser, 'li');
       const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
 
-      // Initialize response
       let bingeShows: BingeShow[] = [];
       let hourlyDistribution: HourlyDistribution[] = [];
       let peakHour = 0;
@@ -186,24 +184,41 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
       let avgSessionsPerDay = 0;
       let bingeSessionsPct = 0;
 
-      // Run queries in parallel based on what's requested
       const queries: Promise<void>[] = [];
 
-      // Binge detection query
       if (includeBinge) {
         queries.push(
           (async () => {
+            // Binge dedup: group by show matchKey so the same show on two servers
+            // is one row. primary_server_id = server with the most episodes watched.
             const bingeResult = await db.execute(sql`
-              WITH binge_stats AS (
+              WITH binge_base AS (
                 SELECT
                   ecs.show_title,
-                  MAX(ses.server_id::text) AS server_id,
+                  MAX(ses.server_id::text) AS raw_server_id,
                   MAX(ses.thumb_path) AS thumb_path,
                   SUM(ecs.total_episode_watches) AS total_episode_watches,
                   SUM(ecs.consecutive_episodes) AS consecutive_episodes,
                   ROUND(AVG(ecs.consecutive_pct)::numeric, 1) AS consecutive_pct,
                   ROUND(AVG(ecs.avg_gap_minutes)::numeric, 1) AS avg_gap_minutes,
-                  MAX(dsi.max_episodes_in_one_day) AS max_episodes_in_one_day
+                  MAX(dsi.max_episodes_in_one_day) AS max_episodes_in_one_day,
+                  -- Collect per-server episode counts to determine primary server
+                  ARRAY_AGG(DISTINCT ses.server_id::text) AS server_ids_arr,
+                  -- Primary server = one with highest episode contribution
+                  (
+                    SELECT s2.server_id::text
+                    FROM (
+                      SELECT ecs2.server_user_id,
+                        MAX(su2.server_id::text) AS server_id,
+                        SUM(ecs2.total_episode_watches) AS ep_count
+                      FROM episode_continuity_stats ecs2
+                      JOIN server_users su2 ON su2.id = ecs2.server_user_id
+                      WHERE ecs2.show_title = ecs.show_title
+                      GROUP BY ecs2.server_user_id
+                    ) s2
+                    ORDER BY s2.ep_count DESC
+                    LIMIT 1
+                  ) AS primary_server_id
                 FROM episode_continuity_stats ecs
                 LEFT JOIN show_engagement_summary ses ON ecs.show_title = ses.show_title
                   AND ecs.server_user_id = ses.server_user_id
@@ -215,36 +230,37 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
                 WHERE ecs.consecutive_episodes >= ${bingeThreshold}
                   AND EXISTS (
                     SELECT 1 FROM sessions s
+                    JOIN server_users su ON su.id = s.server_user_id
                     WHERE s.server_user_id = ecs.server_user_id
                       AND s.grandparent_title = ecs.show_title
                       AND s.started_at >= NOW() - INTERVAL '1 week' * ${periodWeeks}
-                      ${serverId ? sql`AND s.server_id = ${serverId}` : sql``}
+                      ${serverFragmentSess}
                   )
                 GROUP BY ecs.show_title
               )
               SELECT
                 show_title,
-                server_id,
+                COALESCE(primary_server_id, raw_server_id) AS primary_server_id,
                 thumb_path,
                 total_episode_watches::text AS total_episode_watches,
                 consecutive_episodes::text AS consecutive_episodes,
                 consecutive_pct::text AS consecutive_pct,
                 avg_gap_minutes::text AS avg_gap_minutes,
                 COALESCE(max_episodes_in_one_day, 1)::text AS max_episodes_in_one_day,
-                -- Binge score: weighted combination of volume and intensity
+                ARRAY_TO_STRING(server_ids_arr, ',') AS server_ids,
                 ROUND(
                   LEAST(consecutive_episodes * 5, 40) +
                   LEAST(COALESCE(consecutive_pct, 0), 30) +
                   LEAST(COALESCE(max_episodes_in_one_day, 1) * 6, 30)
                 , 1)::text AS binge_score
-              FROM binge_stats
+              FROM binge_base
               ORDER BY binge_score DESC
               LIMIT ${limit}
             `);
 
             bingeShows = (bingeResult.rows as unknown as RawBingeRow[]).map((row) => ({
               showTitle: row.show_title,
-              serverId: row.server_id,
+              primaryServerId: row.primary_server_id,
               thumbPath: row.thumb_path,
               totalEpisodeWatches: parseInt(row.total_episode_watches, 10),
               consecutiveEpisodes: parseInt(row.consecutive_episodes, 10),
@@ -252,16 +268,15 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
               avgGapMinutes: parseFloat(row.avg_gap_minutes || '0'),
               bingeScore: parseFloat(row.binge_score),
               maxEpisodesInOneDay: parseInt(row.max_episodes_in_one_day || '1', 10),
+              serverIds: row.server_ids ? row.server_ids.split(',') : [row.primary_server_id],
             }));
           })()
         );
       }
 
-      // Peak viewing times query
       if (includePeakTimes) {
         queries.push(
           (async () => {
-            // Hourly distribution
             const hourlyResult = await db.execute(sql`
               WITH hourly AS (
                 SELECT
@@ -273,7 +288,7 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
                   AND sess.server_id = li.server_id
                 WHERE sess.duration_ms >= 120000
                   AND sess.started_at >= NOW() - INTERVAL '1 week' * ${periodWeeks}
-                  ${serverFilter}
+                  ${serverFragmentLi}
                   ${libraryFilter}
                 GROUP BY 1
               ),
@@ -297,14 +312,12 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
               pctOfTotal: parseFloat(row.pct_of_total || '0'),
             }));
 
-            // Find peak hour
             if (hourlyDistribution.length > 0) {
               peakHour = hourlyDistribution.reduce((max, h) =>
                 h.watchCount > max.watchCount ? h : max
               ).hour;
             }
 
-            // Peak day of week
             const peakResult = await db.execute(sql`
               SELECT
                 (SELECT EXTRACT(DOW FROM sess.started_at AT TIME ZONE ${tz})::int AS day_of_week
@@ -313,7 +326,7 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
                    AND sess.server_id = li.server_id
                  WHERE sess.duration_ms >= 120000
                    AND sess.started_at >= NOW() - INTERVAL '1 week' * ${periodWeeks}
-                   ${serverFilter}
+                   ${serverFragmentLi}
                    ${libraryFilter}
                  GROUP BY 1
                  ORDER BY COUNT(*) DESC
@@ -327,7 +340,6 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
         );
       }
 
-      // Seasonal trends query
       if (includeSeasonalTrends) {
         queries.push(
           (async () => {
@@ -346,7 +358,7 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
                   AND sess.server_id = li.server_id
                 WHERE sess.duration_ms >= 120000
                   AND sess.started_at >= NOW() - INTERVAL '1 week' * ${periodWeeks}
-                  ${serverFilter}
+                  ${serverFragmentLi}
                   ${libraryFilter}
                 GROUP BY 1
               )
@@ -368,7 +380,6 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
               avgWatchesPerDay: parseFloat(row.avg_watches_per_day),
             }));
 
-            // Find busiest and quietest months
             if (monthlyTrends.length > 0) {
               const sorted = [...monthlyTrends].sort((a, b) => b.watchCount - a.watchCount);
               busiestMonth = sorted[0]?.month ?? '';
@@ -378,7 +389,7 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
         );
       }
 
-      // Summary query (always run)
+      // Summary query (always run) — aggregate across all accessible servers
       queries.push(
         (async () => {
           const summaryResult = await db.execute(sql`
@@ -394,7 +405,7 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
                 AND sess.server_id = li.server_id
               WHERE sess.duration_ms >= 120000
                 AND sess.started_at >= NOW() - INTERVAL '1 week' * ${periodWeeks}
-                ${serverFilter}
+                ${serverFragmentLi}
                 ${libraryFilter}
             ),
             day_count AS (
@@ -404,7 +415,7 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
                 AND sess.server_id = li.server_id
               WHERE sess.duration_ms >= 120000
                 AND sess.started_at >= NOW() - INTERVAL '1 week' * ${periodWeeks}
-                ${serverFilter}
+                ${serverFragmentLi}
                 ${libraryFilter}
             )
             SELECT
@@ -424,7 +435,6 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
         })()
       );
 
-      // Execute all queries in parallel
       await Promise.all(queries);
 
       const response: PatternsResponse = {
@@ -446,9 +456,7 @@ export const libraryPatternsRoute: FastifyPluginAsync = async (app) => {
         },
       };
 
-      // Cache response
       await app.redis.setex(cacheKey, CACHE_TTL.LIBRARY_PATTERNS, JSON.stringify(response));
-
       return response;
     }
   );

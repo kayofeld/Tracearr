@@ -991,6 +991,7 @@ export const libraryStaleQuerySchema = z.object({
 // Library watch statistics query schema
 export const libraryWatchQuerySchema = z.object({
   serverId: uuidSchema.optional(),
+  serverIds: serverIdsQuerySchema,
   libraryId: z.string().optional(),
   mediaType: z.enum(['movie', 'episode', 'show']).optional(),
   minWatchCount: z.coerce.number().int().min(0).optional(),
@@ -1027,6 +1028,7 @@ export const libraryRoiQuerySchema = z.object({
 // Library watch patterns query schema (binge, peak times, seasonal)
 export const libraryPatternsQuerySchema = z.object({
   serverId: uuidSchema.optional(),
+  serverIds: serverIdsQuerySchema,
   libraryId: z.string().optional(),
   // Time range for pattern analysis (default: 52 weeks per CONTEXT.md)
   periodWeeks: z.coerce.number().int().min(4).max(104).default(52),
@@ -1064,6 +1066,7 @@ export const libraryCompletionQuerySchema = z.object({
 // Library top content query schema (for top movies and top shows endpoints)
 export const topContentQuerySchema = z.object({
   serverId: uuidSchema.optional(),
+  serverIds: serverIdsQuerySchema,
   period: z.enum(['7d', '30d', '90d', '1y', 'all']).default('30d'),
   sortBy: z
     .enum(['plays', 'watch_hours', 'viewers', 'completion_rate', 'binge_score'])

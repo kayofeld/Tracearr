@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Film, Tv } from 'lucide-react';
+import type { Server } from '@tracearr/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -19,7 +20,9 @@ type ShowSortBy = 'plays' | 'watch_hours' | 'viewers' | 'completion_rate' | 'bin
 type SortOrder = 'asc' | 'desc';
 
 interface MostWatchedSectionProps {
-  serverId?: string | null;
+  serverIds: string[];
+  selectedServers: Server[];
+  isMultiServer: boolean;
 }
 
 const PERIOD_OPTIONS = [
@@ -34,7 +37,11 @@ const PERIOD_OPTIONS = [
  * Container component for Most Watched section with Movies/Shows tabs.
  * Manages separate state for each tab (sorting, pagination).
  */
-export function MostWatchedSection({ serverId }: MostWatchedSectionProps) {
+export function MostWatchedSection({
+  serverIds,
+  selectedServers,
+  isMultiServer,
+}: MostWatchedSectionProps) {
   // Shared state
   const [period, setPeriod] = useState<Period>('30d');
   const [activeTab, setActiveTab] = useState<'movies' | 'shows'>('movies');
@@ -50,9 +57,9 @@ export function MostWatchedSection({ serverId }: MostWatchedSectionProps) {
   const [showsSortOrder, setShowsSortOrder] = useState<SortOrder>('desc');
 
   // Data fetching
-  const movies = useTopMovies(serverId, period, moviesSortBy, moviesSortOrder, moviesPage, 10);
+  const movies = useTopMovies(serverIds, period, moviesSortBy, moviesSortOrder, moviesPage, 10);
 
-  const shows = useTopShows(serverId, period, showsSortBy, showsSortOrder, showsPage, 10);
+  const shows = useTopShows(serverIds, period, showsSortBy, showsSortOrder, showsPage, 10);
 
   // Reset pages when period changes
   const handlePeriodChange = (newPeriod: Period) => {
@@ -126,6 +133,8 @@ export function MostWatchedSection({ serverId }: MostWatchedSectionProps) {
               sortBy={moviesSortBy}
               sortOrder={moviesSortOrder}
               onSortChange={handleMoviesSortChange}
+              selectedServers={selectedServers}
+              isMultiServer={isMultiServer}
             />
           </TabsContent>
 
@@ -138,6 +147,8 @@ export function MostWatchedSection({ serverId }: MostWatchedSectionProps) {
               sortBy={showsSortBy}
               sortOrder={showsSortOrder}
               onSortChange={handleShowsSortChange}
+              selectedServers={selectedServers}
+              isMultiServer={isMultiServer}
             />
           </TabsContent>
         </Tabs>

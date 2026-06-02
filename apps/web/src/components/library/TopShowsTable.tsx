@@ -1,5 +1,6 @@
 import { Tv, ArrowUpDown, ArrowUp, ArrowDown, Zap } from 'lucide-react';
 import type { TopShowsResponse } from '@tracearr/shared';
+import type { Server } from '@tracearr/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -10,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ServerBadge } from '@/components/server';
 import { EmptyState } from '@/components/library';
 
 type ShowSortBy = 'plays' | 'watch_hours' | 'viewers' | 'completion_rate' | 'binge_score';
@@ -23,6 +25,8 @@ interface TopShowsTableProps {
   sortBy: ShowSortBy;
   sortOrder: SortOrder;
   onSortChange: (sortBy: ShowSortBy, sortOrder: SortOrder) => void;
+  selectedServers?: Server[];
+  isMultiServer?: boolean;
 }
 
 /**
@@ -48,6 +52,7 @@ function getCompletionBadge(rate: number) {
 /**
  * Table component for displaying top TV shows by engagement metrics.
  * Server-side sortable by episode views, watch hours, viewers, completion rate, and binge score.
+ * In multi-server mode renders per-title color dots for each server that owns the show.
  */
 export function TopShowsTable({
   data,
@@ -57,6 +62,8 @@ export function TopShowsTable({
   sortBy,
   sortOrder,
   onSortChange,
+  selectedServers = [],
+  isMultiServer = false,
 }: TopShowsTableProps) {
   const handleSort = (field: ShowSortBy) => {
     if (sortBy === field) {
@@ -162,6 +169,15 @@ export function TopShowsTable({
                     <span className="font-medium">{item.showTitle}</span>
                     {item.year && <span className="text-muted-foreground ml-1">({item.year})</span>}
                   </div>
+                  {isMultiServer && item.serverIds && item.serverIds.length > 0 && (
+                    <div className="flex items-center gap-0.5">
+                      {item.serverIds.map((sid) => {
+                        const server = selectedServers.find((s) => s.id === sid);
+                        if (!server) return null;
+                        return <ServerBadge key={sid} server={server} variant="compact" />;
+                      })}
+                    </div>
+                  )}
                 </div>
               </TableCell>
               <TableCell className="font-medium">{item.totalEpisodeViews}</TableCell>

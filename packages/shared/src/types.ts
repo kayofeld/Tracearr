@@ -2217,8 +2217,16 @@ export interface StaleResponse {
 }
 
 // Library Watch Statistics Response (GET /library/watch)
+
+/**
+ * A single "most watched" row returned by the watch endpoint.
+ * When multiple servers are in scope, the same title is collapsed
+ * into one row (deduped by external ID match key) and serverIds
+ * lists every server that has a copy of the title.
+ */
 export interface WatchItem {
   id: string;
+  /** Primary server for this title (lowest sort value when deduped across servers). */
   serverId: string;
   serverName: string;
   libraryId: string;
@@ -2228,18 +2236,27 @@ export interface WatchItem {
   fileSize: number | null;
   resolution: string | null;
   addedAt: string;
+  /** Total play count summed across all servers for this title. */
   watchCount: number;
+  /** Total watch duration summed across all servers for this title. */
   totalWatchMs: number;
   lastWatchedAt: string | null;
+  /** All server IDs that own a copy of this title (for per-title color dots). */
+  serverIds: string[];
 }
 
 export interface WatchSummary {
+  /** Distinct title count (deduped by external ID). */
   totalItems: number;
+  /** Distinct titles with at least one play (deduped by external ID). */
   watchedCount: number;
   unwatchedCount: number;
   watchedPct: number;
+  /** Sum of all watch durations across all servers. */
   totalWatchMs: number;
   avgWatchesPerItem: number;
+  /** Distinct titles fully completed (deduped by external ID), if available. */
+  completedCount: number;
 }
 
 export interface WatchResponse {
@@ -2319,9 +2336,16 @@ export type CompletionResponse =
     };
 
 // Library Watch Patterns Response (GET /library/patterns)
+
+/**
+ * A single binge-show row.
+ * When multiple servers are in scope, episodes of the same show across
+ * different servers are collapsed into one row (deduped by show matchKey).
+ */
 export interface BingeShow {
   showTitle: string;
-  serverId: string;
+  /** Server with the most episodes watched in this binge journey. */
+  primaryServerId: string;
   thumbPath: string | null;
   totalEpisodeWatches: number;
   consecutiveEpisodes: number;
@@ -2329,6 +2353,8 @@ export interface BingeShow {
   avgGapMinutes: number;
   bingeScore: number;
   maxEpisodesInOneDay: number;
+  /** All server IDs involved in this binge journey. */
+  serverIds: string[];
 }
 
 export interface HourlyDistribution {
@@ -2418,6 +2444,8 @@ export interface TopMovie {
   year: number | null;
   thumbPath: string | null;
   serverId: string;
+  /** All server IDs that own a copy of this title (for per-title color dots). */
+  serverIds?: string[];
   totalPlays: number;
   totalWatchHours: number;
   uniqueViewers: number;
@@ -2440,6 +2468,8 @@ export interface TopShow {
   year: number | null;
   thumbPath: string | null;
   serverId: string;
+  /** All server IDs that own a copy of this title (for per-title color dots). */
+  serverIds?: string[];
   totalEpisodeViews: number;
   totalWatchHours: number;
   uniqueViewers: number;
