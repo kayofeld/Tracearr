@@ -18,7 +18,7 @@ export function ServerLegend({ servers, variant = 'inline', className }: ServerL
       : 'inline-flex flex-wrap items-center gap-3';
 
   return (
-    <div className={cn(layout, 'text-xs', className)}>
+    <div role="group" aria-label="Server legend" className={cn(layout, 'text-xs', className)}>
       {servers.map((server) => (
         <div key={server.id} className="flex items-center gap-1.5 py-0.5">
           <span

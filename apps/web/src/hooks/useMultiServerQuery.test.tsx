@@ -8,9 +8,10 @@ function wrapper() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  );
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  }
+  return Wrapper;
 }
 
 describe('useMultiServerQuery', () => {
@@ -29,8 +30,8 @@ describe('useMultiServerQuery', () => {
     expect(result.current.byServer.get('b')?.data).toBe('payload-b');
   });
 
-  it('reports isLoading=true while any per-server query is fetching', async () => {
-    let resolveA: (v: string) => void = () => {};
+  it('reports isLoading and isFetching while any per-server query is in its initial load', async () => {
+    let resolveA: (v: string) => void = () => undefined;
     const promiseA = new Promise<string>((r) => {
       resolveA = r;
     });
@@ -46,8 +47,10 @@ describe('useMultiServerQuery', () => {
     );
 
     expect(result.current.isLoading).toBe(true);
+    expect(result.current.isFetching).toBe(true);
     resolveA('a');
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isFetching).toBe(false);
   });
 
   it('returns an empty byServer map when serverIds is empty', () => {
@@ -57,9 +60,10 @@ describe('useMultiServerQuery', () => {
     );
     expect(result.current.byServer.size).toBe(0);
     expect(result.current.isLoading).toBe(false);
+    expect(result.current.isFetching).toBe(false);
   });
 
-  it('reports isLoading=false when all queries are disabled', () => {
+  it('reports isLoading and isFetching false when all queries are disabled', () => {
     const { result } = renderHook(
       () =>
         useMultiServerQuery(['a'], (id) => ({
@@ -71,6 +75,7 @@ describe('useMultiServerQuery', () => {
     );
 
     expect(result.current.isLoading).toBe(false);
+    expect(result.current.isFetching).toBe(false);
   });
 
   it('surfaces a rejected query as the error and exposes the per-server error', async () => {

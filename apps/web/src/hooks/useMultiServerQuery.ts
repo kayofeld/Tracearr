@@ -2,7 +2,10 @@ import { useQueries, type UseQueryOptions, type UseQueryResult } from '@tanstack
 
 export interface MultiServerQueryResult<T> {
   byServer: Map<string, UseQueryResult<T>>;
+  /** Any server still in its initial load (no cached data yet). */
   isLoading: boolean;
+  /** Any server fetching, including background refetches over existing data. */
+  isFetching: boolean;
   error: unknown;
 }
 
@@ -12,7 +15,7 @@ export function useMultiServerQuery<T>(
 ): MultiServerQueryResult<T> {
   const results = useQueries({
     queries: serverIds.map((id) => queryFactory(id)),
-  }) as UseQueryResult<T>[];
+  });
 
   const byServer = new Map<string, UseQueryResult<T>>();
   serverIds.forEach((id, i) => {
@@ -20,8 +23,9 @@ export function useMultiServerQuery<T>(
     if (r) byServer.set(id, r);
   });
 
-  const isLoading = results.some((r) => r.isFetching);
+  const isLoading = results.some((r) => r.isLoading);
+  const isFetching = results.some((r) => r.isFetching);
   const error = results.find((r) => r.error)?.error;
 
-  return { byServer, isLoading, error };
+  return { byServer, isLoading, isFetching, error };
 }

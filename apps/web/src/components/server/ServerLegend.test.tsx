@@ -22,6 +22,11 @@ describe('ServerLegend', () => {
     expect(screen.getByText('JF')).toBeInTheDocument();
   });
 
+  it('labels the container as a server legend group for assistive tech', () => {
+    render(<ServerLegend servers={[s('a', 'Plex', '#E5A00D'), s('b', 'JF', '#AA5CC3')]} />);
+    expect(screen.getByRole('group', { name: 'Server legend' })).toBeInTheDocument();
+  });
+
   it('renders nothing when fewer than 2 servers are provided', () => {
     const { container } = render(<ServerLegend servers={[s('a', 'Plex', '#E5A00D')]} />);
     expect(container.firstChild).toBeNull();
