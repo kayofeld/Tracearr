@@ -911,28 +911,34 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     }
     const { whereClause } = filterResult;
 
-    // Unique Titles KPI uses cross-server dedup: join library_items to get external IDs
-    // (imdb->tmdb->tvdb->normalized-title) so the same title on Plex+Jellyfin counts once.
-    // Sessions join library_items on (server_id, rating_key); sessions without a rating_key
-    // or with no matching library_items row fall back to a normalized title key derived
-    // directly from the session's media_title column.
+    // Unique Titles KPI. Single-server: COUNT(DISTINCT media_title), matching main exactly.
+    // Multi-server: dedupe by external-id match key (imdb->tmdb->tvdb->normalized-title) via a
+    // library_items join so the same title on two servers counts once; unmatched sessions fall
+    // back to a normalized title key from the session's media_title.
+    const resolvedIds = resolveServerIds(authUser, query.data.serverId, query.data.serverIds);
+    const singleServer = resolvedIds?.length === 1;
+    const uniqueContentExpr = singleServer
+      ? sql`COUNT(DISTINCT s.media_title)`
+      : sql`COUNT(DISTINCT
+          COALESCE(
+            CASE WHEN li.imdb_id IS NOT NULL AND li.imdb_id <> '' THEN 'imdb:' || li.imdb_id END,
+            CASE WHEN li.tmdb_id IS NOT NULL THEN 'tmdb:' || li.tmdb_id::text END,
+            CASE WHEN li.tvdb_id IS NOT NULL THEN 'tvdb:' || li.tvdb_id::text END,
+            NULLIF('title:' || LOWER(REGEXP_REPLACE(COALESCE(s.media_title, ''), '[^a-zA-Z0-9]', '', 'g')), 'title:')
+          )
+        )`;
+    const libraryJoin = singleServer
+      ? sql``
+      : sql`LEFT JOIN library_items li ON li.server_id = s.server_id AND li.rating_key = s.rating_key`;
+
     const aggregateResult = await db.execute(sql`
       SELECT
         COUNT(DISTINCT COALESCE(s.reference_id, s.id))::int as play_count,
         COALESCE(SUM(s.duration_ms), 0)::bigint as total_watch_time_ms,
         COUNT(DISTINCT s.server_user_id)::int as unique_users,
-        COUNT(DISTINCT
-          COALESCE(
-            -- Prefer library_items external ID key for cross-server dedup
-            CASE WHEN li.imdb_id IS NOT NULL AND li.imdb_id <> '' THEN 'imdb:' || li.imdb_id END,
-            CASE WHEN li.tmdb_id IS NOT NULL THEN 'tmdb:' || li.tmdb_id::text END,
-            CASE WHEN li.tvdb_id IS NOT NULL THEN 'tvdb:' || li.tvdb_id::text END,
-            -- Fall back to normalized session title (handles unmatched or no library sync)
-            NULLIF('title:' || LOWER(REGEXP_REPLACE(COALESCE(s.media_title, ''), '[^a-zA-Z0-9]', '', 'g')), 'title:')
-          )
-        )::int as unique_content
+        ${uniqueContentExpr}::int as unique_content
       FROM sessions s
-      LEFT JOIN library_items li ON li.server_id = s.server_id AND li.rating_key = s.rating_key
+      ${libraryJoin}
       ${whereClause}
     `);
 
