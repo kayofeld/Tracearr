@@ -27,7 +27,7 @@ import {
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { resolveDateRange } from './utils.js';
-import { validateServerAccess, buildServerFilterFragment } from '../../utils/serverFiltering.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 
 export const engagementRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -46,19 +46,12 @@ export const engagementRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { period, startDate, endDate, serverId, mediaType, limit } = query.data;
+    const { period, startDate, endDate, serverId, serverIds, mediaType, limit } = query.data;
     const authUser = request.user;
     const dateRange = resolveDateRange(period, startDate, endDate);
 
-    // Validate server access
-    if (serverId) {
-      const error = validateServerAccess(authUser, serverId);
-      if (error) {
-        return reply.forbidden(error);
-      }
-    }
-
-    const serverFilter = buildServerFilterFragment(serverId, authUser);
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+    const serverFilter = buildMultiServerFragment(resolvedIds);
     // Note: The continuous aggregate buckets by UTC day, so we truncate input dates
     // to UTC day boundaries to ensure correct bucket matching
     const dailyStartFilter = dateRange.start
@@ -525,15 +518,8 @@ export const engagementRoutes: FastifyPluginAsync = async (app) => {
     const authUser = request.user;
     const dateRange = resolveDateRange(period, startDate, endDate);
 
-    // Validate server access
-    if (serverId) {
-      const error = validateServerAccess(authUser, serverId);
-      if (error) {
-        return reply.forbidden(error);
-      }
-    }
-
-    const serverFilter = buildServerFilterFragment(serverId, authUser);
+    const resolvedIds = resolveServerIds(authUser, serverId, undefined);
+    const serverFilter = buildMultiServerFragment(resolvedIds);
 
     // Map orderBy to SQL column
     const orderColumn = {

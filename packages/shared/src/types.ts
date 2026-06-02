@@ -720,6 +720,7 @@ export interface DashboardStats {
 export interface PlayStats {
   date: string;
   count: number;
+  serverId: string;
 }
 
 export interface UserStats {

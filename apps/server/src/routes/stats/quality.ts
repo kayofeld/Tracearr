@@ -9,7 +9,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { statsQuerySchema } from '@tracearr/shared';
 import { qualityStatsSince } from '../../db/prepared.js';
 import { resolveDateRange } from './utils.js';
-import { validateServerAccess, buildServerFilterFragment } from '../../utils/serverFiltering.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 import { queryQualityBreakdown, computeQualityBreakdown } from './queries.js';
 
 export const qualityRoutes: FastifyPluginAsync = async (app) => {
@@ -23,19 +23,13 @@ export const qualityRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { period, startDate, endDate, serverId } = query.data;
+    const { period, startDate, endDate, serverId, serverIds } = query.data;
     const authUser = request.user;
     const dateRange = resolveDateRange(period, startDate, endDate);
 
-    if (serverId) {
-      const error = validateServerAccess(authUser, serverId);
-      if (error) {
-        return reply.forbidden(error);
-      }
-    }
-
-    const serverFilter = buildServerFilterFragment(serverId, authUser);
-    const needsServerFilter = serverId || authUser.role !== 'owner';
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+    const serverFilter = buildMultiServerFragment(resolvedIds);
+    const needsServerFilter = resolvedIds !== undefined;
 
     // For 'all' period (no start date) OR when server filtering is needed, use shared query
     // Prepared statements don't support dynamic server filtering

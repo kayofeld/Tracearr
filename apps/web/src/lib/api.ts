@@ -886,6 +886,21 @@ class ApiClient {
     return params;
   }
 
+  // Variant that serializes repeatable serverIds (precedence over legacy serverId)
+  private buildStatsParamsMulti(timeRange?: StatsTimeRange, serverIds?: string[]): URLSearchParams {
+    const params = new URLSearchParams();
+    if (timeRange?.period) params.set('period', timeRange.period);
+    if (timeRange?.startDate) params.set('startDate', timeRange.startDate);
+    if (timeRange?.endDate) params.set('endDate', timeRange.endDate);
+    if (serverIds?.length) {
+      for (const id of serverIds) {
+        params.append('serverIds', id);
+      }
+    }
+    params.set('timezone', timeRange?.timezone ?? getBrowserTimezone());
+    return params;
+  }
+
   stats = {
     dashboard: (serverIds?: string[]) => {
       const params = new URLSearchParams();
@@ -898,8 +913,8 @@ class ApiClient {
       params.set('timezone', getBrowserTimezone());
       return this.request<DashboardStats>(`/stats/dashboard?${params.toString()}`);
     },
-    plays: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'week' }, serverId);
+    plays: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'week' }, serverIds);
       const response = await this.request<{ data: PlayStats[] }>(
         `/stats/plays?${params.toString()}`
       );
@@ -932,29 +947,29 @@ class ApiClient {
       const query = searchParams.toString();
       return this.request<LocationStatsResponse>(`/stats/locations${query ? `?${query}` : ''}`);
     },
-    playsByDayOfWeek: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    playsByDayOfWeek: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       const response = await this.request<{ data: { day: number; name: string; count: number }[] }>(
         `/stats/plays-by-dayofweek?${params.toString()}`
       );
       return response.data;
     },
-    playsByHourOfDay: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    playsByHourOfDay: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       const response = await this.request<{ data: { hour: number; count: number }[] }>(
         `/stats/plays-by-hourofday?${params.toString()}`
       );
       return response.data;
     },
-    platforms: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    platforms: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       const response = await this.request<{ data: { platform: string | null; count: number }[] }>(
         `/stats/platforms?${params.toString()}`
       );
       return response.data;
     },
-    quality: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    quality: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       return this.request<{
         directPlay: number;
         directStream: number;
@@ -999,8 +1014,8 @@ class ApiClient {
       }>(`/stats/top-content?${params.toString()}`);
       return response;
     },
-    concurrent: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    concurrent: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       const response = await this.request<{
         data: {
           hour: string;
@@ -1014,10 +1029,10 @@ class ApiClient {
     },
     engagement: async (
       timeRange?: StatsTimeRange,
-      serverId?: string,
+      serverIds?: string[],
       options?: { mediaType?: MediaType; limit?: number }
     ) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'week' }, serverId);
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'week' }, serverIds);
       if (options?.mediaType) params.set('mediaType', options.mediaType);
       if (options?.limit) params.set('limit', String(options.limit));
       return this.request<EngagementStats>(`/stats/engagement?${params.toString()}`);

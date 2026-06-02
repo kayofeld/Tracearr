@@ -26,16 +26,16 @@ import { useTimeRange } from '@/hooks/useTimeRange';
 export function StatsActivity() {
   const { t } = useTranslation('pages');
   const { value: timeRange, setValue: setTimeRange, apiParams } = useTimeRange();
-  const { selectedServerId } = useServer();
+  const { selectedServerIds, selectedServers, isMultiServer } = useServer();
 
   // Fetch all stats with the same time range and server filter
-  const plays = usePlaysStats(apiParams, selectedServerId);
-  const dayOfWeek = usePlaysByDayOfWeek(apiParams, selectedServerId);
-  const hourOfDay = usePlaysByHourOfDay(apiParams, selectedServerId);
-  const platforms = usePlatformStats(apiParams, selectedServerId);
-  const quality = useQualityStats(apiParams, selectedServerId);
-  const concurrent = useConcurrentStats(apiParams, selectedServerId);
-  const engagement = useEngagementStats(apiParams, selectedServerId);
+  const plays = usePlaysStats(apiParams, selectedServerIds);
+  const dayOfWeek = usePlaysByDayOfWeek(apiParams, selectedServerIds);
+  const hourOfDay = usePlaysByHourOfDay(apiParams, selectedServerIds);
+  const platforms = usePlatformStats(apiParams, selectedServerIds);
+  const quality = useQualityStats(apiParams, selectedServerIds);
+  const concurrent = useConcurrentStats(apiParams, selectedServerIds);
+  const engagement = useEngagementStats(apiParams, selectedServerIds);
 
   // Transform data for charts
   const platformData = platforms.data?.map((p) => ({
@@ -67,6 +67,8 @@ export function StatsActivity() {
               isLoading={plays.isLoading}
               height={250}
               period={timeRange.period}
+              isMultiServer={isMultiServer}
+              servers={selectedServers}
             />
           </CardContent>
         </Card>

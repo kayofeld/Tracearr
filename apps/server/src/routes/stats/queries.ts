@@ -25,11 +25,15 @@ const MIN_PLAY_DURATION_MS = 120000;
 export interface PlaysOverTimeRow {
   date: string;
   count: number;
+  serverId: string;
 }
 
 /**
- * Play counts bucketed over time with timezone-aware grouping.
- * Only counts engagement-based plays (>= 2 min, deduplicated by reference_id).
+ * Play counts bucketed over time with timezone-aware grouping, broken out per server.
+ * Queries sessions directly so server_id is always available in the GROUP BY.
+ * The daily_content_engagement view only exposes server_id at the aggregate level,
+ * so querying sessions directly avoids a more complex join while keeping the same
+ * >= 2 min engagement threshold and COALESCE(reference_id, id) deduplication.
  */
 export async function queryPlaysOverTime(params: {
   rangeStart: Date | null;
@@ -47,14 +51,15 @@ export async function queryPlaysOverTime(params: {
   const result = await db.execute(sql`
     SELECT
       time_bucket(${bucketInterval}::interval, started_at AT TIME ZONE ${timezone})::text AS date,
+      server_id::text AS "serverId",
       COUNT(DISTINCT COALESCE(reference_id, id))::int AS count
     FROM sessions
     ${baseWhere}
     ${MEDIA_TYPE_SQL_FILTER}
     ${endDate ? sql`AND started_at < ${endDate}` : sql``}
     ${serverFilter}
-    GROUP BY 1
-    ORDER BY 1
+    GROUP BY 1, 2
+    ORDER BY 1, 2
   `);
 
   return result.rows as unknown as PlaysOverTimeRow[];

@@ -7,7 +7,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { statsQuerySchema } from '@tracearr/shared';
 import { resolveDateRange } from './utils.js';
-import { validateServerAccess, buildServerFilterFragment } from '../../utils/serverFiltering.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 import { queryConcurrentStreams } from './queries.js';
 
 /**
@@ -43,18 +43,12 @@ export const concurrentRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { period, startDate, endDate, serverId } = query.data;
+    const { period, startDate, endDate, serverId, serverIds } = query.data;
     const authUser = request.user;
     const dateRange = resolveDateRange(period, startDate, endDate);
 
-    if (serverId) {
-      const error = validateServerAccess(authUser, serverId);
-      if (error) {
-        return reply.forbidden(error);
-      }
-    }
-
-    const serverFilter = buildServerFilterFragment(serverId, authUser);
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+    const serverFilter = buildMultiServerFragment(resolvedIds);
     const bucketInterval = getBucketInterval(period);
     const rangeStart = dateRange.start ?? new Date(0);
     const rangeEnd = dateRange.end ?? new Date();

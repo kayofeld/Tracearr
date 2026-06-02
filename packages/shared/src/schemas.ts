@@ -619,6 +619,7 @@ export const statsQuerySchema = z
     startDate: z.iso.datetime().optional(),
     endDate: z.iso.datetime().optional(),
     serverId: uuidSchema.optional(),
+    serverIds: serverIdsQuerySchema,
     timezone: timezoneSchema,
   })
   .refine(dateValidationRefinements.customPeriodRequiresDates.refinement, {
@@ -891,6 +892,7 @@ export const engagementQuerySchema = z
     startDate: z.iso.datetime().optional(),
     endDate: z.iso.datetime().optional(),
     serverId: uuidSchema.optional(),
+    serverIds: serverIdsQuerySchema,
     timezone: timezoneSchema,
     // Engagement-specific filters
     mediaType: mediaTypeSchema.optional(),

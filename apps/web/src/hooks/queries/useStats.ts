@@ -17,12 +17,13 @@ export function useDashboardStats(serverIds: string[]) {
   });
 }
 
-export function usePlaysStats(timeRange?: StatsTimeRange, serverId?: string | null) {
+export function usePlaysStats(timeRange?: StatsTimeRange, serverIds?: string[]) {
   // Include timezone in cache key since plays are grouped by local day
   const timezone = getBrowserTimezone();
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'plays', timeRange, serverId, timezone],
-    queryFn: () => api.stats.plays(timeRange ?? { period: 'week' }, serverId ?? undefined),
+    queryKey: ['stats', 'plays', timeRange, serverIdsKey, timezone],
+    queryFn: () => api.stats.plays(timeRange ?? { period: 'week' }, serverIds),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
@@ -58,40 +59,42 @@ export function useLocationStats(filters?: LocationStatsFilters) {
   });
 }
 
-export function usePlaysByDayOfWeek(timeRange?: StatsTimeRange, serverId?: string | null) {
+export function usePlaysByDayOfWeek(timeRange?: StatsTimeRange, serverIds?: string[]) {
   // Include timezone in cache key since day-of-week varies by timezone
   const timezone = getBrowserTimezone();
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'plays-by-dayofweek', timeRange, serverId, timezone],
-    queryFn: () =>
-      api.stats.playsByDayOfWeek(timeRange ?? { period: 'month' }, serverId ?? undefined),
+    queryKey: ['stats', 'plays-by-dayofweek', timeRange, serverIdsKey, timezone],
+    queryFn: () => api.stats.playsByDayOfWeek(timeRange ?? { period: 'month' }, serverIds),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
 
-export function usePlaysByHourOfDay(timeRange?: StatsTimeRange, serverId?: string | null) {
+export function usePlaysByHourOfDay(timeRange?: StatsTimeRange, serverIds?: string[]) {
   // Include timezone in cache key since hour-of-day varies by timezone
   const timezone = getBrowserTimezone();
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'plays-by-hourofday', timeRange, serverId, timezone],
-    queryFn: () =>
-      api.stats.playsByHourOfDay(timeRange ?? { period: 'month' }, serverId ?? undefined),
+    queryKey: ['stats', 'plays-by-hourofday', timeRange, serverIdsKey, timezone],
+    queryFn: () => api.stats.playsByHourOfDay(timeRange ?? { period: 'month' }, serverIds),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
 
-export function usePlatformStats(timeRange?: StatsTimeRange, serverId?: string | null) {
+export function usePlatformStats(timeRange?: StatsTimeRange, serverIds?: string[]) {
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'platforms', timeRange, serverId],
-    queryFn: () => api.stats.platforms(timeRange ?? { period: 'month' }, serverId ?? undefined),
+    queryKey: ['stats', 'platforms', timeRange, serverIdsKey],
+    queryFn: () => api.stats.platforms(timeRange ?? { period: 'month' }, serverIds),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
 
-export function useQualityStats(timeRange?: StatsTimeRange, serverId?: string | null) {
+export function useQualityStats(timeRange?: StatsTimeRange, serverIds?: string[]) {
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'quality', timeRange, serverId],
-    queryFn: () => api.stats.quality(timeRange ?? { period: 'month' }, serverId ?? undefined),
+    queryKey: ['stats', 'quality', timeRange, serverIdsKey],
+    queryFn: () => api.stats.quality(timeRange ?? { period: 'month' }, serverIds),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
@@ -112,10 +115,11 @@ export function useTopContent(timeRange?: StatsTimeRange, serverId?: string | nu
   });
 }
 
-export function useConcurrentStats(timeRange?: StatsTimeRange, serverId?: string | null) {
+export function useConcurrentStats(timeRange?: StatsTimeRange, serverIds?: string[]) {
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'concurrent', timeRange, serverId],
-    queryFn: () => api.stats.concurrent(timeRange ?? { period: 'month' }, serverId ?? undefined),
+    queryKey: ['stats', 'concurrent', timeRange, serverIdsKey],
+    queryFn: () => api.stats.concurrent(timeRange ?? { period: 'month' }, serverIds),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
@@ -127,13 +131,13 @@ export interface EngagementStatsOptions {
 
 export function useEngagementStats(
   timeRange?: StatsTimeRange,
-  serverId?: string | null,
+  serverIds?: string[],
   options?: EngagementStatsOptions
 ) {
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'engagement', timeRange, serverId, options],
-    queryFn: () =>
-      api.stats.engagement(timeRange ?? { period: 'week' }, serverId ?? undefined, options),
+    queryKey: ['stats', 'engagement', timeRange, serverIdsKey, options],
+    queryFn: () => api.stats.engagement(timeRange ?? { period: 'week' }, serverIds, options),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }

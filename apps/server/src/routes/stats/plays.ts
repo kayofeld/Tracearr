@@ -12,7 +12,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { statsQuerySchema } from '@tracearr/shared';
 import { resolveDateRange } from './utils.js';
-import { validateServerAccess, buildServerFilterFragment } from '../../utils/serverFiltering.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 import { queryPlaysOverTime, queryPlaysByDayOfWeek, queryPlaysByHourOfDay } from './queries.js';
 
 /**
@@ -47,20 +47,14 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { period, startDate, endDate, serverId, timezone } = query.data;
+    const { period, startDate, endDate, serverId, serverIds, timezone } = query.data;
     const authUser = request.user;
     const dateRange = resolveDateRange(period, startDate, endDate);
     // Default to UTC for backwards compatibility
     const tz = timezone ?? 'UTC';
 
-    if (serverId) {
-      const error = validateServerAccess(authUser, serverId);
-      if (error) {
-        return reply.forbidden(error);
-      }
-    }
-
-    const serverFilter = buildServerFilterFragment(serverId, authUser);
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+    const serverFilter = buildMultiServerFragment(resolvedIds);
     const bucketInterval = getBucketInterval(period);
     const customEnd = period === 'custom' && dateRange.end ? dateRange.end : undefined;
 
@@ -86,20 +80,14 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { period, startDate, endDate, serverId, timezone } = query.data;
+    const { period, startDate, endDate, serverId, serverIds, timezone } = query.data;
     const authUser = request.user;
     const dateRange = resolveDateRange(period, startDate, endDate);
     // Default to UTC for backwards compatibility
     const tz = timezone ?? 'UTC';
 
-    if (serverId) {
-      const error = validateServerAccess(authUser, serverId);
-      if (error) {
-        return reply.forbidden(error);
-      }
-    }
-
-    const serverFilter = buildServerFilterFragment(serverId, authUser);
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+    const serverFilter = buildMultiServerFragment(resolvedIds);
     const customEnd = period === 'custom' ? dateRange.end : undefined;
 
     const data = await queryPlaysByDayOfWeek({
@@ -125,20 +113,14 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { period, startDate, endDate, serverId, timezone } = query.data;
+    const { period, startDate, endDate, serverId, serverIds, timezone } = query.data;
     const authUser = request.user;
     const dateRange = resolveDateRange(period, startDate, endDate);
     // Default to UTC for backwards compatibility
     const tz = timezone ?? 'UTC';
 
-    if (serverId) {
-      const error = validateServerAccess(authUser, serverId);
-      if (error) {
-        return reply.forbidden(error);
-      }
-    }
-
-    const serverFilter = buildServerFilterFragment(serverId, authUser);
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+    const serverFilter = buildMultiServerFragment(resolvedIds);
     const customEnd = period === 'custom' ? dateRange.end : undefined;
 
     const data = await queryPlaysByHourOfDay({
