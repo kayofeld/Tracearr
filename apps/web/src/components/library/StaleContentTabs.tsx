@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Archive, Film, Tv, Music, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { formatMediaTech, type StaleResponse } from '@tracearr/shared';
+import type { Server } from '@tracearr/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -21,6 +22,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useLibraryStale } from '@/hooks/queries/useLibrary';
+import { useServerColorMap } from '@/hooks/useServerColorMap';
+import { ServerColumnCell } from '@/components/server';
 import { formatBytes } from '@/lib/formatters';
 import { EmptyState } from '@/components/library';
 
@@ -97,15 +100,22 @@ function MediaTypeBadge({ mediaType }: { mediaType: string }) {
 }
 
 interface StaleContentTabsProps {
-  serverId?: string | null;
+  serverIds: string[];
   libraryId?: string | null;
+  isMultiServer: boolean;
+  selectedServers: Server[];
 }
 
 /**
  * Tabbed component for displaying never-watched and stale content.
  * Includes a threshold selector for the "stale" category (3m/6m/1y/2y).
  */
-export function StaleContentTabs({ serverId, libraryId }: StaleContentTabsProps) {
+export function StaleContentTabs({
+  serverIds,
+  libraryId,
+  isMultiServer,
+  selectedServers,
+}: StaleContentTabsProps) {
   const [activeTab, setActiveTab] = useState<'never-watched' | 'stale'>('never-watched');
   const [staleDays, setStaleDays] = useState('90');
   const [mediaTypeFilter, setMediaTypeFilter] = useState<MediaTypeFilter>('all');
@@ -113,6 +123,8 @@ export function StaleContentTabs({ serverId, libraryId }: StaleContentTabsProps)
   const [stalePage, setStalePage] = useState(1);
   const [sortBy, setSortBy] = useState<SortBy>('size');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+
+  const colorMap = useServerColorMap();
 
   // Reset pages when filters change
   useEffect(() => {
@@ -139,7 +151,7 @@ export function StaleContentTabs({ serverId, libraryId }: StaleContentTabsProps)
 
   // Fetch both to avoid flicker on tab switch
   const neverWatched = useLibraryStale(
-    serverId,
+    serverIds,
     libraryId,
     90, // staleDays doesn't matter for never_watched category
     'never_watched',
@@ -150,7 +162,7 @@ export function StaleContentTabs({ serverId, libraryId }: StaleContentTabsProps)
     sortOrder
   );
   const stale = useLibraryStale(
-    serverId,
+    serverIds,
     libraryId,
     Number(staleDays),
     'stale',
@@ -215,7 +227,7 @@ export function StaleContentTabs({ serverId, libraryId }: StaleContentTabsProps)
                   )}
                 </button>
               </TableHead>
-              <TableHead>Server</TableHead>
+              {isMultiServer && <TableHead>Server</TableHead>}
               <TableHead className="text-right">
                 <button
                   className="hover:text-foreground ml-auto flex items-center gap-1"
@@ -273,32 +285,48 @@ export function StaleContentTabs({ serverId, libraryId }: StaleContentTabsProps)
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.items.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>
-                  <MediaTypeBadge mediaType={item.mediaType} />
-                </TableCell>
-                <TableCell>
-                  <span className="font-medium">{item.title}</span>
-                  {item.year && <span className="text-muted-foreground ml-1">({item.year})</span>}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline">{item.serverName}</Badge>
-                </TableCell>
-                <TableCell className="text-right">{formatBytes(item.fileSize)}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDistanceToNow(new Date(item.addedAt), { addSuffix: true })}
-                </TableCell>
-                {showStaleColumn && (
+            {data.items.map((item) => {
+              const serverColor = isMultiServer ? (colorMap.get(item.serverId) ?? null) : null;
+              const accentStyle = serverColor
+                ? { boxShadow: `inset 3px 0 0 0 ${serverColor}` }
+                : undefined;
+              const rowServer = isMultiServer
+                ? (selectedServers.find((s) => s.id === item.serverId) ?? null)
+                : null;
+
+              return (
+                <TableRow key={item.id} style={accentStyle}>
                   <TableCell>
-                    <StaleBadge daysStale={item.daysStale} />
+                    <MediaTypeBadge mediaType={item.mediaType} />
                   </TableCell>
-                )}
-                <TableCell className="text-muted-foreground">
-                  {formatMediaTech(item.resolution)}
-                </TableCell>
-              </TableRow>
-            ))}
+                  <TableCell>
+                    <span className="font-medium">{item.title}</span>
+                    {item.year && <span className="text-muted-foreground ml-1">({item.year})</span>}
+                  </TableCell>
+                  {isMultiServer && (
+                    <TableCell>
+                      {rowServer ? (
+                        <ServerColumnCell server={rowServer} />
+                      ) : (
+                        <Badge variant="outline">{item.serverName}</Badge>
+                      )}
+                    </TableCell>
+                  )}
+                  <TableCell className="text-right">{formatBytes(item.fileSize)}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDistanceToNow(new Date(item.addedAt), { addSuffix: true })}
+                  </TableCell>
+                  {showStaleColumn && (
+                    <TableCell>
+                      <StaleBadge daysStale={item.daysStale} />
+                    </TableCell>
+                  )}
+                  <TableCell className="text-muted-foreground">
+                    {formatMediaTech(item.resolution)}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
 

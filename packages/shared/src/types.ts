@@ -2371,6 +2371,7 @@ export type ValueCategory = 'low_value' | 'moderate_value' | 'high_value';
 export interface RoiItem {
   id: string;
   serverId: string;
+  serverName: string;
   title: string;
   mediaType: string;
   year: number | null;

@@ -22,8 +22,8 @@ import {
   type LibraryRoiQueryInput,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { validateServerAccess } from '../../utils/serverFiltering.js';
-import { buildLibraryServerFilter, buildLibraryCacheKey } from './utils.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
+import { buildLibraryCacheKey } from './utils.js';
 
 /** Value category for ROI classification */
 type ValueCategory = 'low_value' | 'moderate_value' | 'high_value';
@@ -32,6 +32,7 @@ type ValueCategory = 'low_value' | 'moderate_value' | 'high_value';
 interface RoiItem {
   id: string;
   serverId: string;
+  serverName: string;
   title: string;
   mediaType: string;
   year: number | null;
@@ -82,6 +83,7 @@ interface RoiResponse {
 interface RawRoiItemRow {
   id: string;
   server_id: string;
+  server_name: string;
   title: string;
   media_type: string;
   year: number | null;
@@ -149,6 +151,7 @@ export const libraryRoiRoute: FastifyPluginAsync = async (app) => {
 
       const {
         serverId,
+        serverIds: rawServerIds,
         libraryId,
         mediaType,
         valueCategory,
@@ -162,18 +165,13 @@ export const libraryRoiRoute: FastifyPluginAsync = async (app) => {
       } = query.data;
       const authUser = request.user;
 
-      // Validate server access if specific server requested
-      if (serverId) {
-        const error = validateServerAccess(authUser, serverId);
-        if (error) {
-          return reply.forbidden(error);
-        }
-      }
+      const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds);
 
       // Build cache key with all varying params
+      const serverCacheSegment = resolvedIds ? resolvedIds.slice().sort().join(',') : 'all';
       const cacheKey = buildLibraryCacheKey(
         REDIS_KEYS.LIBRARY_ROI,
-        serverId,
+        serverCacheSegment,
         `${libraryId ?? 'all'}-${mediaType}-${valueCategory}-${periodDays}-${includeAgeDecay}-${minFileSize}-${sortBy}-${sortOrder}-${page}-${pageSize}`
       );
 
@@ -188,7 +186,7 @@ export const libraryRoiRoute: FastifyPluginAsync = async (app) => {
       }
 
       // Build filters
-      const serverFilter = buildLibraryServerFilter(serverId, authUser, 'li');
+      const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
       const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
       const mediaTypeFilter =
         mediaType && mediaType !== 'all' ? sql`AND li.media_type = ${mediaType}` : sql``;
@@ -248,6 +246,7 @@ export const libraryRoiRoute: FastifyPluginAsync = async (app) => {
           SELECT
             li.id,
             li.server_id,
+            s.name AS server_name,
             li.title,
             li.media_type,
             li.year,
@@ -283,6 +282,7 @@ export const libraryRoiRoute: FastifyPluginAsync = async (app) => {
               ELSE EXTRACT(DAY FROM NOW() - MAX(sess.stopped_at))::int
             END AS days_since_last_watch
           FROM library_items li
+          JOIN servers s ON li.server_id = s.id
           LEFT JOIN child_stats cs ON li.media_type IN ('show', 'artist')
             AND cs.grandparent_rating_key = li.rating_key
             AND cs.server_id = li.server_id
@@ -303,7 +303,7 @@ export const libraryRoiRoute: FastifyPluginAsync = async (app) => {
             ${serverFilter}
             ${libraryFilter}
             ${mediaTypeFilter}
-          GROUP BY li.id, li.server_id, li.title, li.media_type, li.year, li.file_size, li.created_at,
+          GROUP BY li.id, li.server_id, s.name, li.title, li.media_type, li.year, li.file_size, li.created_at,
                    cs.total_size, cws.watch_count, cws.total_watch_ms, cws.last_watched_at
         ),
         roi_scored AS (
@@ -382,6 +382,7 @@ export const libraryRoiRoute: FastifyPluginAsync = async (app) => {
           -- Item fields
           pi.id,
           pi.server_id,
+          pi.server_name,
           pi.title,
           pi.media_type,
           pi.year,
@@ -424,6 +425,7 @@ export const libraryRoiRoute: FastifyPluginAsync = async (app) => {
       const items: RoiItem[] = rows.map((row) => ({
         id: row.id,
         serverId: row.server_id,
+        serverName: row.server_name,
         title: row.title,
         mediaType: row.media_type,
         year: row.year,

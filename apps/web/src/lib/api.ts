@@ -1161,15 +1161,19 @@ class ApiClient {
       params.set('timezone', getBrowserTimezone());
       return this.request<LibraryStorageResponse>(`/library/storage?${params.toString()}`);
     },
-    duplicates: (serverId?: string, page: number = 1, pageSize: number = 20) => {
+    duplicates: (serverIds?: string[], page: number = 1, pageSize: number = 20) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
       return this.request<DuplicatesResponse>(`/library/duplicates?${params.toString()}`);
     },
     stale: (
-      serverId?: string,
+      serverIds?: string[],
       libraryId?: string,
       staleDays: number = 90,
       category: 'all' | 'never_watched' | 'stale' = 'all',
@@ -1180,7 +1184,11 @@ class ApiClient {
       sortOrder: 'asc' | 'desc' = 'desc'
     ) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       if (libraryId) params.set('libraryId', libraryId);
       params.set('staleDays', String(staleDays));
       params.set('category', category);
@@ -1225,7 +1233,7 @@ class ApiClient {
       return this.request<PatternsResponse>(`/library/patterns?${params.toString()}`);
     },
     roi: (
-      serverId?: string,
+      serverIds?: string[],
       libraryId?: string,
       page: number = 1,
       pageSize: number = 20,
@@ -1234,7 +1242,11 @@ class ApiClient {
       sortOrder: 'asc' | 'desc' = 'asc'
     ) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       if (libraryId) params.set('libraryId', libraryId);
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));

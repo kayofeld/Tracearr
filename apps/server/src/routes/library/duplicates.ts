@@ -19,7 +19,11 @@ import {
   type LibraryDuplicatesQueryInput,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { validateServerAccess, buildServerFilterFragment } from '../../utils/serverFiltering.js';
+import {
+  validateServerAccess,
+  resolveServerIds,
+  buildMultiServerFragment,
+} from '../../utils/serverFiltering.js';
 import { buildLibraryCacheKey } from './utils.js';
 
 /** Match type for duplicate groups */
@@ -112,10 +116,18 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
         return reply.badRequest('Invalid query parameters');
       }
 
-      const { serverId, mediaType, minConfidence, includeFuzzy, page, pageSize } = query.data;
+      const {
+        serverId,
+        serverIds: rawServerIds,
+        mediaType,
+        minConfidence,
+        includeFuzzy,
+        page,
+        pageSize,
+      } = query.data;
       const authUser = request.user;
 
-      // Validate server access if specific server requested
+      // Validate single-server access when serverId explicitly requested
       if (serverId) {
         const error = validateServerAccess(authUser, serverId);
         if (error) {
@@ -123,10 +135,13 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
         }
       }
 
+      const resolvedIds = resolveServerIds(authUser, undefined, rawServerIds);
+
       // Build cache key with all varying params
+      const serverCacheSegment = resolvedIds ? resolvedIds.slice().sort().join(',') : 'all';
       const cacheKey = buildLibraryCacheKey(
         REDIS_KEYS.LIBRARY_DUPLICATES,
-        serverId,
+        serverId ?? serverCacheSegment,
         `${mediaType ?? 'all'}-${minConfidence}-${includeFuzzy}-${page}-${pageSize}`
       );
 
@@ -140,9 +155,9 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
         }
       }
 
-      // Build server access filter for non-owner roles
-      const serverFilterSql = buildServerFilterFragment(undefined, authUser);
-      const isRestricted = authUser.role !== 'owner';
+      // resolvedIds already intersects user access with any requested serverIds
+      const serverFilterSql = buildMultiServerFragment(resolvedIds);
+      const isRestricted = resolvedIds !== undefined;
 
       // Optional media type filter
       const mediaTypeFilter = mediaType ? sql`AND media_type = ${mediaType}` : sql``;
@@ -220,21 +235,9 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
       // Fuzzy matching query (only if includeFuzzy=true)
       let fuzzyMatches: RawFuzzyRow[] = [];
       if (includeFuzzy && minConfidence <= 70) {
-        // Build server filter for fuzzy query (need to apply to both a and b tables)
-        const fuzzyServerFilterA =
-          isRestricted && authUser.serverIds.length > 0
-            ? sql`AND a.server_id IN (${sql.join(
-                authUser.serverIds.map((id: string) => sql`${id}::uuid`),
-                sql`, `
-              )})`
-            : sql``;
-        const fuzzyServerFilterB =
-          isRestricted && authUser.serverIds.length > 0
-            ? sql`AND b.server_id IN (${sql.join(
-                authUser.serverIds.map((id: string) => sql`${id}::uuid`),
-                sql`, `
-              )})`
-            : sql``;
+        // Build server filter for fuzzy query (applied to both sides of the self-join)
+        const fuzzyServerFilterA = buildMultiServerFragment(resolvedIds, 'a.server_id');
+        const fuzzyServerFilterB = buildMultiServerFragment(resolvedIds, 'b.server_id');
 
         // Fuzzy match for items without external IDs
         const fuzzyResult = await db.execute(sql`

@@ -965,6 +965,7 @@ export const libraryStorageQuerySchema = z.object({
 // Library duplicates query schema (cross-server duplicate detection)
 export const libraryDuplicatesQuerySchema = z.object({
   serverId: z.uuid().optional(), // Filter to show duplicates involving this server
+  serverIds: serverIdsQuerySchema, // Restrict detection to a subset of accessible servers
   mediaType: z.enum(['movie', 'episode', 'show']).optional(),
   minConfidence: z.coerce.number().min(0).max(100).default(70),
   includeFuzzy: booleanStringSchema.default(true), // Include fuzzy title matches
@@ -975,6 +976,7 @@ export const libraryDuplicatesQuerySchema = z.object({
 // Library stale content query schema
 export const libraryStaleQuerySchema = z.object({
   serverId: z.uuid().optional(),
+  serverIds: serverIdsQuerySchema,
   libraryId: z.uuid().optional(),
   mediaType: z.enum(['movie', 'show', 'artist']).optional(),
   staleDays: z.coerce.number().int().min(1).default(90), // Configurable threshold
@@ -1003,6 +1005,7 @@ export const libraryWatchQuerySchema = z.object({
 // Library ROI (Return on Investment) query schema
 export const libraryRoiQuerySchema = z.object({
   serverId: uuidSchema.optional(),
+  serverIds: serverIdsQuerySchema,
   libraryId: z.string().optional(),
   mediaType: z.enum(['movie', 'show', 'artist', 'all']).default('all'),
   // Filter by value category

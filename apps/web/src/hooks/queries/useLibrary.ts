@@ -102,27 +102,28 @@ export function useLibraryStorage(
 
 /**
  * Fetch cross-server duplicate detection results
- * @param enabled - Set to false to skip fetching (e.g., when only one server exists)
+ * @param enabled - Set to false to skip fetching (e.g., when only one server is selected)
  */
 export function useLibraryDuplicates(
-  serverId?: string | null,
+  serverIds: string[],
   page: number = 1,
   pageSize: number = 20,
   enabled: boolean = true
 ) {
+  const sortedIds = [...serverIds].sort().join(',');
   return useQuery<DuplicatesResponse>({
-    queryKey: ['library', 'duplicates', serverId, page, pageSize],
-    queryFn: () => api.library.duplicates(serverId ?? undefined, page, pageSize),
+    queryKey: ['library', 'duplicates', sortedIds, page, pageSize],
+    queryFn: () => api.library.duplicates(serverIds, page, pageSize),
     staleTime: LIBRARY_STALE_TIME,
     enabled,
   });
 }
 
 /**
- * Fetch stale/unwatched content analysis
+ * Fetch stale/unwatched content analysis — combined across all selected servers.
  */
 export function useLibraryStale(
-  serverId?: string | null,
+  serverIds: string[],
   libraryId?: string | null,
   staleDays: number = 90,
   category: 'all' | 'never_watched' | 'stale' = 'all',
@@ -132,11 +133,12 @@ export function useLibraryStale(
   sortBy: 'size' | 'title' | 'days_stale' | 'added_at' = 'size',
   sortOrder: 'asc' | 'desc' = 'desc'
 ) {
+  const sortedIds = [...serverIds].sort().join(',');
   return useQuery<StaleResponse>({
     queryKey: [
       'library',
       'stale',
-      serverId,
+      sortedIds,
       libraryId,
       staleDays,
       category,
@@ -148,7 +150,7 @@ export function useLibraryStale(
     ],
     queryFn: () =>
       api.library.stale(
-        serverId ?? undefined,
+        serverIds,
         libraryId ?? undefined,
         staleDays,
         category,
@@ -159,6 +161,7 @@ export function useLibraryStale(
         sortOrder
       ),
     staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
   });
 }
 
@@ -230,10 +233,10 @@ export function useLibraryPatterns(
 }
 
 /**
- * Fetch content ROI analysis (watch value per storage cost)
+ * Fetch content ROI analysis — combined across all selected servers.
  */
 export function useLibraryRoi(
-  serverId?: string | null,
+  serverIds: string[],
   libraryId?: string | null,
   page: number = 1,
   pageSize: number = 20,
@@ -242,11 +245,12 @@ export function useLibraryRoi(
   sortOrder: 'asc' | 'desc' = 'asc'
 ) {
   const timezone = getBrowserTimezone();
+  const sortedIds = [...serverIds].sort().join(',');
   return useQuery<RoiResponse>({
     queryKey: [
       'library',
       'roi',
-      serverId,
+      sortedIds,
       libraryId,
       page,
       pageSize,
@@ -257,7 +261,7 @@ export function useLibraryRoi(
     ],
     queryFn: () =>
       api.library.roi(
-        serverId ?? undefined,
+        serverIds,
         libraryId ?? undefined,
         page,
         pageSize,
@@ -266,6 +270,7 @@ export function useLibraryRoi(
         sortOrder
       ),
     staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
   });
 }
 

@@ -1,5 +1,6 @@
 import { Film, Tv, Music, ArrowUpDown, ArrowUp, ArrowDown, BarChart } from 'lucide-react';
 import type { RoiResponse } from '@tracearr/shared';
+import type { Server } from '@tracearr/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,6 +18,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useServerColorMap } from '@/hooks/useServerColorMap';
+import { ServerColumnCell } from '@/components/server';
 import { ValueCategoryBadge, EmptyState } from '@/components/library';
 
 type SortBy = 'watch_hours_per_gb' | 'value_score' | 'file_size' | 'title';
@@ -64,6 +67,8 @@ interface RoiTableProps {
   onSortChange: (sortBy: SortBy, sortOrder: SortOrder) => void;
   mediaType: MediaTypeFilter;
   onMediaTypeChange: (mediaType: MediaTypeFilter) => void;
+  isMultiServer?: boolean;
+  selectedServers?: Server[];
 }
 
 /**
@@ -80,7 +85,11 @@ export function RoiTable({
   onSortChange,
   mediaType,
   onMediaTypeChange,
+  isMultiServer = false,
+  selectedServers = [],
 }: RoiTableProps) {
+  const colorMap = useServerColorMap();
+
   const handleSort = (field: SortBy) => {
     if (sortBy === field) {
       onSortChange(field, sortOrder === 'asc' ? 'desc' : 'asc');
@@ -99,22 +108,24 @@ export function RoiTable({
     );
   };
 
+  const filterSelect = (
+    <Select value={mediaType} onValueChange={(v) => onMediaTypeChange(v as MediaTypeFilter)}>
+      <SelectTrigger className="w-32">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All Types</SelectItem>
+        <SelectItem value="movie">Movies</SelectItem>
+        <SelectItem value="show">TV Shows</SelectItem>
+        <SelectItem value="artist">Music</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-end">
-          <Select value={mediaType} onValueChange={(v) => onMediaTypeChange(v as MediaTypeFilter)}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="movie">Movies</SelectItem>
-              <SelectItem value="show">TV Shows</SelectItem>
-              <SelectItem value="artist">Music</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <div className="flex items-center justify-end">{filterSelect}</div>
         <div className="flex h-48 items-center justify-center">
           <div className="text-muted-foreground">Loading ROI data...</div>
         </div>
@@ -125,19 +136,7 @@ export function RoiTable({
   if (!data?.items?.length) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-end">
-          <Select value={mediaType} onValueChange={(v) => onMediaTypeChange(v as MediaTypeFilter)}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="movie">Movies</SelectItem>
-              <SelectItem value="show">TV Shows</SelectItem>
-              <SelectItem value="artist">Music</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <div className="flex items-center justify-end">{filterSelect}</div>
         <EmptyState
           icon={BarChart}
           title="No ROI data available"
@@ -152,19 +151,7 @@ export function RoiTable({
   return (
     <div className="space-y-4">
       {/* Filter controls */}
-      <div className="flex items-center justify-end">
-        <Select value={mediaType} onValueChange={(v) => onMediaTypeChange(v as MediaTypeFilter)}>
-          <SelectTrigger className="w-32">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            <SelectItem value="movie">Movies</SelectItem>
-            <SelectItem value="show">TV Shows</SelectItem>
-            <SelectItem value="artist">Music</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      <div className="flex items-center justify-end">{filterSelect}</div>
 
       <Table>
         <TableHeader>
@@ -179,6 +166,7 @@ export function RoiTable({
                 <SortIcon field="title" />
               </button>
             </TableHead>
+            {isMultiServer && <TableHead>Server</TableHead>}
             <TableHead>
               <button
                 className="hover:text-foreground flex items-center gap-1"
@@ -202,26 +190,45 @@ export function RoiTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.items.map((item) => (
-            <TableRow key={item.id}>
-              <TableCell>
-                <MediaTypeBadge mediaType={item.mediaType} />
-              </TableCell>
-              <TableCell>
-                <span className="font-medium">{item.title}</span>
-                {item.year && <span className="text-muted-foreground ml-1">({item.year})</span>}
-              </TableCell>
-              <TableCell>{item.fileSizeGb.toFixed(1)} GB</TableCell>
-              <TableCell>{item.totalWatchHours.toFixed(1)}</TableCell>
-              <TableCell>{item.watchHoursPerGb.toFixed(2)}</TableCell>
-              <TableCell>
-                <ValueCategoryBadge
-                  category={item.valueCategory}
-                  suggestDeletion={item.suggestDeletion}
-                />
-              </TableCell>
-            </TableRow>
-          ))}
+          {data.items.map((item) => {
+            const serverColor = isMultiServer ? (colorMap.get(item.serverId) ?? null) : null;
+            const accentStyle = serverColor
+              ? { boxShadow: `inset 3px 0 0 0 ${serverColor}` }
+              : undefined;
+            const rowServer = isMultiServer
+              ? (selectedServers.find((s) => s.id === item.serverId) ?? null)
+              : null;
+
+            return (
+              <TableRow key={item.id} style={accentStyle}>
+                <TableCell>
+                  <MediaTypeBadge mediaType={item.mediaType} />
+                </TableCell>
+                <TableCell>
+                  <span className="font-medium">{item.title}</span>
+                  {item.year && <span className="text-muted-foreground ml-1">({item.year})</span>}
+                </TableCell>
+                {isMultiServer && (
+                  <TableCell>
+                    {rowServer ? (
+                      <ServerColumnCell server={rowServer} />
+                    ) : (
+                      <Badge variant="outline">{item.serverName}</Badge>
+                    )}
+                  </TableCell>
+                )}
+                <TableCell>{item.fileSizeGb.toFixed(1)} GB</TableCell>
+                <TableCell>{item.totalWatchHours.toFixed(1)}</TableCell>
+                <TableCell>{item.watchHoursPerGb.toFixed(2)}</TableCell>
+                <TableCell>
+                  <ValueCategoryBadge
+                    category={item.valueCategory}
+                    suggestDeletion={item.suggestDeletion}
+                  />
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
 

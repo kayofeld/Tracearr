@@ -20,8 +20,8 @@ import {
   type LibraryStaleQueryInput,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { validateServerAccess } from '../../utils/serverFiltering.js';
-import { buildLibraryServerFilter, buildLibraryCacheKey } from './utils.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
+import { buildLibraryCacheKey } from './utils.js';
 
 /** Category for stale content */
 type StaleCategory = 'never_watched' | 'stale';
@@ -107,6 +107,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
 
       const {
         serverId,
+        serverIds: rawServerIds,
         libraryId,
         mediaType,
         staleDays,
@@ -118,18 +119,13 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
       } = query.data;
       const authUser = request.user;
 
-      // Validate server access if specific server requested
-      if (serverId) {
-        const error = validateServerAccess(authUser, serverId);
-        if (error) {
-          return reply.forbidden(error);
-        }
-      }
+      const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds);
 
       // Build cache key with all varying params
+      const serverCacheSegment = resolvedIds ? resolvedIds.slice().sort().join(',') : 'all';
       const cacheKey = buildLibraryCacheKey(
         REDIS_KEYS.LIBRARY_STALE,
-        serverId,
+        serverCacheSegment,
         `${libraryId ?? 'all'}-${mediaType ?? 'all'}-${staleDays}-${category}-${sortBy}-${sortOrder}-${page}-${pageSize}`
       );
 
@@ -144,7 +140,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
       }
 
       // Build filters
-      const serverFilter = buildLibraryServerFilter(serverId, authUser, 'li');
+      const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
       const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
       const mediaTypeFilter = mediaType ? sql`AND li.media_type = ${mediaType}` : sql``;
 

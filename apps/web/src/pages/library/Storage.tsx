@@ -15,28 +15,26 @@ import {
   RoiTable,
 } from '@/components/library';
 import { StoragePredictionChart } from '@/components/charts';
+import { PerServerCardGrid } from '@/components/server';
 import {
-  useLibraryStorage,
   useLibraryDuplicates,
   useLibraryStale,
   useLibraryRoi,
   useLibraryStatus,
 } from '@/hooks/queries';
+import { useMultiServerQuery } from '@/hooks/useMultiServerQuery';
 import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
 import { formatBytes } from '@/lib/formatters';
+import { api } from '@/lib/api';
 
 export function LibraryStorage() {
   const { t } = useTranslation(['pages', 'common']);
-  const { selectedServerId, servers } = useServer();
+  const { selectedServerIds, selectedServers, isMultiServer } = useServer();
   const { value: timeRange, setValue: setTimeRange } = useTimeRange();
 
-  // Check library status first (single-server context; wraps id into array for hook)
-  const statusResult = useLibraryStatus(selectedServerId ? [selectedServerId] : []);
-  const status = {
-    isLoading: statusResult.isLoading,
-    data: selectedServerId ? statusResult.byServer.get(selectedServerId)?.data : undefined,
-  };
+  // Check library status — fan out per server to detect which need setup
+  const statusResult = useLibraryStatus(selectedServerIds);
 
   // Pagination state for tables
   const [duplicatesPage, _setDuplicatesPage] = useState(1);
@@ -68,13 +66,84 @@ export function LibraryStorage() {
     }
   }, [timeRange.period]);
 
-  // Core data hooks - use time range for storage trends
-  const storage = useLibraryStorage(selectedServerId, null, apiPeriod);
-  // Only fetch duplicates when multiple servers exist (cross-server feature)
-  const hasMultipleServers = servers.length > 1;
-  const duplicates = useLibraryDuplicates(selectedServerId, duplicatesPage, 10, hasMultipleServers);
+  // Fan out storage per server — storage endpoint is single-server only
+  const storageMulti = useMultiServerQuery(selectedServerIds, (id) => ({
+    queryKey: ['library', 'storage', id, undefined, apiPeriod],
+    queryFn: () => api.library.storage(id, undefined, apiPeriod),
+  }));
+
+  // Combined KPI: sum totalSizeBytes across all servers (field is a string from BigInt serialization)
+  const totalStorageBytes = useMemo(() => {
+    let sum = 0;
+    for (const id of selectedServerIds) {
+      const entry = storageMulti.byServer.get(id);
+      sum += Number(entry?.data?.current.totalSizeBytes ?? 0);
+    }
+    return sum;
+  }, [storageMulti.byServer, selectedServerIds]);
+
+  // Combined growth rate: sum bytesPerMonth; treat insufficient as 0 contribution
+  const growthSummary = useMemo(() => {
+    let totalBytes = 0;
+    let allInsufficient = true;
+    let hasAnyData = false;
+
+    for (const id of selectedServerIds) {
+      const data = storageMulti.byServer.get(id)?.data;
+      if (!data) continue;
+      hasAnyData = true;
+      const insufficient =
+        data.predictions.currentDataDays != null &&
+        data.predictions.currentDataDays < (data.predictions.minDataDays ?? 7);
+      if (!insufficient) {
+        allInsufficient = false;
+        totalBytes += Number(data.growthRate?.bytesPerMonth ?? 0);
+      }
+    }
+
+    return { totalBytes, allInsufficient: !hasAnyData || allInsufficient };
+  }, [storageMulti.byServer, selectedServerIds]);
+
+  const growthRateDisplay = growthSummary.allInsufficient
+    ? t('library.storage.insufficientData')
+    : growthSummary.totalBytes > 0
+      ? `+${formatBytes(growthSummary.totalBytes)}/mo`
+      : t('library.storage.zeroGrowth');
+
+  // For single-server: expose the underlying query result for chart + sub-value
+  const singleStorageEntry =
+    !isMultiServer && selectedServerIds.length === 1
+      ? (storageMulti.byServer.get(selectedServerIds[0] ?? '') ?? null)
+      : null;
+  const singleInsufficient =
+    singleStorageEntry?.data?.predictions.currentDataDays != null &&
+    singleStorageEntry.data.predictions.currentDataDays <
+      (singleStorageEntry.data.predictions.minDataDays ?? 7);
+  const growthRateSubValue =
+    !isMultiServer && singleInsufficient
+      ? `${singleStorageEntry?.data?.predictions.currentDataDays} ${t('library.storage.of')} ${singleStorageEntry?.data?.predictions.minDataDays} ${t('library.storage.days')}`
+      : undefined;
+
+  // Combined cross-server duplicates — only relevant when multiple servers are selected
+  const duplicates = useLibraryDuplicates(
+    selectedServerIds,
+    duplicatesPage,
+    10,
+    selectedServerIds.length > 1
+  );
+
+  // Combined stale summary for KPI card
+  const staleSummary = useLibraryStale(selectedServerIds, null, 90, 'all', 1, 1);
+  const staleCount =
+    (staleSummary.data?.summary.neverWatched.count ?? 0) +
+    (staleSummary.data?.summary.stale.count ?? 0);
+  const staleSizeBytes =
+    (staleSummary.data?.summary.neverWatched.sizeBytes ?? 0) +
+    (staleSummary.data?.summary.stale.sizeBytes ?? 0);
+
+  // Combined ROI — combined across servers via the backend
   const roi = useLibraryRoi(
-    selectedServerId,
+    selectedServerIds,
     null,
     roiPage,
     10,
@@ -83,28 +152,28 @@ export function LibraryStorage() {
     roiSortOrder
   );
 
-  // Fetch stale summary for KPI card (minimal page size since we only need summary)
-  const staleSummary = useLibraryStale(selectedServerId, null, 90, 'all', 1, 1);
-  const staleCount =
-    (staleSummary.data?.summary.neverWatched.count ?? 0) +
-    (staleSummary.data?.summary.stale.count ?? 0);
-  const staleSizeBytes =
-    (staleSummary.data?.summary.neverWatched.sizeBytes ?? 0) +
-    (staleSummary.data?.summary.stale.sizeBytes ?? 0);
+  // All hooks must fire before any early returns
+  const allStorageErrors = useMemo(() => {
+    if (selectedServerIds.length === 0) return false;
+    return selectedServerIds.every((id) => storageMulti.byServer.get(id)?.isError === true);
+  }, [storageMulti.byServer, selectedServerIds]);
 
-  // Growth rate display - show "0 GB/mo" for zero/negative/NaN growth
-  const insufficientData =
-    storage.data?.predictions.currentDataDays &&
-    storage.data.predictions.currentDataDays < (storage.data.predictions.minDataDays ?? 7);
-  const growthBytes = Number(storage.data?.growthRate?.bytesPerMonth ?? 0);
-  const growthRateDisplay = insufficientData
-    ? t('library.storage.insufficientData')
-    : growthBytes > 0
-      ? `+${formatBytes(storage.data?.growthRate.bytesPerMonth)}/mo`
-      : t('library.storage.zeroGrowth');
-  const growthRateSubValue = insufficientData
-    ? `${storage.data?.predictions.currentDataDays} ${t('library.storage.of')} ${storage.data?.predictions.minDataDays} ${t('library.storage.days')}`
-    : undefined;
+  const firstStorageError = useMemo(() => {
+    for (const id of selectedServerIds) {
+      const entry = storageMulti.byServer.get(id);
+      if (entry?.isError) return entry.error as Error | null;
+    }
+    return null;
+  }, [storageMulti.byServer, selectedServerIds]);
+
+  // Show empty state only if ALL selected servers need setup
+  const allNeedSetup = useMemo(() => {
+    if (statusResult.isLoading || selectedServerIds.length === 0) return false;
+    return selectedServerIds.every((id) => {
+      const s = statusResult.byServer.get(id)?.data;
+      return !s?.isSynced || s.needsBackfill || s.isBackfillRunning;
+    });
+  }, [statusResult, selectedServerIds]);
 
   // Header component (used in all states)
   const header = (
@@ -114,32 +183,40 @@ export function LibraryStorage() {
     </div>
   );
 
-  // Show error state with retry
-  if (storage.isError) {
+  if (allStorageErrors && firstStorageError) {
     return (
       <div className="space-y-6">
         {header}
         <ErrorState
           title={t('library.storage.failedToLoad')}
-          message={storage.error?.message ?? t('library.storage.failedToLoadDesc')}
-          onRetry={storage.refetch}
+          message={firstStorageError.message ?? t('library.storage.failedToLoadDesc')}
+          onRetry={() => {
+            for (const id of selectedServerIds) {
+              void storageMulti.byServer.get(id)?.refetch();
+            }
+          }}
         />
       </div>
     );
   }
 
-  // Show empty state if library not synced or needs backfill
-  const needsSetup =
-    !status.isLoading &&
-    (!status.data?.isSynced || status.data?.needsBackfill || status.data?.isBackfillRunning);
-  if (needsSetup) {
+  if (allNeedSetup) {
     return (
       <div className="space-y-6">
         {header}
-        <LibraryEmptyState onComplete={storage.refetch} />
+        <LibraryEmptyState
+          onComplete={() => {
+            for (const id of selectedServerIds) {
+              void storageMulti.byServer.get(id)?.refetch();
+            }
+          }}
+        />
       </div>
     );
   }
+
+  // Confidence badge applies only in single-server mode
+  const singleServerConfidence = singleStorageEntry?.data?.predictions.confidence;
 
   return (
     <div className="space-y-6">
@@ -150,23 +227,26 @@ export function LibraryStorage() {
         <StatCard
           icon={HardDrive}
           label={t('library.storage.totalStorage')}
-          value={formatBytes(storage.data?.current.totalSizeBytes)}
-          isLoading={storage.isLoading}
+          value={formatBytes(totalStorageBytes)}
+          isLoading={storageMulti.isLoading}
         />
         <StatCard
           icon={TrendingUp}
           label={t('library.storage.growthRate')}
           value={growthRateDisplay}
           subValue={growthRateSubValue}
-          isLoading={storage.isLoading}
+          isLoading={storageMulti.isLoading}
         />
-        <StatCard
-          icon={Copy}
-          label={t('library.storage.duplicates')}
-          value={`${duplicates.data?.summary.totalGroups ?? 0} ${t('library.storage.groups')}`}
-          subValue={`${formatBytes(duplicates.data?.summary.totalPotentialSavingsBytes ?? 0)} ${t('library.storage.recoverable')}`}
-          isLoading={duplicates.isLoading}
-        />
+        {/* Duplicates KPI — only meaningful when multiple servers selected */}
+        {selectedServerIds.length > 1 && (
+          <StatCard
+            icon={Copy}
+            label={t('library.storage.duplicates')}
+            value={`${duplicates.data?.summary.totalGroups ?? 0} ${t('library.storage.groups')}`}
+            subValue={`${formatBytes(duplicates.data?.summary.totalPotentialSavingsBytes ?? 0)} ${t('library.storage.recoverable')}`}
+            isLoading={duplicates.isLoading}
+          />
+        )}
         <StatCard
           icon={Archive}
           label={t('library.storage.staleContent')}
@@ -184,12 +264,13 @@ export function LibraryStorage() {
               <CardTitle className="text-base font-medium">
                 {t('library.storage.storageTrend')}
               </CardTitle>
-              {showPredictions && storage.data?.predictions.confidence && (
+              {/* Confidence badge shown only in single-server mode */}
+              {!isMultiServer && showPredictions && singleServerConfidence && (
                 <Badge
                   variant={
-                    storage.data.predictions.confidence === 'high'
+                    singleServerConfidence === 'high'
                       ? 'success'
-                      : storage.data.predictions.confidence === 'medium'
+                      : singleServerConfidence === 'medium'
                         ? 'warning'
                         : 'secondary'
                   }
@@ -198,8 +279,7 @@ export function LibraryStorage() {
                     high: t('library.storage.confidenceHigh'),
                     medium: t('library.storage.confidenceMedium'),
                     low: t('library.storage.confidenceLow'),
-                  }[storage.data.predictions.confidence] ??
-                    storage.data.predictions.confidence}{' '}
+                  }[singleServerConfidence] ?? singleServerConfidence}{' '}
                   {t('library.storage.confidence')}
                 </Badge>
               )}
@@ -220,18 +300,38 @@ export function LibraryStorage() {
           </div>
         </CardHeader>
         <CardContent>
-          <StoragePredictionChart
-            data={storage.data}
-            isLoading={storage.isLoading}
-            height={300}
-            period={timeRange.period}
-            showPredictions={showPredictions}
-          />
+          {isMultiServer ? (
+            /* Multi-server: one chart card per server */
+            <PerServerCardGrid
+              servers={selectedServers}
+              renderServer={(server) => {
+                const entry = storageMulti.byServer.get(server.id);
+                return (
+                  <StoragePredictionChart
+                    data={entry?.data}
+                    isLoading={entry?.isLoading ?? true}
+                    height={250}
+                    period={timeRange.period}
+                    showPredictions={showPredictions}
+                  />
+                );
+              }}
+            />
+          ) : (
+            /* Single-server: original chart */
+            <StoragePredictionChart
+              data={singleStorageEntry?.data}
+              isLoading={storageMulti.isLoading}
+              height={300}
+              period={timeRange.period}
+              showPredictions={showPredictions}
+            />
+          )}
         </CardContent>
       </Card>
 
       {/* Duplicates Section - temporarily hidden globally
-      {hasMultipleServers && (
+      {selectedServerIds.length > 1 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-medium">Cross-Server Duplicates</CardTitle>
@@ -258,7 +358,12 @@ export function LibraryStorage() {
           <p className="text-muted-foreground text-sm">{t('library.storage.staleContentDesc')}</p>
         </CardHeader>
         <CardContent>
-          <StaleContentTabs serverId={selectedServerId} libraryId={null} />
+          <StaleContentTabs
+            serverIds={selectedServerIds}
+            libraryId={null}
+            isMultiServer={isMultiServer}
+            selectedServers={selectedServers}
+          />
         </CardContent>
       </Card>
 
@@ -292,16 +397,18 @@ export function LibraryStorage() {
             onPageChange={(page) => setRoiPage(page)}
             sortBy={roiSortBy}
             sortOrder={roiSortOrder}
-            onSortChange={(sortBy, sortOrder) => {
-              setRoiSortBy(sortBy);
-              setRoiSortOrder(sortOrder);
+            onSortChange={(sb, so) => {
+              setRoiSortBy(sb);
+              setRoiSortOrder(so);
               setRoiPage(1); // Reset to first page when sort changes
             }}
             mediaType={roiMediaType}
-            onMediaTypeChange={(mediaType) => {
-              setRoiMediaType(mediaType);
+            onMediaTypeChange={(mt) => {
+              setRoiMediaType(mt);
               setRoiPage(1); // Reset to first page when filter changes
             }}
+            isMultiServer={isMultiServer}
+            selectedServers={selectedServers}
           />
         </CardContent>
       </Card>
