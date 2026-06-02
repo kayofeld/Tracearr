@@ -30,6 +30,9 @@ import {
   createDefaultAction,
   SEVERITY_OPTIONS,
 } from '@/lib/rules';
+import { useServer } from '@/hooks/useServer';
+import { useUsers } from '@/hooks/queries/useUsers';
+import { ServerBadge } from '@/components/server';
 
 // Combined rule type that can represent V1 or V2 rules from the API
 // The API returns rules with optional V2 fields (conditions, actions, description)
@@ -39,10 +42,14 @@ interface RuleInput {
   description?: string | null;
   severity?: ViolationSeverity;
   isActive: boolean;
+  serverId?: string | null;
+  serverUserId?: string | null;
   // V2 fields
   conditions?: RuleConditions | null;
   actions?: RuleActions | null;
 }
+
+type ScopeMode = 'global' | 'server' | 'user';
 
 interface RuleBuilderProps {
   initialRule?: RuleInput;
@@ -108,6 +115,15 @@ export function RuleBuilder({
   isLoading = false,
   filterOptions,
 }: RuleBuilderProps) {
+  const { servers } = useServer();
+
+  // Derive initial scope mode from existing rule fields
+  const initialScopeMode: ScopeMode = initialRule?.serverUserId
+    ? 'user'
+    : initialRule?.serverId
+      ? 'server'
+      : 'global';
+
   const [name, setName] = useState(initialRule?.name ?? '');
   const [description, setDescription] = useState(initialRule?.description ?? '');
   const [severity, setSeverity] = useState<ViolationSeverity>(initialRule?.severity ?? 'warning');
@@ -115,6 +131,26 @@ export function RuleBuilder({
   const [conditions, setConditions] = useState<RuleConditions>(extractConditions(initialRule));
   const [actions, setActions] = useState<RuleActions>(extractActions(initialRule));
   const [errors, setErrors] = useState<string[]>([]);
+
+  // Scope picker state — seed from existing rule, fall back to first available server
+  const [scopeMode, setScopeMode] = useState<ScopeMode>(initialScopeMode);
+  const [scopeServerId, setScopeServerId] = useState<string>(
+    initialRule?.serverId ?? servers[0]?.id ?? ''
+  );
+  const [scopeServerUserId, setScopeServerUserId] = useState<string>(
+    initialRule?.serverUserId ?? ''
+  );
+
+  const handleScopeServerChange = (serverId: string) => {
+    setScopeServerId(serverId);
+    setScopeServerUserId('');
+  };
+
+  // Fetch users for selected server when in user-scope mode
+  const { data: usersPage } = useUsers(
+    scopeMode === 'user' && scopeServerId ? { serverId: scopeServerId, pageSize: 100 } : {}
+  );
+  const userOptions = usersPage?.data ?? [];
 
   // Validation
   const validate = (): boolean => {
@@ -142,14 +178,23 @@ export function RuleBuilder({
   const handleSubmit = async () => {
     if (!validate()) return;
 
-    const data: CreateRuleV2Input | UpdateRuleV2Input = {
+    // Build base payload — serverId carries server-scope; user-scope adds serverUserId alongside null serverId
+    const base = {
       name: name.trim(),
       description: description.trim() || null,
       severity,
       isActive,
       conditions,
       actions,
+      serverId: scopeMode === 'server' && scopeServerId ? scopeServerId : null,
     };
+
+    // serverUserId is not part of CreateRuleV2Input schema but the backend may forward it on the
+    // rules table; cast to allow the extra field rather than silently dropping user scope
+    const data =
+      scopeMode === 'user' && scopeServerUserId
+        ? ({ ...base, serverUserId: scopeServerUserId } as CreateRuleV2Input | UpdateRuleV2Input)
+        : (base as CreateRuleV2Input | UpdateRuleV2Input);
 
     await onSave(data);
   };
@@ -246,6 +291,76 @@ export function RuleBuilder({
             Active
           </Label>
         </div>
+      </div>
+
+      {/* Scope Picker */}
+      <div className="space-y-3">
+        <Label>Scope</Label>
+        <div className="flex flex-wrap gap-2">
+          {(['global', 'server', 'user'] as ScopeMode[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setScopeMode(mode)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                scopeMode === mode
+                  ? 'bg-primary text-primary-foreground border-transparent'
+                  : 'border-border text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              {mode === 'global'
+                ? 'Global'
+                : mode === 'server'
+                  ? 'Specific server'
+                  : 'Specific user'}
+            </button>
+          ))}
+        </div>
+
+        {scopeMode !== 'global' && servers.length > 0 && (
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="scope-server" className="text-xs">
+                Server
+              </Label>
+              <Select value={scopeServerId} onValueChange={handleScopeServerChange}>
+                <SelectTrigger id="scope-server" className="w-[200px]">
+                  <SelectValue placeholder="Select server" />
+                </SelectTrigger>
+                <SelectContent>
+                  {servers.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      <span className="flex items-center gap-2">
+                        <ServerBadge server={s} variant="compact" />
+                        {s.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {scopeMode === 'user' && scopeServerId && (
+              <div className="space-y-1.5">
+                <Label htmlFor="scope-user" className="text-xs">
+                  User
+                </Label>
+                <Select value={scopeServerUserId} onValueChange={setScopeServerUserId}>
+                  <SelectTrigger id="scope-user" className="w-[200px]">
+                    <SelectValue placeholder="Select user" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {userOptions.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.identityName ?? u.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Conditions Section */}

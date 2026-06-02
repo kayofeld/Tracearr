@@ -544,6 +544,7 @@ export const createRuleV2Schema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).nullable().optional(),
   serverId: uuidSchema.nullable().optional(),
+  serverUserId: uuidSchema.nullable().optional(),
   isActive: z.boolean().default(true),
   severity: violationSeveritySchema.default('warning'),
   conditions: ruleConditionsSchema,
@@ -554,6 +555,8 @@ export const createRuleV2Schema = z.object({
 export const updateRuleV2Schema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).nullable().optional(),
+  serverId: uuidSchema.nullable().optional(),
+  serverUserId: uuidSchema.nullable().optional(),
   isActive: z.boolean().optional(),
   severity: violationSeveritySchema.optional(),
   conditions: ruleConditionsSchema.optional(),

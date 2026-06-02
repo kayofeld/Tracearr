@@ -171,7 +171,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
       return reply.forbidden('Only server owners can create rules');
     }
 
-    const { name, description, serverId, isActive, severity, conditions, actions } = body.data;
+    const { name, description, serverId, serverUserId, isActive, severity, conditions, actions } =
+      body.data;
 
     // Verify serverId exists and user has access if provided
     if (serverId) {
@@ -191,6 +192,23 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
+    // Verify serverUserId exists and owner has access to its server if provided
+    if (serverUserId) {
+      const serverUserRows = await db
+        .select({ serverId: serverUsers.serverId })
+        .from(serverUsers)
+        .where(eq(serverUsers.id, serverUserId))
+        .limit(1);
+
+      const serverUser = serverUserRows[0];
+      if (!serverUser) {
+        return reply.notFound('Server user not found');
+      }
+      if (!hasServerAccess(authUser, serverUser.serverId)) {
+        return reply.forbidden('You do not have access to this server');
+      }
+    }
+
     // Create rule with V2 format
     const inserted = await db
       .insert(rules)
@@ -198,6 +216,7 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
         name,
         description,
         serverId,
+        serverUserId,
         isActive,
         severity,
         conditions,
@@ -422,6 +441,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
     const updateData: Partial<{
       name: string;
       description: string | null;
+      serverId: string | null;
+      serverUserId: string | null;
       severity: ViolationSeverity;
       conditions: RuleConditions;
       actions: RuleActions;
@@ -437,6 +458,14 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
 
     if (body.data.description !== undefined) {
       updateData.description = body.data.description;
+    }
+
+    if (body.data.serverId !== undefined) {
+      updateData.serverId = body.data.serverId;
+    }
+
+    if (body.data.serverUserId !== undefined) {
+      updateData.serverUserId = body.data.serverUserId;
     }
 
     if (body.data.severity !== undefined) {

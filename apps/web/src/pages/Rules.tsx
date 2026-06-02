@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,9 +46,10 @@ import {
   ChevronDown,
   Sparkles,
   Settings2,
+  User,
 } from 'lucide-react';
 import { CountryMultiSelect } from '@/components/ui/country-multi-select';
-import { getCountryName } from '@/lib/utils';
+import { getCountryName, cn } from '@/lib/utils';
 import type {
   Rule,
   RuleType,
@@ -57,8 +58,11 @@ import type {
   CreateRuleV2Input,
   UpdateRuleV2Input,
   RulesFilterOptions,
+  Server,
 } from '@tracearr/shared';
 import { RuleBuilderDialog, getRuleIcon, getRuleSummary, isV2Rule } from '@/components/rules';
+import { ServerBadge } from '@/components/server';
+import { useServer } from '@/hooks/useServer';
 import { CLASSIC_RULE_TEMPLATES, type ClassicRuleTemplate } from '@/lib/rules';
 import {
   getSpeedUnit,
@@ -553,6 +557,108 @@ function RuleDialog({
   );
 }
 
+// 'all' | 'global' | 'per_user' | <serverId string>
+type ScopeFilterValue = string;
+
+function getRuleScope(rule: Rule): 'global' | 'server' | 'user' {
+  if (rule.serverUserId) return 'user';
+  if (rule.serverId) return 'server';
+  return 'global';
+}
+
+/** Small chip showing the rule's scope — rendered inline with the rule name row. */
+function RuleScopeChip({
+  rule,
+  servers,
+  filterOptions,
+}: {
+  rule: Rule;
+  servers: Server[];
+  filterOptions?: RulesFilterOptions;
+}) {
+  const scope = getRuleScope(rule);
+
+  if (scope === 'global') {
+    return (
+      <span className="text-muted-foreground bg-muted inline-flex items-center rounded-full px-2 py-0.5 text-xs">
+        Global
+      </span>
+    );
+  }
+
+  if (scope === 'server') {
+    const server = servers.find((s) => s.id === rule.serverId);
+    if (!server) return null;
+    return <ServerBadge server={server} variant="outlined" />;
+  }
+
+  // user scope: resolve server from filterOptions.users → servers, fall back to user glyph
+  const userOption = filterOptions?.users.find((u) => u.id === rule.serverUserId);
+  const server = userOption ? servers.find((s) => s.id === userOption.serverId) : undefined;
+  const username = userOption?.username ?? userOption?.identityName;
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {server && <ServerBadge server={server} variant="compact" />}
+      <span className="text-muted-foreground bg-muted inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs">
+        <User className="h-3 w-3 shrink-0" aria-hidden="true" />
+        {username ?? 'User'}
+      </span>
+    </span>
+  );
+}
+
+interface ScopeFilterPill {
+  value: ScopeFilterValue;
+  label: string;
+  color?: string | null;
+}
+
+/** Pill-row filter above the rule list. Independent of the page server selector. */
+function ScopeFilterStrip({
+  servers,
+  value,
+  onChange,
+}: {
+  servers: Server[];
+  value: ScopeFilterValue;
+  onChange: (v: ScopeFilterValue) => void;
+}) {
+  const pills: ScopeFilterPill[] = [
+    { value: 'all', label: 'All' },
+    { value: 'global', label: 'Global' },
+    ...servers.map((s) => ({ value: s.id, label: s.name, color: s.color })),
+    { value: 'per_user', label: 'Per-user' },
+  ];
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by scope">
+      {pills.map((pill) => (
+        <button
+          key={pill.value}
+          onClick={() => onChange(pill.value)}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors',
+            value === pill.value
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-muted text-muted-foreground hover:bg-muted/80'
+          )}
+          aria-pressed={value === pill.value}
+        >
+          {pill.color && (
+            <span
+              aria-hidden="true"
+              className="inline-block h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: pill.color }}
+            />
+          )}
+          {pill.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function RuleCard({
   rule,
   onEdit,
@@ -562,6 +668,7 @@ function RuleCard({
   isSelected,
   onSelect,
   filterOptions,
+  servers,
 }: {
   rule: Rule;
   onEdit: () => void;
@@ -571,6 +678,7 @@ function RuleCard({
   isSelected?: boolean;
   onSelect?: () => void;
   filterOptions?: RulesFilterOptions;
+  servers: Server[];
 }) {
   const { t } = useTranslation(['pages', 'common']);
   const ruleTypes = useRuleTypes();
@@ -607,8 +715,9 @@ function RuleCard({
               {icon}
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-semibold">{rule.name}</h3>
+                <RuleScopeChip rule={rule} servers={servers} filterOptions={filterOptions} />
                 {!rule.isActive && (
                   <span className="text-muted-foreground text-xs">
                     ({t('common:states.disabled')})
@@ -713,6 +822,7 @@ export function Rules() {
   const { t } = useTranslation(['pages', 'common']);
   const { data: rules, isLoading } = useRules();
   const { data: settings } = useSettings();
+  const { servers } = useServer();
   const createRule = useCreateRule();
   const updateRule = useUpdateRule();
   const deleteRule = useDeleteRule();
@@ -721,6 +831,9 @@ export function Rules() {
   const bulkDeleteRules = useBulkDeleteRules();
 
   const unitSystem = settings?.unitSystem ?? 'metric';
+
+  // Scope filter — independent of the global server selector
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilterValue>('all');
 
   // V1 Classic rule dialog state (for editing legacy rules only)
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -739,10 +852,27 @@ export function Rules() {
   const updateRuleV2 = useUpdateRuleV2();
   const { data: rulesFilterOptions } = useRulesFilterOptions();
 
+  // Client-side scope filtering — does not touch the server selector
+  const filteredRules = useMemo(() => {
+    if (!rules) return [];
+    if (scopeFilter === 'all') return rules;
+    if (scopeFilter === 'global') return rules.filter((r) => getRuleScope(r) === 'global');
+    if (scopeFilter === 'per_user') return rules.filter((r) => getRuleScope(r) === 'user');
+    // serverId pill: match rules whose serverId === pill, or user-scoped rules whose user belongs to that server
+    return rules.filter((r) => {
+      if (r.serverId === scopeFilter) return true;
+      if (r.serverUserId) {
+        const userOption = rulesFilterOptions?.users.find((u) => u.id === r.serverUserId);
+        return userOption?.serverId === scopeFilter;
+      }
+      return false;
+    });
+  }, [rules, scopeFilter, rulesFilterOptions]);
+
   // Row selection for bulk operations
   const { selectedIds, selectedCount, toggleRow, clearSelection, isSelected } = useRowSelection({
     getRowId: (rule: Rule) => rule.id,
-    totalCount: rules?.length ?? 0,
+    totalCount: filteredRules.length,
   });
 
   const handleCreate = (data: RuleFormData) => {
@@ -985,30 +1115,38 @@ export function Rules() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {rules.map((rule) => (
-            <RuleCard
-              key={rule.id}
-              rule={rule}
-              onEdit={() => {
-                // Route to appropriate editor based on rule version
-                if (isV2Rule(rule)) {
-                  openV2EditDialog(rule);
-                } else {
-                  openEditDialog(rule);
-                }
-              }}
-              onDelete={() => {
-                setDeleteConfirmId(rule.id);
-              }}
-              onToggle={() => {
-                handleToggle(rule);
-              }}
-              unitSystem={unitSystem}
-              isSelected={isSelected(rule)}
-              onSelect={() => toggleRow(rule)}
-              filterOptions={rulesFilterOptions}
-            />
-          ))}
+          <ScopeFilterStrip servers={servers} value={scopeFilter} onChange={setScopeFilter} />
+          {filteredRules.length === 0 ? (
+            <p className="text-muted-foreground py-8 text-center text-sm">
+              No rules match this scope filter.
+            </p>
+          ) : (
+            filteredRules.map((rule) => (
+              <RuleCard
+                key={rule.id}
+                rule={rule}
+                onEdit={() => {
+                  // Route to appropriate editor based on rule version
+                  if (isV2Rule(rule)) {
+                    openV2EditDialog(rule);
+                  } else {
+                    openEditDialog(rule);
+                  }
+                }}
+                onDelete={() => {
+                  setDeleteConfirmId(rule.id);
+                }}
+                onToggle={() => {
+                  handleToggle(rule);
+                }}
+                unitSystem={unitSystem}
+                isSelected={isSelected(rule)}
+                onSelect={() => toggleRow(rule)}
+                filterOptions={rulesFilterOptions}
+                servers={servers}
+              />
+            ))
+          )}
         </div>
       )}
 
