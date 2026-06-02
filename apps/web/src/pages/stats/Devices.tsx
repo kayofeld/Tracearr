@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Smartphone, Monitor, CheckCircle2, ArrowRightLeft, Users } from 'lucide-react';
 import { formatMediaTech } from '@tracearr/shared';
+import type { DeviceCompatibilityMatrix } from '@tracearr/shared';
 import { Link } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { StatCard } from '@/components/ui/stat-card';
@@ -27,6 +28,8 @@ import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
 import { cn } from '@/lib/utils';
 import { getAvatarUrl } from '@/components/users/utils';
+import { PerServerCardGrid, ServerColumnCell } from '@/components/server';
+import type { Server } from '@tracearr/shared';
 
 // Color coding for direct play percentage
 function getDirectPlayColor(pct: number): string {
@@ -53,33 +56,144 @@ function getProgressTextColor(pct: number): string {
   return 'text-red-600 dark:text-red-400';
 }
 
-export function StatsDevices() {
+// Inline matrix renderer driven by pre-fetched data (used by both single and per-server views).
+interface MatrixViewProps {
+  data: DeviceCompatibilityMatrix | undefined;
+  isLoading: boolean;
+}
+
+function MatrixView({ data, isLoading }: MatrixViewProps) {
   const { t } = useTranslation(['pages', 'common']);
-  const { value: timeRange, setValue: setTimeRange, apiParams } = useTimeRange();
-  const { selectedServerId } = useServer();
 
-  const compatibility = useDeviceCompatibility(apiParams, selectedServerId);
-  const matrix = useDeviceCompatibilityMatrix(apiParams, selectedServerId);
-  const deviceHealth = useDeviceHealth(apiParams, selectedServerId);
-  const hotspots = useTranscodeHotspots(apiParams, selectedServerId);
-  const topTranscodingUsers = useTopTranscodingUsers(apiParams, selectedServerId);
-
-  const summary = compatibility.data?.summary;
-
-  // Sort matrix devices by total sessions (descending)
-  const sortedMatrixDevices = matrix.data?.devices
-    ? [...matrix.data.devices].sort((a, b) => {
+  const sortedMatrixDevices = data?.devices
+    ? [...data.devices].sort((a, b) => {
         const aSessions = Object.values(a.codecs).reduce((sum, c) => sum + c.sessions, 0);
         const bSessions = Object.values(b.codecs).reduce((sum, c) => sum + c.sessions, 0);
         return bSessions - aSessions;
       })
     : [];
 
-  // Only show codecs that have data in at least one device
   const activeCodecs =
-    matrix.data?.codecs.filter((codec) =>
-      sortedMatrixDevices.some((device) => device.codecs[codec])
-    ) ?? [];
+    data?.codecs.filter((codec) => sortedMatrixDevices.some((device) => device.codecs[codec])) ??
+    [];
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!data || sortedMatrixDevices.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed p-8 text-center">
+        <Monitor className="text-muted-foreground/50 mx-auto h-12 w-12" />
+        <p className="text-muted-foreground mt-2">{t('devices.noDeviceDataPeriod')}</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="bg-background sticky left-0 z-10">
+              {t('common:labels.device')}
+            </TableHead>
+            {activeCodecs.map((codec) => (
+              <TableHead key={codec} className="min-w-[80px] text-center">
+                {formatMediaTech(codec)}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sortedMatrixDevices.map((device) => {
+            const totalSessions = Object.values(device.codecs).reduce(
+              (sum, c) => sum + c.sessions,
+              0
+            );
+            return (
+              <TableRow key={device.device} className="hover:bg-transparent">
+                <TableCell className="bg-background sticky left-0 z-10 font-medium">
+                  <div>{device.device}</div>
+                  <div className="text-muted-foreground text-xs">
+                    {totalSessions.toLocaleString()} {t('common:labels.sessions').toLowerCase()}
+                  </div>
+                </TableCell>
+                {activeCodecs.map((codec) => {
+                  const cell = device.codecs[codec];
+                  if (!cell) {
+                    return (
+                      <TableCell key={codec} className="text-center">
+                        <span className="text-muted-foreground/50">-</span>
+                      </TableCell>
+                    );
+                  }
+                  return (
+                    <TableCell
+                      key={codec}
+                      className={cn('text-center', getDirectPlayBg(cell.directPct))}
+                    >
+                      <div className={cn('font-medium', getDirectPlayColor(cell.directPct))}>
+                        {cell.directPct}%
+                      </div>
+                      <div className="text-muted-foreground text-xs">{cell.sessions}</div>
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+
+      {/* Legend */}
+      <div className="mt-4 flex items-center gap-4 text-sm">
+        <span className="text-muted-foreground">{t('devices.legend')}</span>
+        <Badge
+          variant="outline"
+          className="border-transparent bg-green-500/20 text-green-600 dark:text-green-400"
+        >
+          {t('devices.directPlayHigh')}
+        </Badge>
+        <Badge
+          variant="outline"
+          className="border-transparent bg-yellow-500/20 text-yellow-600 dark:text-yellow-400"
+        >
+          {t('devices.directPlayMid')}
+        </Badge>
+        <Badge
+          variant="outline"
+          className="border-transparent bg-red-500/20 text-red-600 dark:text-red-400"
+        >
+          {t('devices.directPlayLow')}
+        </Badge>
+      </div>
+    </>
+  );
+}
+
+export function StatsDevices() {
+  const { t } = useTranslation(['pages', 'common']);
+  const { value: timeRange, setValue: setTimeRange, apiParams } = useTimeRange();
+  const { selectedServerIds, selectedServers, isMultiServer } = useServer();
+
+  const compatibility = useDeviceCompatibility(apiParams, selectedServerIds);
+  const matrixResult = useDeviceCompatibilityMatrix(selectedServerIds, apiParams);
+  const deviceHealth = useDeviceHealth(apiParams, selectedServerIds);
+  const hotspots = useTranscodeHotspots(apiParams, selectedServerIds);
+  const topTranscodingUsers = useTopTranscodingUsers(apiParams, selectedServerIds);
+
+  const summary = compatibility.data?.summary;
+
+  // Resolve a Server object by id from selectedServers; returns undefined when id is unknown.
+  const resolveServer = (serverId: string): Server | undefined =>
+    selectedServers.find((s) => s.id === serverId);
 
   return (
     <div className="space-y-6">
@@ -138,38 +252,49 @@ export function StatsDevices() {
               </div>
             ) : deviceHealth.data && deviceHealth.data.data.length > 0 ? (
               <div className="space-y-4">
-                {deviceHealth.data.data.slice(0, 8).map((device) => (
-                  <div key={device.device} className="space-y-1">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="max-w-[150px] truncate font-medium" title={device.device}>
-                        {device.device}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground text-xs">
-                          {device.sessions.toLocaleString()}{' '}
-                          {t('common:labels.sessions').toLowerCase()}
-                        </span>
-                        <span
-                          className={cn(
-                            'font-semibold',
-                            getProgressTextColor(device.directPlayPct)
+                {deviceHealth.data.data.slice(0, 8).map((device, idx) => {
+                  const deviceServer = resolveServer(device.serverId);
+                  return (
+                    <div key={`${device.device}-${idx}`} className="space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <span
+                            className="max-w-[150px] truncate font-medium"
+                            title={device.device}
+                          >
+                            {device.device}
+                          </span>
+                          {isMultiServer && deviceServer && (
+                            <ServerColumnCell server={deviceServer} />
                           )}
-                        >
-                          {device.directPlayPct}%
-                        </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground text-xs">
+                            {device.sessions.toLocaleString()}{' '}
+                            {t('common:labels.sessions').toLowerCase()}
+                          </span>
+                          <span
+                            className={cn(
+                              'font-semibold',
+                              getProgressTextColor(device.directPlayPct)
+                            )}
+                          >
+                            {device.directPlayPct}%
+                          </span>
+                        </div>
+                      </div>
+                      <div className="bg-muted relative h-2 w-full overflow-hidden rounded-full">
+                        <div
+                          className={cn(
+                            'absolute inset-y-0 left-0 rounded-full',
+                            getProgressColor(device.directPlayPct)
+                          )}
+                          style={{ width: `${device.directPlayPct}%` }}
+                        />
                       </div>
                     </div>
-                    <div className="bg-muted relative h-2 w-full overflow-hidden rounded-full">
-                      <div
-                        className={cn(
-                          'absolute inset-y-0 left-0 rounded-full',
-                          getProgressColor(device.directPlayPct)
-                        )}
-                        style={{ width: `${device.directPlayPct}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="rounded-xl border border-dashed p-8 text-center">
@@ -198,35 +323,44 @@ export function StatsDevices() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t('devices.deviceAndCodec')}</TableHead>
+                    {isMultiServer && <TableHead>{t('common:labels.server')}</TableHead>}
                     <TableHead className="text-right">{t('devices.transcodes')}</TableHead>
                     <TableHead className="text-right">{t('devices.pctOfTotal')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {hotspots.data.data.slice(0, 5).map((hotspot, idx) => (
-                    <TableRow
-                      key={`${hotspot.device}-${hotspot.videoCodec}-${hotspot.audioCodec}-${idx}`}
-                    >
-                      <TableCell>
-                        <div className="font-medium">{hotspot.device}</div>
-                        <div className="text-muted-foreground text-xs">
-                          {formatMediaTech(hotspot.videoCodec)} +{' '}
-                          {formatMediaTech(hotspot.audioCodec)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {hotspot.transcodeCount.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Badge
-                          variant="destructive"
-                          className="border-orange-500/30 bg-orange-500/20 text-orange-600 dark:text-orange-400"
-                        >
-                          {hotspot.pctOfTotalTranscodes}%
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {hotspots.data.data.slice(0, 5).map((hotspot, idx) => {
+                    const hotspotServer = resolveServer(hotspot.serverId);
+                    return (
+                      <TableRow
+                        key={`${hotspot.device}-${hotspot.videoCodec}-${hotspot.audioCodec}-${idx}`}
+                      >
+                        <TableCell>
+                          <div className="font-medium">{hotspot.device}</div>
+                          <div className="text-muted-foreground text-xs">
+                            {formatMediaTech(hotspot.videoCodec)} +{' '}
+                            {formatMediaTech(hotspot.audioCodec)}
+                          </div>
+                        </TableCell>
+                        {isMultiServer && (
+                          <TableCell>
+                            {hotspotServer && <ServerColumnCell server={hotspotServer} />}
+                          </TableCell>
+                        )}
+                        <TableCell className="text-right font-mono">
+                          {hotspot.transcodeCount.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Badge
+                            variant="destructive"
+                            className="border-orange-500/30 bg-orange-500/20 text-orange-600 dark:text-orange-400"
+                          >
+                            {hotspot.pctOfTotalTranscodes}%
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             ) : (
@@ -246,96 +380,25 @@ export function StatsDevices() {
           <CardDescription>{t('devices.compatibilityMatrixDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-          {matrix.isLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : matrix.data && sortedMatrixDevices.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="bg-background sticky left-0 z-10">
-                    {t('common:labels.device')}
-                  </TableHead>
-                  {activeCodecs.map((codec) => (
-                    <TableHead key={codec} className="min-w-[80px] text-center">
-                      {formatMediaTech(codec)}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedMatrixDevices.map((device) => {
-                  const totalSessions = Object.values(device.codecs).reduce(
-                    (sum, c) => sum + c.sessions,
-                    0
-                  );
-                  return (
-                    <TableRow key={device.device} className="hover:bg-transparent">
-                      <TableCell className="bg-background sticky left-0 z-10 font-medium">
-                        <div>{device.device}</div>
-                        <div className="text-muted-foreground text-xs">
-                          {totalSessions.toLocaleString()}{' '}
-                          {t('common:labels.sessions').toLowerCase()}
-                        </div>
-                      </TableCell>
-                      {activeCodecs.map((codec) => {
-                        const cell = device.codecs[codec];
-                        if (!cell) {
-                          return (
-                            <TableCell key={codec} className="text-center">
-                              <span className="text-muted-foreground/50">-</span>
-                            </TableCell>
-                          );
-                        }
-                        return (
-                          <TableCell
-                            key={codec}
-                            className={cn('text-center', getDirectPlayBg(cell.directPct))}
-                          >
-                            <div className={cn('font-medium', getDirectPlayColor(cell.directPct))}>
-                              {cell.directPct}%
-                            </div>
-                            <div className="text-muted-foreground text-xs">{cell.sessions}</div>
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+          {isMultiServer ? (
+            <PerServerCardGrid
+              servers={selectedServers}
+              renderServer={(server) => {
+                const result = matrixResult.byServer.get(server.id);
+                return (
+                  <MatrixView
+                    data={result?.data}
+                    isLoading={result?.isLoading ?? matrixResult.isLoading}
+                  />
+                );
+              }}
+            />
           ) : (
-            <div className="rounded-xl border border-dashed p-8 text-center">
-              <Monitor className="text-muted-foreground/50 mx-auto h-12 w-12" />
-              <p className="text-muted-foreground mt-2">{t('devices.noDeviceDataPeriod')}</p>
-            </div>
+            <MatrixView
+              data={matrixResult.byServer.get(selectedServerIds[0] ?? '')?.data}
+              isLoading={matrixResult.isLoading}
+            />
           )}
-
-          {/* Legend */}
-          <div className="mt-4 flex items-center gap-4 text-sm">
-            <span className="text-muted-foreground">{t('devices.legend')}</span>
-            <Badge
-              variant="outline"
-              className="border-transparent bg-green-500/20 text-green-600 dark:text-green-400"
-            >
-              {t('devices.directPlayHigh')}
-            </Badge>
-            <Badge
-              variant="outline"
-              className="border-transparent bg-yellow-500/20 text-yellow-600 dark:text-yellow-400"
-            >
-              {t('devices.directPlayMid')}
-            </Badge>
-            <Badge
-              variant="outline"
-              className="border-transparent bg-red-500/20 text-red-600 dark:text-red-400"
-            >
-              {t('devices.directPlayLow')}
-            </Badge>
-          </div>
         </CardContent>
       </Card>
 
@@ -357,6 +420,7 @@ export function StatsDevices() {
               <TableHeader>
                 <TableRow>
                   <TableHead>{t('common:labels.user')}</TableHead>
+                  {isMultiServer && <TableHead>{t('common:labels.server')}</TableHead>}
                   <TableHead className="text-right">{t('common:labels.sessions')}</TableHead>
                   <TableHead className="text-right">{t('common:playback.directPlay')}</TableHead>
                   <TableHead className="text-right">{t('devices.transcodes')}</TableHead>
@@ -364,56 +428,64 @@ export function StatsDevices() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {topTranscodingUsers.data.data.map((user) => (
-                  <TableRow key={user.serverUserId}>
-                    <TableCell>
-                      <Link
-                        to={`/users/${user.serverUserId}`}
-                        className="flex items-center gap-3 hover:underline"
-                      >
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage
-                            src={getAvatarUrl(selectedServerId, user.avatar, 32) ?? undefined}
-                            alt={user.username}
-                          />
-                          <AvatarFallback>
-                            {(user.identityName ?? user.username).slice(0, 2).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="font-medium">{user.identityName ?? user.username}</span>
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-right">
-                      {user.totalSessions.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          'border-transparent',
-                          user.directPlayPct >= 80
-                            ? 'bg-green-500/20 text-green-600 dark:text-green-400'
-                            : user.directPlayPct >= 50
-                              ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400'
-                              : 'bg-red-500/20 text-red-600 dark:text-red-400'
-                        )}
-                      >
-                        {user.directPlayPct}%
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-orange-600 dark:text-orange-400">
-                      {user.transcodeCount.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Badge
-                        variant="destructive"
-                        className="border-orange-500/30 bg-orange-500/20 text-orange-600 dark:text-orange-400"
-                      >
-                        {user.pctOfTotalTranscodes}%
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {topTranscodingUsers.data.data.map((user) => {
+                  const userServer = resolveServer(user.serverId);
+                  return (
+                    <TableRow key={`${user.serverUserId}-${user.serverId}`}>
+                      <TableCell>
+                        <Link
+                          to={`/users/${user.serverUserId}`}
+                          className="flex items-center gap-3 hover:underline"
+                        >
+                          <Avatar className="h-8 w-8">
+                            <AvatarImage
+                              src={getAvatarUrl(user.serverId, user.avatar, 32) ?? undefined}
+                              alt={user.username}
+                            />
+                            <AvatarFallback>
+                              {(user.identityName ?? user.username).slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="font-medium">{user.identityName ?? user.username}</span>
+                        </Link>
+                      </TableCell>
+                      {isMultiServer && (
+                        <TableCell>
+                          {userServer && <ServerColumnCell server={userServer} />}
+                        </TableCell>
+                      )}
+                      <TableCell className="text-muted-foreground text-right">
+                        {user.totalSessions.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'border-transparent',
+                            user.directPlayPct >= 80
+                              ? 'bg-green-500/20 text-green-600 dark:text-green-400'
+                              : user.directPlayPct >= 50
+                                ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400'
+                                : 'bg-red-500/20 text-red-600 dark:text-red-400'
+                          )}
+                        >
+                          {user.directPlayPct}%
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-orange-600 dark:text-orange-400">
+                        {user.transcodeCount.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Badge
+                          variant="destructive"
+                          className="border-orange-500/30 bg-orange-500/20 text-orange-600 dark:text-orange-400"
+                        >
+                          {user.pctOfTotalTranscodes}%
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           ) : (

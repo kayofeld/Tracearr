@@ -1052,13 +1052,18 @@ class ApiClient {
     },
 
     // Device compatibility stats
-    deviceCompatibility: async (timeRange?: StatsTimeRange, serverId?: string, minSessions = 5) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    deviceCompatibility: async (
+      timeRange?: StatsTimeRange,
+      serverIds?: string[],
+      minSessions = 5
+    ) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       params.set('minSessions', String(minSessions));
       return this.request<DeviceCompatibilityResponse>(
         `/stats/device-compatibility?${params.toString()}`
       );
     },
+    // Matrix is single-server only; fan-out in useDeviceCompatibilityMatrix calls this per id.
     deviceCompatibilityMatrix: async (
       timeRange?: StatsTimeRange,
       serverId?: string,
@@ -1070,20 +1075,20 @@ class ApiClient {
         `/stats/device-compatibility/matrix?${params.toString()}`
       );
     },
-    deviceHealth: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    deviceHealth: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       return this.request<DeviceHealthResponse>(
         `/stats/device-compatibility/health?${params.toString()}`
       );
     },
-    transcodeHotspots: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    transcodeHotspots: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       return this.request<TranscodeHotspotsResponse>(
         `/stats/device-compatibility/hotspots?${params.toString()}`
       );
     },
-    topTranscodingUsers: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    topTranscodingUsers: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       return this.request<TopTranscodingUsersResponse>(
         `/stats/device-compatibility/top-transcoding-users?${params.toString()}`
       );

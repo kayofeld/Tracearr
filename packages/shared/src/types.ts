@@ -1899,6 +1899,7 @@ export interface DeviceCompatibilityMatrix {
 
 // Device health ranking row
 export interface DeviceHealthRow {
+  serverId: string;
   device: string;
   sessions: number;
   directPlayCount: number;
@@ -1913,6 +1914,7 @@ export interface DeviceHealthResponse {
 
 // Transcode hotspot row
 export interface TranscodeHotspotRow {
+  serverId: string;
   device: string;
   videoCodec: string;
   audioCodec: string;
@@ -1931,6 +1933,7 @@ export interface TranscodeHotspotsResponse {
 
 // Top transcoding user row
 export interface TopTranscodingUserRow {
+  serverId: string;
   serverUserId: string;
   username: string;
   identityName: string | null;
