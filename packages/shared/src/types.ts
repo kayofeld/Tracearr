@@ -2044,6 +2044,15 @@ export interface BandwidthSummary {
 // Library Statistics Types
 // =============================================================================
 
+// Per-server KPI slice used inside LibraryStatsResponse.byServer
+export interface LibraryStatsServerKpis {
+  totalItems: number;
+  totalSizeBytes: string;
+  movieCount: number;
+  episodeCount: number;
+  showCount: number;
+}
+
 // Library Stats Response (GET /library/stats)
 export interface LibraryStatsResponse {
   totalItems: number;
@@ -2058,6 +2067,8 @@ export interface LibraryStatsResponse {
     countSd: number;
   };
   asOf: string | null;
+  /** Per-server KPI breakdown keyed by server ID (present when multiple servers are in scope) */
+  byServer?: Record<string, LibraryStatsServerKpis>;
 }
 
 // Library Growth Response (GET /library/growth)
@@ -2065,6 +2076,8 @@ export interface GrowthDataPoint {
   day: string;
   total: number;
   additions: number;
+  /** Server that produced this data point (present in multi-server responses) */
+  serverId: string;
 }
 
 export interface LibraryGrowthResponse {

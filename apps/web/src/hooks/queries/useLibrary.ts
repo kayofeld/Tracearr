@@ -9,6 +9,8 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api, getBrowserTimezone } from '@/lib/api';
+import { useMultiServerQuery } from '@/hooks/useMultiServerQuery';
+import type { MultiServerQueryResult } from '@/hooks/useMultiServerQuery';
 import type {
   LibraryStatsResponse,
   LibraryGrowthResponse,
@@ -30,30 +32,36 @@ import type {
 const LIBRARY_STALE_TIME = 1000 * 60 * 5;
 
 /**
- * Fetch current library statistics (item counts, size, quality breakdown)
+ * Fetch current library statistics (item counts, size, quality breakdown).
+ * Backend deduplicates item counts and sums storage across servers.
  */
-export function useLibraryStats(serverId?: string | null, libraryId?: string | null) {
+export function useLibraryStats(serverIds: string[], libraryId?: string | null) {
   const timezone = getBrowserTimezone();
+  const sortedIds = [...serverIds].sort().join(',');
   return useQuery<LibraryStatsResponse>({
-    queryKey: ['library', 'stats', serverId, libraryId, timezone],
-    queryFn: () => api.library.stats(serverId ?? undefined, libraryId ?? undefined),
+    queryKey: ['library', 'stats', sortedIds, libraryId, timezone],
+    queryFn: () => api.library.stats(serverIds, libraryId ?? undefined),
     staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
   });
 }
 
 /**
- * Fetch library growth timeline (additions/removals over time)
+ * Fetch library growth timeline (additions/removals over time).
+ * Each data point carries a serverId; Overview aggregates across servers before charting.
  */
 export function useLibraryGrowth(
-  serverId?: string | null,
+  serverIds: string[],
   libraryId?: string | null,
   period: string = '30d'
 ) {
   const timezone = getBrowserTimezone();
+  const sortedIds = [...serverIds].sort().join(',');
   return useQuery<LibraryGrowthResponse>({
-    queryKey: ['library', 'growth', serverId, libraryId, period, timezone],
-    queryFn: () => api.library.growth(serverId ?? undefined, libraryId ?? undefined, period),
+    queryKey: ['library', 'growth', sortedIds, libraryId, period, timezone],
+    queryFn: () => api.library.growth(serverIds, libraryId ?? undefined, period),
     staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
   });
 }
 
@@ -334,14 +342,15 @@ export interface LibraryStatusResponse {
 }
 
 /**
- * Fetch library sync and backfill status
- * Used to determine if library needs syncing or if snapshots need backfilling
+ * Fan-out library sync/backfill status across all selected servers.
+ * Returns a MultiServerQueryResult so callers can inspect per-server state.
  */
-export function useLibraryStatus(serverId?: string | null) {
-  return useQuery<LibraryStatusResponse>({
-    queryKey: ['library', 'status', serverId],
-    queryFn: () => api.library.status(serverId ?? undefined),
-    // Shorter stale time since this is used for real-time status checking
-    staleTime: 1000 * 30, // 30 seconds
-  });
+export function useLibraryStatus(
+  serverIds: string[]
+): MultiServerQueryResult<LibraryStatusResponse> {
+  return useMultiServerQuery<LibraryStatusResponse>(serverIds, (id) => ({
+    queryKey: ['library', 'status', id],
+    queryFn: () => api.library.status(id),
+    staleTime: 1000 * 30,
+  }));
 }

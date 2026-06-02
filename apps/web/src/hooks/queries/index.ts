@@ -148,3 +148,4 @@ export {
   useLibraryStatus,
   type LibraryStatusResponse,
 } from './useLibrary';
+export type { MultiServerQueryResult } from '@/hooks/useMultiServerQuery';

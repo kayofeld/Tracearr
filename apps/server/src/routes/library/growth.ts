@@ -5,6 +5,9 @@
  *
  * Uses library_stats_daily continuous aggregate for efficient growth tracking.
  * This avoids lock exhaustion from scanning 1000+ raw library_snapshots chunks.
+ *
+ * Each returned data point carries a serverId discriminator so the frontend can
+ * aggregate across servers by media type for the stacked view, or split by server.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -17,14 +20,15 @@ import {
   type LibraryGrowthQueryInput,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { validateServerAccess } from '../../utils/serverFiltering.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 import { buildLibraryCacheKey } from './utils.js';
 
-/** Single data point in growth timeline (per media type) */
+/** Single data point in growth timeline (per media type, per server) */
 interface GrowthDataPoint {
   day: string;
   total: number;
   additions: number;
+  serverId: string;
 }
 
 /** Library growth response shape with separate series per media type */
@@ -60,6 +64,8 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
    * GET /growth - Library growth timeline
    *
    * Returns time-series data from library_stats_daily continuous aggregate.
+   * Rows are grouped by (day, server_id) so the frontend receives a serverId
+   * discriminator on every data point.
    */
   app.get<{ Querystring: LibraryGrowthQueryInput }>(
     '/growth',
@@ -70,25 +76,21 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
         return reply.badRequest('Invalid query parameters');
       }
 
-      const { serverId, libraryId, period, timezone } = query.data;
+      const { serverId, serverIds, libraryId, period, timezone } = query.data;
       const authUser = request.user;
       const tz = timezone ?? 'UTC';
 
-      // Validate server access if specific server requested
-      if (serverId) {
-        const error = validateServerAccess(authUser, serverId);
-        if (error) {
-          return reply.forbidden(error);
-        }
-      }
+      const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+      const serverFilter = buildMultiServerFragment(resolvedIds, 'lsd.server_id');
 
-      // Build cache key with all varying params
-      const cacheKey = buildLibraryCacheKey(REDIS_KEYS.LIBRARY_GROWTH, serverId, period, tz);
+      // Optional library filter
+      const libraryFilter = libraryId ? sql`AND lsd.library_id = ${libraryId}` : sql``;
 
-      // Add libraryId to cache key if provided
+      // Build cache key — include sorted server IDs so order doesn't cause misses
+      const serverCacheKey = resolvedIds !== undefined ? [...resolvedIds].sort().join(',') : 'all';
+      const cacheKey = buildLibraryCacheKey(REDIS_KEYS.LIBRARY_GROWTH, serverCacheKey, period, tz);
       const fullCacheKey = libraryId ? `${cacheKey}:${libraryId}` : cacheKey;
 
-      // Try cache first
       const cached = await app.redis.get(fullCacheKey);
       if (cached) {
         try {
@@ -97,19 +99,6 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
           // Fall through to compute
         }
       }
-
-      // Build server filter for library_stats_daily aggregate
-      const serverFilter = serverId
-        ? sql`AND lsd.server_id = ${serverId}::uuid`
-        : authUser.serverIds?.length
-          ? sql`AND lsd.server_id IN (${sql.join(
-              authUser.serverIds.map((id: string) => sql`${id}::uuid`),
-              sql`, `
-            )})`
-          : sql``;
-
-      // Optional library filter
-      const libraryFilter = libraryId ? sql`AND lsd.library_id = ${libraryId}` : sql``;
 
       // Calculate date range
       const startDate = getStartDate(period);
@@ -131,13 +120,14 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
         effectiveStartDate = earliest ? new Date(earliest) : new Date('2020-01-01');
       }
 
-      // Query from library_stats_daily continuous aggregate
-      // This avoids lock exhaustion from scanning 1000+ raw library_snapshots chunks
+      // Query from library_stats_daily continuous aggregate.
+      // GROUP BY (day, server_id) so every row carries a serverId discriminator.
+      // The frontend aggregates across servers for the stacked view.
       const result = await db.execute(sql`
-        WITH daily_totals AS (
-          -- Sum across all libraries for each day (aggregate already has MAX per library)
+        WITH daily_by_server AS (
           SELECT
             lsd.day::date AS day,
+            lsd.server_id,
             COALESCE(SUM(lsd.movie_count), 0)::int AS movies,
             COALESCE(SUM(lsd.episode_count), 0)::int AS episodes,
             COALESCE(SUM(lsd.music_count), 0)::int AS music
@@ -146,22 +136,29 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
             AND lsd.day <= ${endDate.toISOString()}::date
             ${serverFilter}
             ${libraryFilter}
-          GROUP BY lsd.day::date
+          GROUP BY lsd.day::date, lsd.server_id
         ),
         with_additions AS (
-          -- Calculate additions as difference from previous day
           SELECT
             day,
+            server_id,
             movies,
             episodes,
             music,
-            GREATEST(0, movies - COALESCE(LAG(movies) OVER (ORDER BY day), movies))::int AS movie_adds,
-            GREATEST(0, episodes - COALESCE(LAG(episodes) OVER (ORDER BY day), episodes))::int AS episode_adds,
-            GREATEST(0, music - COALESCE(LAG(music) OVER (ORDER BY day), music))::int AS music_adds
-          FROM daily_totals
+            GREATEST(0,
+              movies - COALESCE(LAG(movies) OVER (PARTITION BY server_id ORDER BY day), movies)
+            )::int AS movie_adds,
+            GREATEST(0,
+              episodes - COALESCE(LAG(episodes) OVER (PARTITION BY server_id ORDER BY day), episodes)
+            )::int AS episode_adds,
+            GREATEST(0,
+              music - COALESCE(LAG(music) OVER (PARTITION BY server_id ORDER BY day), music)
+            )::int AS music_adds
+          FROM daily_by_server
         )
         SELECT
           day::text,
+          server_id,
           movies,
           episodes,
           music,
@@ -169,11 +166,12 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
           episode_adds,
           music_adds
         FROM with_additions
-        ORDER BY day ASC
+        ORDER BY day ASC, server_id
       `);
 
       const rows = result.rows as Array<{
         day: string;
+        server_id: string;
         movies: number;
         episodes: number;
         music: number;
@@ -182,7 +180,7 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
         music_adds: number;
       }>;
 
-      // Build separate arrays for each media type
+      // Build separate arrays for each media type — include serverId on every point
       const movies: GrowthDataPoint[] = [];
       const episodes: GrowthDataPoint[] = [];
       const music: GrowthDataPoint[] = [];
@@ -193,6 +191,7 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
             day: row.day,
             total: row.movies,
             additions: row.movie_adds,
+            serverId: row.server_id,
           });
         }
 
@@ -201,6 +200,7 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
             day: row.day,
             total: row.episodes,
             additions: row.episode_adds,
+            serverId: row.server_id,
           });
         }
 
@@ -209,6 +209,7 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
             day: row.day,
             total: row.music,
             additions: row.music_adds,
+            serverId: row.server_id,
           });
         }
       }
@@ -220,7 +221,6 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
         music,
       };
 
-      // Cache for 5 minutes
       await app.redis.setex(fullCacheKey, CACHE_TTL.LIBRARY_GROWTH, JSON.stringify(response));
 
       return response;

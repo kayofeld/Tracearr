@@ -33,8 +33,12 @@ export function LibraryEmptyState({ onComplete }: LibraryEmptyStateProps) {
   const [isStartingBackfill, setIsStartingBackfill] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState<MaintenanceJobProgress | null>(null);
 
-  // Get library status to determine which state to show
-  const status = useLibraryStatus(selectedServerId);
+  // Get library status to determine which state to show (single-server; wraps into array for hook)
+  const statusResult = useLibraryStatus(selectedServerId ? [selectedServerId] : []);
+  const status = {
+    isLoading: statusResult.isLoading,
+    data: selectedServerId ? statusResult.byServer.get(selectedServerId)?.data : undefined,
+  };
 
   // Listen for maintenance progress via WebSocket
   const { socket } = useSocket();

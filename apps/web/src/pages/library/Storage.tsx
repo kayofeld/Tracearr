@@ -31,8 +31,12 @@ export function LibraryStorage() {
   const { selectedServerId, servers } = useServer();
   const { value: timeRange, setValue: setTimeRange } = useTimeRange();
 
-  // Check library status first
-  const status = useLibraryStatus(selectedServerId);
+  // Check library status first (single-server context; wraps id into array for hook)
+  const statusResult = useLibraryStatus(selectedServerId ? [selectedServerId] : []);
+  const status = {
+    isLoading: statusResult.isLoading,
+    data: selectedServerId ? statusResult.byServer.get(selectedServerId)?.data : undefined,
+  };
 
   // Pagination state for tables
   const [duplicatesPage, _setDuplicatesPage] = useState(1);

@@ -932,6 +932,7 @@ export const showsQuerySchema = z
 // Library stats query schema
 export const libraryStatsQuerySchema = z.object({
   serverId: z.uuid().optional(),
+  serverIds: serverIdsQuerySchema,
   libraryId: z.uuid().optional(),
   timezone: timezoneSchema,
 });
@@ -939,6 +940,7 @@ export const libraryStatsQuerySchema = z.object({
 // Library growth query schema (time-series)
 export const libraryGrowthQuerySchema = z.object({
   serverId: z.uuid().optional(),
+  serverIds: serverIdsQuerySchema,
   libraryId: z.uuid().optional(),
   period: z.enum(['7d', '30d', '90d', '1y', 'all']).default('30d'),
   timezone: timezoneSchema,

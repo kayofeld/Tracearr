@@ -23,8 +23,12 @@ export function LibraryQuality() {
   const { value: timeRange, setValue: setTimeRange } = useTimeRange();
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all');
 
-  // Check library status first
-  const status = useLibraryStatus(selectedServerId);
+  // Check library status first (single-server context; wraps id into array for hook)
+  const statusResult = useLibraryStatus(selectedServerId ? [selectedServerId] : []);
+  const status = {
+    isLoading: statusResult.isLoading,
+    data: selectedServerId ? statusResult.byServer.get(selectedServerId)?.data : undefined,
+  };
 
   // Map TimeRangePicker periods to API format
   const apiPeriod = useMemo(() => {

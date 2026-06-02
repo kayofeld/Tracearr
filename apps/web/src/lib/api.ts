@@ -1118,16 +1118,24 @@ class ApiClient {
 
   // Library statistics - data fetching for library analytics pages
   library = {
-    stats: (serverId?: string, libraryId?: string) => {
+    stats: (serverIds?: string[], libraryId?: string) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       if (libraryId) params.set('libraryId', libraryId);
       params.set('timezone', getBrowserTimezone());
       return this.request<LibraryStatsResponse>(`/library/stats?${params.toString()}`);
     },
-    growth: (serverId?: string, libraryId?: string, period: string = '30d') => {
+    growth: (serverIds?: string[], libraryId?: string, period: string = '30d') => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       if (libraryId) params.set('libraryId', libraryId);
       params.set('period', period);
       params.set('timezone', getBrowserTimezone());

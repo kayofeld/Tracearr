@@ -1,11 +1,17 @@
 /**
  * Library Stats Route
  *
- * GET /stats - Current library statistics from latest snapshots
+ * GET /stats - Current library statistics from library_items
  *
- * Uses library_snapshots for consistency with growth charts. Snapshots already
- * filter out invalid items (missing episodes with no file size), ensuring
- * accurate counts that match the graph data.
+ * Inventory KPIs (totalItems, movieCount, showCount, episodeCount, itemsAdded) are
+ * COUNT(DISTINCT matchKey) — the COALESCE(imdb→tmdb→tvdb→title) key — so the same
+ * title on two servers counts once, not twice.
+ *
+ * Total storage is a plain SUM(file_size) because bytes on disk are physical: the
+ * same film stored on two servers occupies two files.
+ *
+ * byServer contains per-server raw counts (not deduped) so the frontend can display
+ * server-level breakdowns without a second request.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -15,9 +21,12 @@ import {
   CACHE_TTL,
   libraryStatsQuerySchema,
   type LibraryStatsQueryInput,
+  type LibraryStatsServerKpis,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { validateServerAccess } from '../../utils/serverFiltering.js';
+import { libraryItems } from '../../db/schema.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
+import { buildExternalIdMatchKey } from '../../services/library/buildExternalIdMatchKey.js';
 import { buildLibraryCacheKey } from './utils.js';
 
 /** Library stats response shape */
@@ -34,14 +43,15 @@ interface LibraryStatsResponse {
     countSd: number;
   };
   asOf: string | null;
+  byServer?: Record<string, LibraryStatsServerKpis>;
 }
 
 export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
   /**
    * GET /stats - Current library statistics
    *
-   * Returns aggregated library statistics from the latest day's data.
-   * Supports filtering by serverId and libraryId.
+   * Returns aggregated library statistics deduped by external ID match key.
+   * Supports filtering by serverId / serverIds and libraryId.
    */
   app.get<{ Querystring: LibraryStatsQueryInput }>(
     '/stats',
@@ -52,23 +62,22 @@ export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
         return reply.badRequest('Invalid query parameters');
       }
 
-      const { serverId, libraryId, timezone } = query.data;
+      const { serverId, serverIds, libraryId, timezone } = query.data;
       const authUser = request.user;
       const tz = timezone ?? 'UTC';
 
-      // Validate server access if specific server requested
-      if (serverId) {
-        const error = validateServerAccess(authUser, serverId);
-        if (error) {
-          return reply.forbidden(error);
-        }
-      }
+      const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+      const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
 
-      // Build cache key with all varying params
-      const cacheKey = buildLibraryCacheKey(REDIS_KEYS.LIBRARY_STATS, serverId, libraryId, tz);
+      // Optional library filter
+      const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
 
-      // Try cache first
-      const cached = await app.redis.get(cacheKey);
+      // Build cache key — include sorted server IDs so order doesn't cause misses
+      const serverCacheKey = resolvedIds !== undefined ? [...resolvedIds].sort().join(',') : 'all';
+      const cacheKey = buildLibraryCacheKey(REDIS_KEYS.LIBRARY_STATS, serverCacheKey, tz);
+      const fullCacheKey = libraryId ? `${cacheKey}:${libraryId}` : cacheKey;
+
+      const cached = await app.redis.get(fullCacheKey);
       if (cached) {
         try {
           return JSON.parse(cached) as LibraryStatsResponse;
@@ -77,53 +86,28 @@ export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
         }
       }
 
-      // Build server filter for library_snapshots table
-      const serverFilter = serverId
-        ? sql`AND ls.server_id = ${serverId}::uuid`
-        : authUser.serverIds?.length
-          ? sql`AND ls.server_id IN (${sql.join(
-              authUser.serverIds.map((id: string) => sql`${id}::uuid`),
-              sql`, `
-            )})`
-          : sql``;
+      const matchKey = buildExternalIdMatchKey(libraryItems);
 
-      // Optional library filter
-      const libraryFilter = libraryId ? sql`AND ls.library_id = ${libraryId}` : sql``;
-
-      // Query latest snapshot per library, then aggregate across all matching libraries.
-      // This ensures stats match the graph data (both use snapshots which filter out
-      // invalid items like missing episodes with no file size). Fixes #240.
+      // Deduped inventory counts via COUNT(DISTINCT matchKey).
+      // Items with no external ID fall back to a normalised title key so they still
+      // dedupe across servers when the title is identical.
+      // Storage is SUM — physical bytes are never deduped.
       const result = await db.execute(sql`
-        WITH latest_snapshots AS (
-          SELECT DISTINCT ON (ls.server_id, ls.library_id)
-            ls.item_count,
-            ls.total_size,
-            ls.movie_count,
-            ls.episode_count,
-            ls.show_count,
-            ls.count_4k,
-            ls.count_1080p,
-            ls.count_720p,
-            ls.count_sd,
-            ls.snapshot_time
-          FROM library_snapshots ls
-          WHERE 1=1
-            ${serverFilter}
-            ${libraryFilter}
-          ORDER BY ls.server_id, ls.library_id, ls.snapshot_time DESC
-        )
         SELECT
-          COALESCE(SUM(item_count), 0)::int AS total_items,
-          COALESCE(SUM(total_size), 0)::bigint AS total_size_bytes,
-          COALESCE(SUM(movie_count), 0)::int AS movie_count,
-          COALESCE(SUM(episode_count), 0)::int AS episode_count,
-          COALESCE(SUM(show_count), 0)::int AS show_count,
-          COALESCE(SUM(count_4k), 0)::int AS count_4k,
-          COALESCE(SUM(count_1080p), 0)::int AS count_1080p,
-          COALESCE(SUM(count_720p), 0)::int AS count_720p,
-          COALESCE(SUM(count_sd), 0)::int AS count_sd,
-          MAX(snapshot_time) AS as_of
-        FROM latest_snapshots
+          COUNT(DISTINCT CASE WHEN li.file_size > 0 OR li.media_type IN ('show', 'season') THEN ${matchKey} END)::int AS total_items,
+          COALESCE(SUM(COALESCE(li.file_size, 0)), 0)::bigint AS total_size_bytes,
+          COUNT(DISTINCT CASE WHEN li.media_type = 'movie' THEN ${matchKey} END)::int AS movie_count,
+          COUNT(DISTINCT CASE WHEN li.media_type = 'episode' THEN ${matchKey} END)::int AS episode_count,
+          COUNT(DISTINCT CASE WHEN li.media_type = 'show' THEN ${matchKey} END)::int AS show_count,
+          COUNT(CASE WHEN li.video_resolution = '4k' THEN 1 END)::int AS count_4k,
+          COUNT(CASE WHEN li.video_resolution = '1080p' THEN 1 END)::int AS count_1080p,
+          COUNT(CASE WHEN li.video_resolution = '720p' THEN 1 END)::int AS count_720p,
+          COUNT(CASE WHEN li.video_resolution = 'sd' THEN 1 END)::int AS count_sd,
+          MAX(li.updated_at)::text AS as_of
+        FROM library_items li
+        WHERE 1=1
+          ${serverFilter}
+          ${libraryFilter}
       `);
 
       const row = result.rows[0] as
@@ -141,6 +125,41 @@ export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
           }
         | undefined;
 
+      // Per-server raw (non-deduped) counts so the frontend can show server breakdowns.
+      // Storage stays as SUM per server — still physical.
+      const perServerResult = await db.execute(sql`
+        SELECT
+          li.server_id,
+          COUNT(DISTINCT CASE WHEN li.file_size > 0 OR li.media_type IN ('show', 'season') THEN ${matchKey} END)::int AS total_items,
+          COALESCE(SUM(COALESCE(li.file_size, 0)), 0)::bigint AS total_size_bytes,
+          COUNT(DISTINCT CASE WHEN li.media_type = 'movie' THEN ${matchKey} END)::int AS movie_count,
+          COUNT(DISTINCT CASE WHEN li.media_type = 'episode' THEN ${matchKey} END)::int AS episode_count,
+          COUNT(DISTINCT CASE WHEN li.media_type = 'show' THEN ${matchKey} END)::int AS show_count
+        FROM library_items li
+        WHERE 1=1
+          ${serverFilter}
+          ${libraryFilter}
+        GROUP BY li.server_id
+      `);
+
+      const byServer: Record<string, LibraryStatsServerKpis> = {};
+      for (const r of perServerResult.rows as {
+        server_id: string;
+        total_items: number;
+        total_size_bytes: string;
+        movie_count: number;
+        episode_count: number;
+        show_count: number;
+      }[]) {
+        byServer[r.server_id] = {
+          totalItems: r.total_items,
+          totalSizeBytes: r.total_size_bytes,
+          movieCount: r.movie_count,
+          episodeCount: r.episode_count,
+          showCount: r.show_count,
+        };
+      }
+
       const stats: LibraryStatsResponse = {
         totalItems: row?.total_items ?? 0,
         totalSizeBytes: row?.total_size_bytes ?? '0',
@@ -154,10 +173,10 @@ export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
           countSd: row?.count_sd ?? 0,
         },
         asOf: row?.as_of ?? null,
+        byServer: Object.keys(byServer).length > 0 ? byServer : undefined,
       };
 
-      // Cache for 5 minutes
-      await app.redis.setex(cacheKey, CACHE_TTL.LIBRARY_STATS, JSON.stringify(stats));
+      await app.redis.setex(fullCacheKey, CACHE_TTL.LIBRARY_STATS, JSON.stringify(stats));
 
       return stats;
     }

@@ -216,6 +216,7 @@ export type {
   BandwidthSummaryServerKpis,
   BandwidthSummary,
   // Library statistics
+  LibraryStatsServerKpis,
   LibraryStatsResponse,
   GrowthDataPoint,
   LibraryGrowthResponse,
