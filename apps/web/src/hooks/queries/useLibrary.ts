@@ -72,13 +72,15 @@ export function useLibraryGrowth(
 export function useLibraryQuality(
   serverId?: string | null,
   period: string = '30d',
-  mediaType: 'all' | 'movies' | 'shows' = 'all'
+  mediaType: 'all' | 'movies' | 'shows' = 'all',
+  enabled: boolean = true
 ) {
   const timezone = getBrowserTimezone();
   return useQuery<LibraryQualityResponse>({
     queryKey: ['library', 'quality', serverId, period, mediaType, timezone],
     queryFn: () => api.library.quality(serverId ?? undefined, period, mediaType),
     staleTime: LIBRARY_STALE_TIME,
+    enabled,
   });
 }
 

@@ -11,24 +11,48 @@ import {
   ResolutionDistributionSection,
 } from '@/components/library';
 import { QualityTimelineChart } from '@/components/charts';
+import { PerServerCardGrid } from '@/components/server';
 import { useLibraryQuality, useLibraryStatus } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
+import type { Server } from '@tracearr/shared';
 
 type MediaTypeFilter = 'all' | 'movies' | 'shows';
 
+/**
+ * Per-server quality evolution card rendered inside PerServerCardGrid.
+ * Fetches its own data so loading is independent per server.
+ */
+function ServerQualityEvolutionCard({
+  server,
+  apiPeriod,
+  mediaType,
+  timeRangePeriod,
+}: {
+  server: Server;
+  apiPeriod: string;
+  mediaType: MediaTypeFilter;
+  timeRangePeriod: string;
+}) {
+  const quality = useLibraryQuality(server.id, apiPeriod, mediaType);
+
+  return (
+    <QualityTimelineChart
+      data={quality.data}
+      isLoading={quality.isLoading}
+      height={300}
+      period={timeRangePeriod}
+    />
+  );
+}
+
 export function LibraryQuality() {
   const { t } = useTranslation(['pages', 'common']);
-  const { selectedServerId } = useServer();
+  const { selectedServers, isMultiServer, selectedServerIds } = useServer();
+  // When single-server, the one selected ID drives the quality/status hooks
+  const singleServerId = !isMultiServer ? (selectedServerIds[0] ?? null) : null;
   const { value: timeRange, setValue: setTimeRange } = useTimeRange();
   const [mediaType, setMediaType] = useState<MediaTypeFilter>('all');
-
-  // Check library status first (single-server context; wraps id into array for hook)
-  const statusResult = useLibraryStatus(selectedServerId ? [selectedServerId] : []);
-  const status = {
-    isLoading: statusResult.isLoading,
-    data: selectedServerId ? statusResult.byServer.get(selectedServerId)?.data : undefined,
-  };
 
   // Map TimeRangePicker periods to API format
   const apiPeriod = useMemo(() => {
@@ -46,7 +70,16 @@ export function LibraryQuality() {
     }
   }, [timeRange.period]);
 
-  const quality = useLibraryQuality(selectedServerId ?? undefined, apiPeriod, mediaType);
+  const serverIds = useMemo(() => selectedServers.map((s) => s.id), [selectedServers]);
+  const statusResult = useLibraryStatus(serverIds);
+
+  // Single-server quality fetch (only used for single-server error state + chart)
+  const singleQuality = useLibraryQuality(
+    singleServerId ?? undefined,
+    apiPeriod,
+    mediaType,
+    !isMultiServer
+  );
 
   // Header component (used in all states)
   const header = (
@@ -56,29 +89,49 @@ export function LibraryQuality() {
     </div>
   );
 
-  // Show error state with retry
-  if (quality.isError) {
+  // Show error state for single-server only; multi-server cards handle errors independently
+  if (!isMultiServer && singleQuality.isError) {
     return (
       <div className="space-y-6">
         {header}
         <ErrorState
           title={t('library.quality.failedToLoad')}
-          message={quality.error?.message ?? t('library.quality.failedToLoadDesc')}
-          onRetry={quality.refetch}
+          message={singleQuality.error?.message ?? t('library.quality.failedToLoadDesc')}
+          onRetry={singleQuality.refetch}
         />
       </div>
     );
   }
 
-  // Show empty state if library not synced or needs backfill
-  const needsSetup =
-    !status.isLoading &&
-    (!status.data?.isSynced || status.data?.needsBackfill || status.data?.isBackfillRunning);
+  // Gate on empty/setup state:
+  // - Single-server: same as before — check the one server.
+  // - Multi-server: only show page-level empty state if EVERY selected server needs setup.
+  const needsSetup = (() => {
+    if (isMultiServer) {
+      // All servers need setup → show page-level empty state
+      return (
+        serverIds.length > 0 &&
+        serverIds.every((id) => {
+          const entry = statusResult.byServer.get(id);
+          if (!entry || entry.isLoading) return false;
+          const d = entry.data;
+          return !d?.isSynced || d?.needsBackfill || d?.isBackfillRunning;
+        })
+      );
+    }
+    if (singleServerId) {
+      const entry = statusResult.byServer.get(singleServerId);
+      const d = entry?.data;
+      return !statusResult.isLoading && (!d?.isSynced || d?.needsBackfill || d?.isBackfillRunning);
+    }
+    return false;
+  })();
+
   if (needsSetup) {
     return (
       <div className="space-y-6">
         {header}
-        <LibraryEmptyState onComplete={quality.refetch} />
+        <LibraryEmptyState onComplete={singleQuality.refetch} />
       </div>
     );
   }
@@ -87,7 +140,7 @@ export function LibraryQuality() {
     <div className="space-y-6">
       {header}
 
-      {/* Quality Evolution Chart (full width) */}
+      {/* Quality Evolution Chart — page-level media-type tabs + time range apply to all cards */}
       <Card>
         <CardHeader className="pb-2">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -115,20 +168,42 @@ export function LibraryQuality() {
           </div>
         </CardHeader>
         <CardContent>
-          <QualityTimelineChart
-            data={quality.data}
-            isLoading={quality.isLoading}
-            height={300}
-            period={timeRange.period}
-          />
+          {isMultiServer ? (
+            <PerServerCardGrid
+              servers={selectedServers}
+              renderServer={(server) => (
+                <ServerQualityEvolutionCard
+                  server={server}
+                  apiPeriod={apiPeriod}
+                  mediaType={mediaType}
+                  timeRangePeriod={timeRange.period}
+                />
+              )}
+            />
+          ) : (
+            <QualityTimelineChart
+              data={singleQuality.data}
+              isLoading={singleQuality.isLoading}
+              height={300}
+              period={timeRange.period}
+            />
+          )}
         </CardContent>
       </Card>
 
       {/* Resolution Distribution - Movies vs TV */}
-      <ResolutionDistributionSection serverId={selectedServerId} />
+      <ResolutionDistributionSection
+        serverId={singleServerId}
+        selectedServers={isMultiServer ? selectedServers : undefined}
+        isMultiServer={isMultiServer}
+      />
 
       {/* Codec Distribution - Full width with tabs */}
-      <CodecDistributionSection serverId={selectedServerId} />
+      <CodecDistributionSection
+        serverId={singleServerId}
+        selectedServers={isMultiServer ? selectedServers : undefined}
+        isMultiServer={isMultiServer}
+      />
     </div>
   );
 }

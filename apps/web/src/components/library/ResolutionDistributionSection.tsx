@@ -5,11 +5,15 @@ import { HighchartsReact } from 'highcharts-react-official';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/library';
+import { PerServerCardGrid } from '@/components/server';
 import { useLibraryResolution } from '@/hooks/queries';
+import type { Server } from '@tracearr/shared';
 import type { ResolutionBreakdown } from '@tracearr/shared';
 
 interface ResolutionDistributionSectionProps {
   serverId?: string | null;
+  selectedServers?: Server[];
+  isMultiServer?: boolean;
 }
 
 const QUALITY_COLORS = {
@@ -180,13 +184,57 @@ function ResolutionDonut({
   );
 }
 
-/**
- * Resolution Distribution Section
- *
- * Displays resolution breakdowns (4K, 1080p, 720p, SD) for Movies vs TV Shows
- * using two side-by-side cards with donut charts.
- */
-export function ResolutionDistributionSection({ serverId }: ResolutionDistributionSectionProps) {
+/** Per-server resolution content rendered inside PerServerCardGrid (no outer Card). */
+function ServerResolutionCard({ serverId }: { serverId: string }) {
+  const resolution = useLibraryResolution(serverId);
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Film className="text-muted-foreground h-4 w-4" />
+            <h4 className="text-sm font-medium">Movies</h4>
+          </div>
+          {resolution.data?.movies?.total !== undefined && (
+            <span className="text-muted-foreground text-sm">
+              {resolution.data.movies.total.toLocaleString()} items
+            </span>
+          )}
+        </div>
+        <ResolutionDonut
+          data={resolution.data?.movies}
+          isLoading={resolution.isLoading}
+          title="Movies"
+          showHeader={false}
+        />
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Tv className="text-muted-foreground h-4 w-4" />
+            <h4 className="text-sm font-medium">TV Shows</h4>
+          </div>
+          {resolution.data?.tv?.total !== undefined && (
+            <span className="text-muted-foreground text-sm">
+              {resolution.data.tv.total.toLocaleString()} items
+            </span>
+          )}
+        </div>
+        <ResolutionDonut
+          data={resolution.data?.tv}
+          isLoading={resolution.isLoading}
+          title="TV Shows"
+          showHeader={false}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Single-server layout — two side-by-side cards as the original design. */
+function SingleServerResolutionSection({ serverId }: { serverId?: string | null }) {
   const resolution = useLibraryResolution(serverId);
 
   return (
@@ -242,4 +290,27 @@ export function ResolutionDistributionSection({ serverId }: ResolutionDistributi
       </Card>
     </div>
   );
+}
+
+/**
+ * Resolution Distribution Section
+ *
+ * Single-server: two side-by-side cards (Movies + TV) as today.
+ * Multi-server: one PerServerCardGrid card per server, each containing Movies + TV donuts.
+ */
+export function ResolutionDistributionSection({
+  serverId,
+  selectedServers,
+  isMultiServer,
+}: ResolutionDistributionSectionProps) {
+  if (isMultiServer && selectedServers && selectedServers.length > 0) {
+    return (
+      <PerServerCardGrid
+        servers={selectedServers}
+        renderServer={(server) => <ServerResolutionCard serverId={server.id} />}
+      />
+    );
+  }
+
+  return <SingleServerResolutionSection serverId={serverId} />;
 }
