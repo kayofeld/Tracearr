@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
 import { StreamMap } from '@/components/map';
+import { ServerLegend } from '@/components/server';
 import {
   Select,
   SelectContent,
@@ -15,13 +16,15 @@ import { X, Flame, CircleDot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLocationStats } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
+import { useServerColorMap } from '@/hooks/useServerColorMap';
 import { useTimeRange } from '@/hooks/useTimeRange';
 
 export function Map() {
   const { t } = useTranslation(['pages', 'common']);
   const [searchParams, setSearchParams] = useSearchParams();
   const { value: timeRange, setValue: setTimeRange } = useTimeRange();
-  const { selectedServerId } = useServer();
+  const { selectedServerIds, selectedServers, isMultiServer } = useServer();
+  const serverColorMap = useServerColorMap();
 
   const MEDIA_TYPES = useMemo(
     () =>
@@ -33,7 +36,7 @@ export function Map() {
     [t]
   );
 
-  // Parse filters from URL, use selected server from context
+  // Parse filters from URL, use selected servers from context
   const filters = useMemo(() => {
     const serverUserId = searchParams.get('serverUserId');
     const mediaType = searchParams.get('mediaType') as 'movie' | 'episode' | 'track' | null;
@@ -41,11 +44,10 @@ export function Map() {
 
     return {
       serverUserId: serverUserId || undefined,
-      serverId: selectedServerId || undefined,
       mediaType: mediaType || undefined,
       viewMode,
     };
-  }, [searchParams, selectedServerId]);
+  }, [searchParams]);
 
   // Build API params including time range
   const apiParams = useMemo(
@@ -56,10 +58,10 @@ export function Map() {
         endDate: timeRange.endDate?.toISOString(),
       },
       serverUserId: filters.serverUserId,
-      serverId: filters.serverId,
+      serverIds: selectedServerIds.length ? selectedServerIds : undefined,
       mediaType: filters.mediaType,
     }),
-    [timeRange, filters]
+    [timeRange, filters, selectedServerIds]
   );
 
   const filterKey = useMemo(() => JSON.stringify(apiParams), [apiParams]);
@@ -81,6 +83,12 @@ export function Map() {
 
   // Filter MEDIA_TYPES to only show available options
   const availableMediaTypeOptions = MEDIA_TYPES.filter((m) => mediaTypes.includes(m.value));
+
+  // Server name lookup for popup breakdowns
+  const serverNameMap = useMemo(
+    () => Object.fromEntries(selectedServers.map((s) => [s.id, s.name])),
+    [selectedServers]
+  );
 
   // Update a single filter
   const setFilter = (key: string, value: string | null) => {
@@ -118,6 +126,8 @@ export function Map() {
     if (selectedMediaType) parts.push(selectedMediaType.label);
     return parts.join(' · ') || t('map.allActivity');
   }, [selectedUser, selectedMediaType, t]);
+
+  const hasData = locations.length > 0;
 
   return (
     <div className="-m-6 flex h-[calc(100vh-4rem)] flex-col">
@@ -233,7 +243,13 @@ export function Map() {
           isLoading={locationsLoading}
           viewMode={filters.viewMode}
           filterKey={filterKey}
+          serverColorMap={serverColorMap}
+          serverNameMap={serverNameMap}
+          isMultiServer={isMultiServer}
         />
+        {isMultiServer && hasData && filters.viewMode === 'circles' && (
+          <ServerLegend variant="floating" servers={selectedServers} />
+        )}
       </div>
     </div>
   );

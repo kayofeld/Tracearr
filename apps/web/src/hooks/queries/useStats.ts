@@ -38,13 +38,21 @@ export function useUserStats(timeRange?: StatsTimeRange, serverId?: string | nul
 export interface LocationStatsFilters {
   timeRange?: StatsTimeRange;
   serverUserId?: string;
-  serverId?: string;
+  serverIds?: string[];
   mediaType?: 'movie' | 'episode' | 'track';
 }
 
 export function useLocationStats(filters?: LocationStatsFilters) {
+  const serverIdsKey = filters?.serverIds?.length ? [...filters.serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'locations', filters],
+    queryKey: [
+      'stats',
+      'locations',
+      serverIdsKey,
+      filters?.serverUserId,
+      filters?.mediaType,
+      filters?.timeRange,
+    ],
     queryFn: () => api.stats.locations(filters),
     staleTime: 1000 * 60, // 1 minute
   });

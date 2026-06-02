@@ -748,6 +748,8 @@ export interface LocationStats {
   // Contextual data - populated based on filters
   users?: LocationUserInfo[]; // Top users at this location (when not filtering by userId)
   deviceCount?: number; // Unique devices from this location
+  // Per-server breakdown ordered by count DESC; servers[0] is the dominant server
+  servers?: { serverId: string; count: number }[];
 }
 
 export interface LocationStatsSummary {

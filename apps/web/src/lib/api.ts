@@ -901,7 +901,7 @@ class ApiClient {
     locations: async (params?: {
       timeRange?: StatsTimeRange;
       serverUserId?: string;
-      serverId?: string;
+      serverIds?: string[];
       mediaType?: 'movie' | 'episode' | 'track';
     }) => {
       const searchParams = new URLSearchParams();
@@ -909,7 +909,11 @@ class ApiClient {
       if (params?.timeRange?.startDate) searchParams.set('startDate', params.timeRange.startDate);
       if (params?.timeRange?.endDate) searchParams.set('endDate', params.timeRange.endDate);
       if (params?.serverUserId) searchParams.set('serverUserId', params.serverUserId);
-      if (params?.serverId) searchParams.set('serverId', params.serverId);
+      if (params?.serverIds?.length) {
+        for (const id of params.serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
       if (params?.mediaType) searchParams.set('mediaType', params.mediaType);
       const query = searchParams.toString();
       return this.request<LocationStatsResponse>(`/stats/locations${query ? `?${query}` : ''}`);

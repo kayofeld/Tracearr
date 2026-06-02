@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import type { AuthUser } from '@tracearr/shared';
 import {
+  buildMultiServerFragment,
   buildServerAccessCondition,
   buildServerFilterCondition,
   filterByServerAccess,
@@ -20,6 +21,7 @@ import {
   validateServerAccess,
 } from '../serverFiltering.js';
 import type { Column } from 'drizzle-orm';
+import { CasingCache } from 'drizzle-orm/casing';
 
 // Mock column for testing SQL condition builders
 const mockServerIdColumn = {
@@ -251,5 +253,44 @@ describe('buildServerFilterCondition', () => {
     const result = buildServerFilterCondition(ownerUser, undefined, mockServerIdColumn);
     expect(result.error).toBeNull();
     expect(result.condition).toBeUndefined(); // Owners see all
+  });
+});
+
+const _casingCache = new CasingCache();
+
+// Renders a Drizzle sql`` fragment to a parameterized SQL string for assertion
+function toSqlString(fragment: ReturnType<typeof buildMultiServerFragment>): string {
+  return fragment.toQuery({
+    casing: _casingCache,
+    escapeName: (n) => n,
+    escapeParam: () => '?',
+    escapeString: (s) => `'${s}'`,
+    inlineParams: false,
+  }).sql;
+}
+
+describe('buildMultiServerFragment', () => {
+  it('returns empty SQL for undefined (owner all-servers)', () => {
+    expect(toSqlString(buildMultiServerFragment(undefined))).toBe('');
+  });
+
+  it('returns AND false for empty array (no accessible servers)', () => {
+    expect(toSqlString(buildMultiServerFragment([]))).toBe('AND false');
+  });
+
+  it('returns AND col = ? for single server', () => {
+    expect(toSqlString(buildMultiServerFragment(['server-abc']))).toBe('AND server_id = ?');
+  });
+
+  it('returns AND col IN (?, ?) for multiple servers', () => {
+    expect(toSqlString(buildMultiServerFragment(['server-1', 'server-2']))).toBe(
+      'AND server_id IN (?, ?)'
+    );
+  });
+
+  it('respects a custom columnRef', () => {
+    expect(toSqlString(buildMultiServerFragment(['server-1'], 'su.server_id'))).toBe(
+      'AND su.server_id = ?'
+    );
   });
 });

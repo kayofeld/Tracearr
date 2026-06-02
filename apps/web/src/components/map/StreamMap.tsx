@@ -97,6 +97,9 @@ interface StreamMapProps {
   isLoading?: boolean;
   viewMode?: MapViewMode;
   filterKey?: string;
+  serverColorMap?: Map<string, string | null>;
+  serverNameMap?: Record<string, string>;
+  isMultiServer?: boolean;
 }
 
 // Heatmap configuration (gradient generated dynamically from accent color)
@@ -111,13 +114,26 @@ const HEATMAP_CONFIG = {
   maxZoom: 12,
 };
 
+// Default green used when no server color is assigned
+const DEFAULT_STROKE = 'hsl(142, 76%, 42%)';
+const DEFAULT_FILL = 'hsl(142, 76%, 55%)';
+
 interface CircleMarkersLayerProps {
   locations: LocationStats[];
   colors: { stroke: string; fill: string };
+  serverColorMap?: Map<string, string | null>;
+  serverNameMap?: Record<string, string>;
+  isMultiServer?: boolean;
 }
 
 // Circle markers layer component
-function CircleMarkersLayer({ locations, colors }: CircleMarkersLayerProps) {
+function CircleMarkersLayer({
+  locations,
+  colors,
+  serverColorMap,
+  serverNameMap,
+  isMultiServer,
+}: CircleMarkersLayerProps) {
   const maxCount = useMemo(() => Math.max(...locations.map((l) => l.count), 1), [locations]);
 
   // Calculate radius based on count (scaled logarithmically)
@@ -136,35 +152,68 @@ function CircleMarkersLayer({ locations, colors }: CircleMarkersLayerProps) {
     return minOpacity + scale * (maxOpacity - minOpacity);
   };
 
+  // Resolve marker color from the dominant server, falling back to accent colors
+  const getMarkerColors = (location: LocationStats): { stroke: string; fill: string } => {
+    if (!isMultiServer || !serverColorMap) return colors;
+    const dominantServerId = location.servers?.[0]?.serverId;
+    if (!dominantServerId) return colors;
+    const serverColor = serverColorMap.get(dominantServerId);
+    if (!serverColor) return { stroke: DEFAULT_STROKE, fill: DEFAULT_FILL };
+    return { stroke: serverColor, fill: serverColor };
+  };
+
   return (
     <>
       {locations
         .filter((l) => l.lat && l.lon)
-        .map((location, index) => (
-          <CircleMarker
-            key={`${location.lat}-${location.lon}-${index}`}
-            center={[location.lat, location.lon]}
-            radius={getRadius(location.count)}
-            pathOptions={{
-              color: colors.stroke,
-              fillColor: colors.fill,
-              fillOpacity: getOpacity(location.count),
-              weight: 1,
-            }}
-          >
-            <Popup>
-              <div className="text-sm">
-                <div className="font-semibold">
-                  {location.city ? `${location.city}, ` : ''}
-                  {location.country || 'Unknown'}
+        .map((location, index) => {
+          const markerColors = getMarkerColors(location);
+          const serverBreakdown =
+            isMultiServer && serverNameMap && (location.servers?.length ?? 0) > 1
+              ? location.servers
+              : undefined;
+
+          return (
+            <CircleMarker
+              key={`${location.lat}-${location.lon}-${index}`}
+              center={[location.lat, location.lon]}
+              radius={getRadius(location.count)}
+              pathOptions={{
+                color: markerColors.stroke,
+                fillColor: markerColors.fill,
+                fillOpacity: getOpacity(location.count),
+                weight: 1,
+              }}
+            >
+              <Popup>
+                <div className="text-sm">
+                  <div className="font-semibold">
+                    {location.city ? `${location.city}, ` : ''}
+                    {location.country || 'Unknown'}
+                  </div>
+                  <div className="text-muted-foreground">
+                    {location.count.toLocaleString()} stream{location.count !== 1 ? 's' : ''}
+                  </div>
+                  {serverBreakdown && serverNameMap && (
+                    <div className="mt-1.5 space-y-0.5 border-t pt-1.5">
+                      {serverBreakdown.map((entry) => (
+                        <div
+                          key={entry.serverId}
+                          className="flex items-center justify-between gap-3"
+                        >
+                          <span className="text-muted-foreground">
+                            {serverNameMap[entry.serverId] ?? entry.serverId}
+                          </span>
+                          <span className="tabular-nums">{entry.count.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="text-muted-foreground">
-                  {location.count.toLocaleString()} stream{location.count !== 1 ? 's' : ''}
-                </div>
-              </div>
-            </Popup>
-          </CircleMarker>
-        ))}
+              </Popup>
+            </CircleMarker>
+          );
+        })}
     </>
   );
 }
@@ -244,6 +293,9 @@ export function StreamMap({
   isLoading,
   viewMode = 'heatmap',
   filterKey,
+  serverColorMap,
+  serverNameMap,
+  isMultiServer,
 }: StreamMapProps) {
   const hasData = locations.length > 0;
   const { theme, accentHue } = useTheme();
@@ -304,7 +356,13 @@ export function StreamMap({
           />
         )}
         {hasData && viewMode === 'circles' && (
-          <CircleMarkersLayer locations={locations} colors={circleColors} />
+          <CircleMarkersLayer
+            locations={locations}
+            colors={circleColors}
+            serverColorMap={serverColorMap}
+            serverNameMap={serverNameMap}
+            isMultiServer={isMultiServer}
+          />
         )}
       </MapContainer>
 

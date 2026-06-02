@@ -616,6 +616,7 @@ export const locationStatsQuerySchema = z
     endDate: z.iso.datetime().optional(),
     serverUserId: uuidSchema.optional(),
     serverId: uuidSchema.optional(),
+    serverIds: serverIdsQuerySchema,
     mediaType: mediaTypeSchema.optional(),
   })
   .refine(dateValidationRefinements.customPeriodRequiresDates.refinement, {
