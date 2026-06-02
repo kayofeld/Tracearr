@@ -171,7 +171,7 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
             SUM(server_count)::int AS total_count,
             JSON_AGG(
               jsonb_build_object('serverId', server_id, 'count', server_count)
-              ORDER BY server_count DESC
+              ORDER BY server_count DESC, server_id
             ) AS servers
           FROM per_server
           GROUP BY geo_city, geo_region, geo_country, geo_lat, geo_lon
