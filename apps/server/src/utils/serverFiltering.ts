@@ -8,6 +8,7 @@
 
 import { sql, inArray, eq, type SQL, type Column } from 'drizzle-orm';
 import type { AuthUser } from '@tracearr/shared';
+import { ForbiddenError } from './errors.js';
 
 /**
  * Build a SQL condition for filtering by server access.
@@ -193,12 +194,26 @@ export function buildServerFilterFragment(
  * Returns:
  * - undefined: owner with no filter (all servers, skip WHERE clause)
  * - string[]: specific servers to filter by (may be empty if no access)
+ *
+ * By default (strict) this is the single enforcement point for explicit server access:
+ * a non-owner explicitly requesting a single serverId they cannot access gets a
+ * ForbiddenError (403), so routes no longer need their own validateServerAccess guard.
+ * A serverIds[] array (multi-server fan-out) is always silently intersected, never rejected.
+ *
+ * Pass `{ strict: false }` for endpoints that intentionally return empty results instead
+ * of 403 for an inaccessible serverId (e.g. dashboard/locations/sessions/violations, which
+ * behaved that way before multi-server support).
  */
 export function resolveServerIds(
   authUser: AuthUser,
   serverId: string | undefined,
-  serverIds: string[] | undefined
+  serverIds: string[] | undefined,
+  { strict = true }: { strict?: boolean } = {}
 ): string[] | undefined {
+  if (strict && serverId && !hasServerAccess(authUser, serverId)) {
+    throw new ForbiddenError('You do not have access to this server');
+  }
+
   // serverIds takes precedence over serverId
   const requested = serverIds ?? (serverId ? [serverId] : undefined);
 

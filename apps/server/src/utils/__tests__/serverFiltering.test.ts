@@ -20,6 +20,7 @@ import {
   resolveServerIds,
   validateServerAccess,
 } from '../serverFiltering.js';
+import { ForbiddenError } from '../errors.js';
 import type { Column } from 'drizzle-orm';
 import { CasingCache } from 'drizzle-orm/casing';
 
@@ -211,8 +212,16 @@ describe('resolveServerIds', () => {
     expect(resolveServerIds(memberUser, undefined, ['server-d'])).toEqual([]);
   });
 
-  it('validates single serverId access for member', () => {
-    expect(resolveServerIds(memberUser, 'server-d', undefined)).toEqual([]);
+  it('returns the single serverId when member has access', () => {
+    expect(resolveServerIds(memberUser, 'server-1', undefined)).toEqual(['server-1']);
+  });
+
+  it('throws when member requests an inaccessible single serverId', () => {
+    expect(() => resolveServerIds(memberUser, 'server-d', undefined)).toThrow(ForbiddenError);
+  });
+
+  it('returns an empty array instead of throwing when strict is false', () => {
+    expect(resolveServerIds(memberUser, 'server-d', undefined, { strict: false })).toEqual([]);
   });
 });
 

@@ -82,7 +82,7 @@ function buildHistoryFilterConditions(
   const conditions: ReturnType<typeof sql>[] = [];
 
   // Resolve effective server IDs (handles owner bypass + access intersection)
-  const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds);
+  const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds, { strict: false });
   if (resolvedIds?.length === 0) {
     return null; // No accessible servers after intersection
   }
@@ -915,7 +915,9 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     // Multi-server: dedupe by external-id match key (imdb->tmdb->tvdb->normalized-title) via a
     // library_items join so the same title on two servers counts once; unmatched sessions fall
     // back to a normalized title key from the session's media_title.
-    const resolvedIds = resolveServerIds(authUser, query.data.serverId, query.data.serverIds);
+    const resolvedIds = resolveServerIds(authUser, query.data.serverId, query.data.serverIds, {
+      strict: false,
+    });
     const singleServer = resolvedIds?.length === 1;
     const uniqueContentExpr = singleServer
       ? sql`COUNT(DISTINCT s.media_title)`
@@ -990,7 +992,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     const authUser = request.user;
 
     // Resolve effective server IDs (handles owner bypass + access intersection)
-    const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds);
+    const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds, { strict: false });
     if (resolvedIds?.length === 0) {
       // No accessible servers - return empty filter options
       if (includeAllCountries) {
@@ -1253,7 +1255,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     const { serverId: legacyServerId, serverIds: rawServerIds } = query.success
       ? query.data
       : { serverId: undefined, serverIds: undefined };
-    const resolvedIds = resolveServerIds(authUser, legacyServerId, rawServerIds);
+    const resolvedIds = resolveServerIds(authUser, legacyServerId, rawServerIds, { strict: false });
 
     // Get active sessions from atomic SET-based cache
     const cacheService = getCacheService();

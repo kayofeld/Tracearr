@@ -28,7 +28,7 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
     const authUser = request.user;
     const tz = timezone ?? 'UTC';
 
-    const resolvedIds = resolveServerIds(authUser, legacyServerId, rawServerIds);
+    const resolvedIds = resolveServerIds(authUser, legacyServerId, rawServerIds, { strict: false });
 
     return getDashboardStats({
       serverIds: resolvedIds,

@@ -610,7 +610,7 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
     const authUser = request.user;
     const offset = (page - 1) * pageSize;
 
-    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds, { strict: false });
 
     // Build conditions
     const conditions = [];
@@ -1026,7 +1026,8 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
       const bulkResolvedIds = resolveServerIds(
         authUser,
         body.filters.serverId,
-        body.filters.serverIds
+        body.filters.serverIds,
+        { strict: false }
       );
 
       if (bulkResolvedIds?.length === 0) {
@@ -1127,7 +1128,8 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
       const bulkResolvedIds = resolveServerIds(
         authUser,
         body.filters.serverId,
-        body.filters.serverIds
+        body.filters.serverIds,
+        { strict: false }
       );
 
       if (bulkResolvedIds?.length === 0) {

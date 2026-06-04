@@ -19,12 +19,22 @@ vi.mock('../../../db/client.js', () => ({
   },
 }));
 
-// Mock server filtering utilities
+// Mock server filtering utilities. resolveServerIds mirrors the real implementation,
+// including the ForbiddenError it throws for a non-owner's explicit unauthorized serverId.
 vi.mock('../../../utils/serverFiltering.js', async () => {
   const { sql } = await import('drizzle-orm');
+  const { ForbiddenError } = await import('../../../utils/errors.js');
   return {
-    validateServerAccess: vi.fn(),
-    buildServerFilterFragment: vi.fn(() => sql``),
+    resolveServerIds: vi.fn((authUser, serverId, serverIds) => {
+      if (serverId && authUser.role !== 'owner' && !authUser.serverIds.includes(serverId)) {
+        throw new ForbiddenError('You do not have access to this server');
+      }
+      const requested = serverIds ?? (serverId ? [serverId] : undefined);
+      if (authUser.role === 'owner') return requested ?? undefined;
+      if (!requested) return authUser.serverIds;
+      return requested.filter((id: string) => authUser.serverIds.includes(id));
+    }),
+    buildMultiServerFragment: vi.fn(() => sql``),
   };
 });
 
@@ -49,7 +59,6 @@ vi.mock('../utils.js', () => ({
 }));
 
 import { db } from '../../../db/client.js';
-import { validateServerAccess } from '../../../utils/serverFiltering.js';
 import { engagementRoutes } from '../engagement.js';
 
 /**
@@ -185,13 +194,11 @@ describe('Engagement Routes', () => {
     }
   });
 
-  describe('Server filtering (via shared buildServerFilterFragment)', () => {
+  describe('Server filtering (via shared resolveServerIds)', () => {
     describe('Schema validation security', () => {
       it('should reject malformed UUID in serverId', async () => {
         const ownerUser = createOwnerUser();
         app = await buildTestApp(ownerUser);
-
-        vi.mocked(validateServerAccess).mockReturnValue(null);
 
         // Mock db.execute to capture SQL and verify it contains "AND false"
         vi.mocked(db.execute).mockResolvedValue({ rows: [] } as never);
@@ -223,8 +230,6 @@ describe('Engagement Routes', () => {
         const validServerId = randomUUID();
         app = await buildTestApp(ownerUser);
 
-        vi.mocked(validateServerAccess).mockReturnValue(null);
-
         // Mock the 2 db.execute calls for the engagement endpoint (combined + shows)
         const mockResults = mockEngagementResults();
         vi.mocked(db.execute).mockResolvedValueOnce(mockResults[0] as never);
@@ -236,7 +241,6 @@ describe('Engagement Routes', () => {
         });
 
         expect(response.statusCode).toBe(200);
-        expect(validateServerAccess).toHaveBeenCalledWith(ownerUser, validServerId);
       });
     });
 
@@ -402,8 +406,6 @@ describe('Engagement Routes', () => {
       const unauthorizedServer = randomUUID();
       const viewerUser = createViewerUser([authorizedServer]);
       app = await buildTestApp(viewerUser);
-
-      vi.mocked(validateServerAccess).mockReturnValue('You do not have access to this server');
 
       const response = await app.inject({
         method: 'GET',
@@ -601,8 +603,6 @@ describe('Engagement Routes', () => {
       const unauthorizedServer = randomUUID();
       const viewerUser = createViewerUser([authorizedServer]);
       app = await buildTestApp(viewerUser);
-
-      vi.mocked(validateServerAccess).mockReturnValue('You do not have access to this server');
 
       const response = await app.inject({
         method: 'GET',

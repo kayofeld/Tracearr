@@ -50,7 +50,7 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
     const dateRange = resolveDateRange(period, startDate, endDate);
     const authUser = request.user;
 
-    const resolvedIds = resolveServerIds(authUser, legacyServerId, rawServerIds);
+    const resolvedIds = resolveServerIds(authUser, legacyServerId, rawServerIds, { strict: false });
     const serverFragment = buildMultiServerFragment(resolvedIds, 's.server_id');
 
     // Build WHERE conditions for main query (all qualified with 's.' for sessions table)
