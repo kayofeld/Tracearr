@@ -104,6 +104,7 @@ export interface FieldDefinition {
   hasWindowHours?: boolean; // For velocity-type fields
   hasExcludeSameDevice?: boolean; // For cross-session comparison fields
   hasExcludeSameIp?: boolean; // For detecting different-IP concurrent streams
+  hasCountDeviceTypes?: boolean; // For limiting which device types are counted
   hidden?: boolean; // Hide from UI (e.g., not yet implemented in backend)
 }
 
@@ -132,6 +133,7 @@ export const FIELD_DEFINITIONS: Record<ConditionField, FieldDefinition> = {
     step: 1,
     hasExcludeSameDevice: true,
     hasExcludeSameIp: true,
+    hasCountDeviceTypes: true,
   },
   active_session_distance_km: {
     field: 'active_session_distance_km',

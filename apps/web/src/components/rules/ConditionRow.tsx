@@ -1,5 +1,11 @@
 import { ChevronsUpDown, X } from 'lucide-react';
-import type { Condition, ConditionField, Operator, RulesFilterOptions } from '@tracearr/shared';
+import type {
+  Condition,
+  ConditionField,
+  DeviceType,
+  Operator,
+  RulesFilterOptions,
+} from '@tracearr/shared';
 import { fromMetricDistance, toMetricDistance, formatConditionFieldValue } from '@tracearr/shared';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -20,6 +26,7 @@ import {
 import {
   FIELD_DEFINITIONS,
   CATEGORY_LABELS,
+  DEVICE_TYPE_OPTIONS,
   OPERATOR_LABELS,
   getFieldsByCategory,
   getDefaultOperatorForField,
@@ -118,6 +125,15 @@ export function ConditionRow({
     onChange({
       ...condition,
       params: { ...condition.params, exclude_same_ip: exclude },
+    });
+  };
+
+  const handleCountDeviceTypesChange = (types: string[]) => {
+    const { count_device_types: _removed, ...rest } = condition.params ?? {};
+    onChange({
+      ...condition,
+      params:
+        types.length > 0 ? { ...rest, count_device_types: types as DeviceType[] } : { ...rest },
     });
   };
 
@@ -221,6 +237,25 @@ export function ConditionRow({
           <TooltipContent side="top" className="max-w-[240px]">
             When checked, only counts sessions from different IP addresses. Use this to detect
             account sharing while allowing same-household usage.
+          </TooltipContent>
+        </Tooltip>
+      )}
+
+      {/* Count Device Types (limit which device types count toward the threshold) */}
+      {fieldDef.hasCountDeviceTypes && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="w-[170px] shrink-0">
+              <GroupedMultiSelectInput
+                options={DEVICE_TYPE_OPTIONS}
+                value={condition.params?.count_device_types ?? []}
+                onChange={handleCountDeviceTypesChange}
+                placeholder="All device types"
+              />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[240px]">
+            Only count streams from the selected device types. Leave empty to count every device.
           </TooltipContent>
         </Tooltip>
       )}

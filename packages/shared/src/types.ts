@@ -541,6 +541,9 @@ export interface Condition {
     exclude_same_device?: boolean;
     // When true, only count sessions from different IPs.
     exclude_same_ip?: boolean;
+    // When set, only count sessions from these device types.
+    // Useful for: concurrent_streams (ignore phones/tablets when detecting sharing)
+    count_device_types?: DeviceType[];
   };
 }
 

@@ -166,9 +166,18 @@ const evaluateConcurrentStreams: ConditionEvaluator = (
   const { session, activeSessions, serverUser } = context;
   const excludeSameDevice = condition.params?.exclude_same_device ?? true;
   const excludeSameIp = condition.params?.exclude_same_ip ?? false;
+  const countDeviceTypes = condition.params?.count_device_types;
 
   // Count active sessions for this user (INCLUDING current session)
   let userActiveSessions = activeSessions.filter((s) => s.serverUserId === serverUser.id);
+
+  // When count_device_types is set, only count sessions from those device types.
+  // Unlike the exclusions below, the triggering session is NOT exempt.
+  if (countDeviceTypes?.length) {
+    userActiveSessions = userActiveSessions.filter((s) =>
+      countDeviceTypes.includes(normalizeDeviceType(s.device, s.platform))
+    );
+  }
 
   // When exclude_same_device is true, don't count OTHER sessions from the same device.
   // Keep the triggering session, but remove duplicates from same device.

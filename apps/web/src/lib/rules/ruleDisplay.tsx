@@ -28,7 +28,7 @@ import {
   Settings2,
   Pause,
 } from 'lucide-react';
-import { FIELD_DEFINITIONS } from './conditionFields';
+import { DEVICE_TYPE_OPTIONS, FIELD_DEFINITIONS } from './conditionFields';
 import { ACTION_DEFINITIONS } from './actionDefinitions';
 
 // Condition field → icon mapping
@@ -190,6 +190,13 @@ export function formatCondition(
   // exclude_same_ip defaults to false, so show when enabled
   if (condition.params?.exclude_same_ip === true) {
     paramIndicators.push('unique IPs');
+  }
+  // count_device_types defaults to all devices, so show when set
+  if (condition.params?.count_device_types?.length) {
+    const labels = condition.params.count_device_types.map(
+      (type) => DEVICE_TYPE_OPTIONS.find((opt) => opt.value === type)?.label ?? type
+    );
+    paramIndicators.push(`${labels.join('/')} only`);
   }
 
   if (paramIndicators.length > 0) {
