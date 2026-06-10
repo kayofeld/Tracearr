@@ -138,7 +138,7 @@ export function ConditionRow({
   };
 
   return (
-    <div className="flex items-start gap-2">
+    <div className="flex flex-wrap items-start gap-2">
       {/* Field Selector */}
       <Select value={condition.field} onValueChange={handleFieldChange}>
         <SelectTrigger className="w-[200px]">
