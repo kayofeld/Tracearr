@@ -15,7 +15,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { sql } from 'drizzle-orm';
+import { aliasedTable, sql } from 'drizzle-orm';
 import {
   REDIS_KEYS,
   CACHE_TTL,
@@ -160,7 +160,7 @@ export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
         const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
         const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
 
-        const matchKey = buildExternalIdMatchKey(libraryItems);
+        const matchKey = buildExternalIdMatchKey(aliasedTable(libraryItems, 'li'));
 
         const result = await db.execute(sql`
           SELECT

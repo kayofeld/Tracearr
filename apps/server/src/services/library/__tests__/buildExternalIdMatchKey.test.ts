@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { aliasedTable } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { buildExternalIdMatchKey } from '../buildExternalIdMatchKey.js';
 import { libraryItems } from '../../../db/schema.js';
@@ -56,5 +57,14 @@ describe('buildExternalIdMatchKey', () => {
   it('returns NULL instead of a literal "title:" when the title is empty/null/all-punctuation', () => {
     const text = compile();
     expect(text).toMatch(/NULLIF/i);
+  });
+
+  it('renders alias-qualified columns when given an aliased table', () => {
+    const text = compile(aliasedTable(libraryItems, 'li'));
+    expect(text).toContain('"li"."imdb_id"');
+    expect(text).toContain('"li"."tmdb_id"');
+    expect(text).toContain('"li"."tvdb_id"');
+    expect(text).toContain('"li"."title"');
+    expect(text).not.toContain('"library_items"');
   });
 });
