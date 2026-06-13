@@ -459,6 +459,50 @@ describe('CacheService', () => {
     });
   });
 
+  describe('getServerConnectionStatus / setServerConnectionStatus', () => {
+    it('should return null when no status cached', async () => {
+      const result = await cache.getServerConnectionStatus('srv-1');
+      expect(result).toBeNull();
+    });
+
+    it('should store and retrieve server connection status', async () => {
+      const status = {
+        serverId: 'srv-1',
+        serverName: 'My Jellyfin',
+        serverType: 'jellyfin' as const,
+        mode: 'realtime' as const,
+        state: 'connected' as const,
+        lastEventAt: '2024-01-01T00:00:00.000Z',
+        since: '2024-01-01T00:00:00.000Z',
+        error: null,
+      };
+
+      await cache.setServerConnectionStatus('srv-1', status);
+      const result = await cache.getServerConnectionStatus('srv-1');
+
+      expect(result).toEqual(status);
+    });
+
+    it('should use the correct TTL', async () => {
+      const status = {
+        serverId: 'srv-1',
+        serverName: 'My Emby',
+        serverType: 'emby' as const,
+        mode: 'polling' as const,
+        state: 'fallback' as const,
+        lastEventAt: null,
+        since: null,
+        error: null,
+      };
+
+      await cache.setServerConnectionStatus('srv-1', status);
+
+      // TTL should be 600 (SERVER_CONNECTION = 600)
+      const key = 'tracearr:servers:srv-1:connection';
+      expect(redis.ttls.get(key)).toBe(600);
+    });
+  });
+
   describe('invalidateCache', () => {
     it('should delete specific key', async () => {
       redis.store.set('some:key', 'value');

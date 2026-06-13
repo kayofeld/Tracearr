@@ -3,7 +3,7 @@
  * Handles caching of active sessions, dashboard stats, and other frequently accessed data
  */
 
-import type { ActiveSession, DashboardStats } from '@tracearr/shared';
+import type { ActiveSession, DashboardStats, ServerConnectionStatus } from '@tracearr/shared';
 import { CACHE_TTL, REDIS_KEYS } from '@tracearr/shared';
 import type { Redis } from 'ioredis';
 import type { PendingSessionData } from '../jobs/poller/types.js';
@@ -46,6 +46,10 @@ export interface CacheService {
   setServerHealth(serverId: string, isHealthy: boolean): Promise<void>;
   incrServerFailCount(serverId: string): Promise<number>;
   resetServerFailCount(serverId: string): Promise<void>;
+
+  // Server connection status (live runtime state, not persisted to DB)
+  getServerConnectionStatus(serverId: string): Promise<ServerConnectionStatus | null>;
+  setServerConnectionStatus(serverId: string, status: ServerConnectionStatus): Promise<void>;
 
   // Generic cache operations
   invalidateCache(key: string): Promise<void>;
@@ -416,6 +420,24 @@ export function createCacheService(redis: Redis): CacheService {
 
     async resetServerFailCount(serverId: string): Promise<void> {
       await redis.del(REDIS_KEYS.SERVER_HEALTH_FAIL_COUNT(serverId));
+    },
+
+    // Runtime connection status — written going forward only, TTL-bound, not in DB
+    async getServerConnectionStatus(serverId: string): Promise<ServerConnectionStatus | null> {
+      const data = await redis.get(REDIS_KEYS.SERVER_CONNECTION(serverId));
+      if (!data) return null;
+      return JSON.parse(data) as ServerConnectionStatus;
+    },
+
+    async setServerConnectionStatus(
+      serverId: string,
+      status: ServerConnectionStatus
+    ): Promise<void> {
+      await redis.setex(
+        REDIS_KEYS.SERVER_CONNECTION(serverId),
+        CACHE_TTL.SERVER_CONNECTION,
+        JSON.stringify(status)
+      );
     },
 
     // Generic cache operations
