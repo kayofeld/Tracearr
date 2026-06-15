@@ -12,6 +12,7 @@ import {
   pickServerColor,
   SERVER_STATS_CONFIG,
   BANDWIDTH_STATS_CONFIG,
+  type ServerConnectionStatus,
 } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { servers, plexAccounts } from '../db/schema.js';
@@ -692,5 +693,58 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return { data: unhealthyServers };
+  });
+
+  /**
+   * GET /servers/connection-status - Live SSE plugin connection state per server
+   *
+   * Returns per-server realtime/polling mode. Status is ephemeral runtime truth
+   * mirrored in Redis with a TTL — not persisted to the database. Servers with
+   * no cached status are reported as polling (safe default).
+   */
+  app.get('/connection-status', { preHandler: [app.authenticate] }, async (request) => {
+    const authUser = request.user;
+
+    const serverList = await db
+      .select({
+        id: servers.id,
+        name: servers.name,
+        type: servers.type,
+      })
+      .from(servers)
+      .where(
+        authUser.role === 'owner'
+          ? undefined
+          : authUser.serverIds.length > 0
+            ? inArray(servers.id, authUser.serverIds)
+            : undefined
+      );
+
+    const cacheService = getCacheService();
+    const result: ServerConnectionStatus[] = [];
+
+    for (const server of serverList) {
+      if (cacheService) {
+        const cached = await cacheService.getServerConnectionStatus(server.id);
+        if (cached) {
+          result.push(cached);
+          continue;
+        }
+      }
+
+      // No cached status yet — default to polling (safe)
+      result.push({
+        serverId: server.id,
+        serverName: server.name,
+        serverType: server.type,
+        mode: 'polling',
+        state: 'fallback',
+        lastEventAt: null,
+        since: null,
+        error: null,
+      });
+    }
+
+    return { data: result };
   });
 };
