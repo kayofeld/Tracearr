@@ -411,7 +411,7 @@ export const HistoryTableRow = memo(
 
           {/* Quality */}
           {columnVisibility.quality && (
-            <TableCell className="w-[110px]">
+            <TableCell className="w-[150px]">
               {(() => {
                 const isHwTranscode =
                   session.isTranscode &&
@@ -444,7 +444,7 @@ export const HistoryTableRow = memo(
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-1.5">
-                    <Clock className="text-muted-foreground h-3.5 w-3.5" />
+                    <Clock className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
                     <span className="text-sm">
                       {formatDuration(session.durationMs, { style: 'compact' })}
                     </span>
@@ -695,7 +695,7 @@ export function HistoryTable({
               {columnVisibility.platform && <TableHead className="w-[120px]">Platform</TableHead>}
               {columnVisibility.location && <TableHead className="w-[130px]">Location</TableHead>}
               {columnVisibility.ip && <TableHead className="w-[120px]">IP Address</TableHead>}
-              {columnVisibility.quality && <TableHead className="w-[110px]">Quality</TableHead>}
+              {columnVisibility.quality && <TableHead className="w-[150px]">Quality</TableHead>}
               {columnVisibility.duration && <TableHead className="w-[100px]">Duration</TableHead>}
               {columnVisibility.progress && <TableHead className="w-[100px]">Progress</TableHead>}
             </tr>
@@ -738,7 +738,7 @@ export function HistoryTable({
               {columnVisibility.platform && <TableHead className="w-[120px]">Platform</TableHead>}
               {columnVisibility.location && <TableHead className="w-[130px]">Location</TableHead>}
               {columnVisibility.ip && <TableHead className="w-[120px]">IP Address</TableHead>}
-              {columnVisibility.quality && <TableHead className="w-[110px]">Quality</TableHead>}
+              {columnVisibility.quality && <TableHead className="w-[150px]">Quality</TableHead>}
               {columnVisibility.duration && <TableHead className="w-[100px]">Duration</TableHead>}
               {columnVisibility.progress && <TableHead className="w-[100px]">Progress</TableHead>}
             </tr>
@@ -809,7 +809,7 @@ export function HistoryTable({
             {columnVisibility.platform && <TableHead className="w-[120px]">Platform</TableHead>}
             {columnVisibility.location && <TableHead className="w-[130px]">Location</TableHead>}
             {columnVisibility.ip && <TableHead className="w-[120px]">IP Address</TableHead>}
-            {columnVisibility.quality && <TableHead className="w-[110px]">Quality</TableHead>}
+            {columnVisibility.quality && <TableHead className="w-[150px]">Quality</TableHead>}
             {columnVisibility.duration && (
               <TableHead className="w-[100px]">
                 <SortableHeader
