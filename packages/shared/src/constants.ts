@@ -132,8 +132,7 @@ export const REDIS_KEYS = {
   SERVER_HEALTH: (serverId: string) => `${_redisPrefix}tracearr:servers:${serverId}:health`,
   SERVER_HEALTH_FAIL_COUNT: (serverId: string) =>
     `${_redisPrefix}tracearr:servers:${serverId}:health:fails`,
-  SERVER_CONNECTION: (serverId: string) =>
-    `${_redisPrefix}tracearr:servers:${serverId}:connection`,
+  SERVER_CONNECTION: (serverId: string) => `${_redisPrefix}tracearr:servers:${serverId}:connection`,
   get PUBSUB_EVENTS() {
     return `${_redisPrefix}tracearr:events`;
   },
@@ -149,6 +148,10 @@ export const REDIS_KEYS = {
   // Version check cache
   get VERSION_LATEST() {
     return `${_redisPrefix}tracearr:version:latest`;
+  },
+  // Cooldown key to prevent hammering GitHub on restarts or retry storms
+  get VERSION_CHECK_COOLDOWN() {
+    return `${_redisPrefix}tracearr:version:check:cooldown`;
   },
   // Library statistics
   get LIBRARY_STATS() {
@@ -206,8 +209,7 @@ export const REDIS_KEYS = {
   MOBILE_REFRESH_TOKEN: (hash: string) => `${_redisPrefix}tracearr:mobile_refresh:${hash}`,
   MOBILE_BLACKLISTED_TOKEN: (deviceId: string) =>
     `${_redisPrefix}tracearr:mobile:blacklist:${deviceId}`,
-  MOBILE_LAST_SEEN: (deviceId: string) =>
-    `${_redisPrefix}tracearr:mobile:last_seen:${deviceId}`,
+  MOBILE_LAST_SEEN: (deviceId: string) => `${_redisPrefix}tracearr:mobile:last_seen:${deviceId}`,
   // Rate limiting
   MOBILE_TOKEN_GEN_RATE: (userId: string) => `${_redisPrefix}mobile_token_gen:${userId}`,
   // Distributed locks

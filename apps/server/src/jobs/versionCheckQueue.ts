@@ -15,6 +15,21 @@ import { getCurrentVersion } from '../utils/buildInfo.js';
 // Queue name
 const QUEUE_NAME = 'version-check';
 
+// Minimum interval between GitHub fetches (15 min); the 6h scheduler far exceeds this
+const MIN_VERSION_CHECK_INTERVAL_S = 15 * 60;
+
+// Thrown when GitHub signals a rate limit (403/429); carries the pause duration
+export class GitHubRateLimitError extends Error {
+  retryAfterSeconds: number;
+  constructor(retryAfterSeconds: number) {
+    super(
+      `GitHub rate limited; pausing version checks for ~${Math.round(retryAfterSeconds / 60)}m`
+    );
+    this.name = 'GitHubRateLimitError';
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 // GitHub API configuration
 const GITHUB_API_LATEST_URL = 'https://api.github.com/repos/connorgallopo/Tracearr/releases/latest';
 const GITHUB_API_ALL_RELEASES_URL = 'https://api.github.com/repos/connorgallopo/Tracearr/releases';
@@ -171,8 +186,8 @@ export async function scheduleVersionChecks(): Promise<void> {
     }
   );
 
-  // Run an immediate check on startup
-  await versionQueue.add('startup-check', { type: 'check' }, { jobId: `startup-${Date.now()}` });
+  // Stable jobId so repeated restarts collapse to a single waiting job
+  await versionQueue.add('startup-check', { type: 'check' }, { jobId: 'startup-check' });
 
   console.log('Version checks scheduled (every 6 hours)');
 }
@@ -205,9 +220,13 @@ export interface GitHubRelease {
 }
 
 /**
- * Fetch releases from GitHub API
+ * Fetch releases from GitHub API.
+ * Best-effort/informational; on rate limit or error it degrades to the cached
+ * last-known version and must never spiral or crash.
  */
-async function fetchGitHubReleases(url: string): Promise<GitHubRelease[] | GitHubRelease | null> {
+export async function fetchGitHubReleases(
+  url: string
+): Promise<GitHubRelease[] | GitHubRelease | null> {
   const response = await fetch(url, {
     headers: {
       Accept: 'application/vnd.github.v3+json',
@@ -216,11 +235,29 @@ async function fetchGitHubReleases(url: string): Promise<GitHubRelease[] | GitHu
   });
 
   if (!response.ok) {
-    // Handle rate limiting gracefully
+    // GitHub uses 403 (primary limit) and 429 (secondary) for rate limiting; treat both the same
     if (response.status === 403 || response.status === 429) {
-      const retryAfter = response.headers.get('retry-after');
-      console.warn(`GitHub rate limit hit, retry after ${retryAfter ?? 'unknown'}s`);
-      throw new Error('GitHub rate limit exceeded');
+      // Compute pause duration from headers; fall back to 1h if absent
+      const retryAfterHeader = response.headers.get('retry-after');
+      const resetHeader = response.headers.get('x-ratelimit-reset');
+      let seconds: number;
+      if (retryAfterHeader) {
+        seconds = parseInt(retryAfterHeader, 10);
+      } else if (resetHeader) {
+        seconds = parseInt(resetHeader, 10) - Math.floor(Date.now() / 1000);
+      } else {
+        seconds = 3600;
+      }
+      // retry-after can be an HTTP-date and reset can be malformed — fall back if not a number
+      if (!Number.isFinite(seconds)) {
+        seconds = 3600;
+      }
+      // Clamp to [15min, 6h]
+      seconds = Math.max(MIN_VERSION_CHECK_INTERVAL_S, Math.min(seconds, 6 * 60 * 60));
+      console.warn(
+        `GitHub rate limit hit; pausing version checks for ~${Math.round(seconds / 60)}m`
+      );
+      throw new GitHubRateLimitError(seconds);
     }
 
     // 404 means no releases yet - not an error
@@ -268,14 +305,25 @@ export function findBestUpdateForPrerelease(
 }
 
 /**
- * Process a version check job
+ * Process a version check job.
+ * Best-effort/informational; on rate limit it sets a cooldown and returns
+ * gracefully (no retry storm). On other errors it rethrows for BullMQ retry.
  */
-async function processVersionCheck(job: Job<VersionCheckJobData>): Promise<void> {
+export async function processVersionCheck(job: Job<VersionCheckJobData>): Promise<void> {
   if (!redisClient) {
     throw new Error('Redis client not available');
   }
 
   console.log(`Processing version check (job ${job.id}, force=${job.data.force ?? false})`);
+
+  // Skip if a cooldown is active (restarts/retries collapse to a single fetch per interval)
+  if (!job.data.force) {
+    const coolingDown = await redisClient.exists(REDIS_KEYS.VERSION_CHECK_COOLDOWN);
+    if (coolingDown) {
+      console.log('Version check skipped (cooldown active)');
+      return;
+    }
+  }
 
   try {
     const currentVersion = getCurrentVersion();
@@ -336,6 +384,14 @@ async function processVersionCheck(job: Job<VersionCheckJobData>): Promise<void>
 
     console.log(`Latest version cached: ${version} (tag: ${targetRelease.tag_name})`);
 
+    // Set cooldown so restart bursts don't re-fetch immediately
+    await redisClient.set(
+      REDIS_KEYS.VERSION_CHECK_COOLDOWN,
+      '1',
+      'EX',
+      MIN_VERSION_CHECK_INTERVAL_S
+    );
+
     // Check if update is available
     const updateAvailable = isNewerVersion(version, currentVersion);
 
@@ -349,6 +405,11 @@ async function processVersionCheck(job: Job<VersionCheckJobData>): Promise<void>
       console.log(`Update available: ${currentVersion} -> ${version}`);
     }
   } catch (error) {
+    if (error instanceof GitHubRateLimitError) {
+      // Set cooldown for the rate-limit window, then return gracefully
+      await redisClient.set(REDIS_KEYS.VERSION_CHECK_COOLDOWN, '1', 'EX', error.retryAfterSeconds);
+      return;
+    }
     console.error('Version check failed:', error);
     throw error;
   }

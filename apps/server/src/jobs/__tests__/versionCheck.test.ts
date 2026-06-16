@@ -7,9 +7,11 @@
  * - getBaseVersion: Get base version without prerelease suffix
  * - compareVersions: Compare two semantic versions
  * - isNewerVersion: Check if one version is newer than another
+ * - fetchGitHubReleases: Rate-limit error handling
+ * - processVersionCheck: Cooldown guard and rate-limit recovery
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   parseVersion,
   isPrerelease,
@@ -17,8 +19,39 @@ import {
   compareVersions,
   isNewerVersion,
   findBestUpdateForPrerelease,
+  fetchGitHubReleases,
+  GitHubRateLimitError,
+  processVersionCheck,
+  initVersionCheckQueue,
   type GitHubRelease,
 } from '../versionCheckQueue.js';
+
+// ---- module-level mocks needed for processVersionCheck tests ----
+
+vi.mock('bullmq', () => {
+  function MockQueue(this: Record<string, unknown>) {
+    this.add = vi.fn();
+    this.close = vi.fn();
+    this.getJobSchedulers = vi.fn().mockResolvedValue([]);
+    this.removeJobScheduler = vi.fn();
+    this.on = vi.fn();
+  }
+  function MockWorker(this: Record<string, unknown>) {
+    this.on = vi.fn();
+    this.close = vi.fn();
+  }
+  return { Queue: MockQueue, Worker: MockWorker };
+});
+
+vi.mock('../../serverState.js', () => ({ isMaintenance: vi.fn().mockReturnValue(false) }));
+
+const mockGetCurrentVersion = vi.fn().mockReturnValue('1.4.0');
+vi.mock('../../utils/buildInfo.js', () => ({
+  getCurrentVersion: () => mockGetCurrentVersion(),
+  getCurrentTag: vi.fn(),
+  getCurrentCommit: vi.fn(),
+  getBuildDate: vi.fn(),
+}));
 
 describe('parseVersion', () => {
   describe('stable versions', () => {
@@ -375,5 +408,183 @@ describe('findBestUpdateForPrerelease', () => {
 
     const result = findBestUpdateForPrerelease('v1.4.1-beta.17', releases);
     expect(result?.tag_name).toBe('v1.4.3');
+  });
+});
+
+// ============================================================================
+// fetchGitHubReleases — rate-limit error handling
+// ============================================================================
+
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
+
+function mockRateLimitResponse(headers: Record<string, string> = {}, status = 429) {
+  return {
+    ok: false,
+    status,
+    headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+    json: vi.fn(),
+  };
+}
+
+describe('fetchGitHubReleases', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it('throws GitHubRateLimitError with seconds from retry-after header', async () => {
+    // 1800s is within the [900, 21600] clamp so it passes through unchanged
+    mockFetch.mockResolvedValue(mockRateLimitResponse({ 'retry-after': '1800' }, 429));
+    const err = await fetchGitHubReleases('https://api.github.com/test').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubRateLimitError);
+    expect((err as GitHubRateLimitError).retryAfterSeconds).toBe(1800);
+  });
+
+  it('throws GitHubRateLimitError with seconds from x-ratelimit-reset when retry-after absent', async () => {
+    // 30 min from now — above the 15min clamp floor
+    const wait = 30 * 60;
+    const resetEpoch = Math.floor(Date.now() / 1000) + wait;
+    mockFetch.mockResolvedValue(
+      mockRateLimitResponse({ 'x-ratelimit-reset': String(resetEpoch) }, 403)
+    );
+    const err = await fetchGitHubReleases('https://api.github.com/test').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubRateLimitError);
+    const secs = (err as GitHubRateLimitError).retryAfterSeconds;
+    // Allow a few seconds of test execution drift
+    expect(secs).toBeGreaterThanOrEqual(wait - 5);
+    expect(secs).toBeLessThanOrEqual(wait + 5);
+  });
+
+  it('clamps retryAfterSeconds to minimum of 15 min when header is tiny', async () => {
+    mockFetch.mockResolvedValue(mockRateLimitResponse({ 'retry-after': '5' }, 429));
+    const err = await fetchGitHubReleases('https://api.github.com/test').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubRateLimitError);
+    expect((err as GitHubRateLimitError).retryAfterSeconds).toBe(15 * 60);
+  });
+
+  it('clamps retryAfterSeconds to maximum of 6 h when header is huge', async () => {
+    mockFetch.mockResolvedValue(mockRateLimitResponse({ 'retry-after': '999999' }, 429));
+    const err = await fetchGitHubReleases('https://api.github.com/test').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubRateLimitError);
+    expect((err as GitHubRateLimitError).retryAfterSeconds).toBe(6 * 60 * 60);
+  });
+
+  it('defaults to 1 h when no rate-limit headers are present', async () => {
+    mockFetch.mockResolvedValue(mockRateLimitResponse({}, 403));
+    const err = await fetchGitHubReleases('https://api.github.com/test').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubRateLimitError);
+    // 3600 is clamped within [900, 21600] so stays at 3600
+    expect((err as GitHubRateLimitError).retryAfterSeconds).toBe(3600);
+  });
+
+  it('falls back to 1 h when retry-after is an HTTP-date instead of seconds', async () => {
+    mockFetch.mockResolvedValue(
+      mockRateLimitResponse({ 'retry-after': 'Thu, 01 Jan 2026 00:00:00 GMT' }, 429)
+    );
+    const err = await fetchGitHubReleases('https://api.github.com/test').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubRateLimitError);
+    expect((err as GitHubRateLimitError).retryAfterSeconds).toBe(3600);
+  });
+});
+
+// ============================================================================
+// processVersionCheck — cooldown guard and rate-limit recovery
+// ============================================================================
+
+// Single shared redis mock — initVersionCheckQueue only accepts the first call per module
+// instance, so we control behavior via mockResolvedValueOnce per test.
+const sharedRedis = {
+  exists: vi.fn(),
+  set: vi.fn().mockResolvedValue('OK'),
+  get: vi.fn().mockResolvedValue(null),
+};
+
+// Initialise once; subsequent calls are no-ops due to the guard in the module.
+initVersionCheckQueue('redis://localhost', sharedRedis as never, vi.fn());
+
+function makeJob(force?: boolean) {
+  return { id: 'test-job', data: { type: 'check' as const, force } } as Parameters<
+    typeof processVersionCheck
+  >[0];
+}
+
+describe('processVersionCheck', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    sharedRedis.exists.mockReset();
+    sharedRedis.set.mockReset().mockResolvedValue('OK');
+    mockGetCurrentVersion.mockReturnValue('1.4.0');
+  });
+
+  it('skips GitHub fetch when cooldown key exists and force is false', async () => {
+    sharedRedis.exists.mockResolvedValue(1); // cooldown active
+    await processVersionCheck(makeJob(false));
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does NOT skip when force is true even if cooldown key exists', async () => {
+    sharedRedis.exists.mockResolvedValue(1); // cooldown active — but force overrides
+    const latestRelease: GitHubRelease = {
+      tag_name: 'v1.4.0',
+      html_url: 'https://github.com/test/releases/tag/v1.4.0',
+      published_at: '2024-01-01T00:00:00Z',
+      name: 'v1.4.0',
+      body: null,
+      prerelease: false,
+      draft: false,
+    };
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue(latestRelease),
+    });
+    await processVersionCheck(makeJob(true));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('sets cooldown key on rate-limit and returns without throwing', async () => {
+    sharedRedis.exists.mockResolvedValue(0); // no cooldown
+    mockFetch.mockResolvedValue(mockRateLimitResponse({ 'retry-after': '1800' }, 429));
+    // Must not throw
+    await expect(processVersionCheck(makeJob(false))).resolves.toBeUndefined();
+    // Cooldown key must be set with the rate-limit TTL
+    expect(sharedRedis.set).toHaveBeenCalledWith(
+      expect.stringContaining('version:check:cooldown'),
+      '1',
+      'EX',
+      1800
+    );
+  });
+
+  it('sets cooldown key after a successful fetch', async () => {
+    sharedRedis.exists.mockResolvedValue(0); // no cooldown
+    const latestRelease: GitHubRelease = {
+      tag_name: 'v1.5.0',
+      html_url: 'https://github.com/test/releases/tag/v1.5.0',
+      published_at: '2024-01-01T00:00:00Z',
+      name: 'v1.5.0',
+      body: null,
+      prerelease: false,
+      draft: false,
+    };
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue(latestRelease),
+    });
+    await processVersionCheck(makeJob(false));
+    expect(sharedRedis.set).toHaveBeenCalledWith(
+      expect.stringContaining('version:check:cooldown'),
+      '1',
+      'EX',
+      15 * 60
+    );
+  });
+
+  it('rethrows non-rate-limit errors and does not set a cooldown', async () => {
+    sharedRedis.exists.mockResolvedValue(0); // no cooldown
+    mockFetch.mockResolvedValue(mockRateLimitResponse({}, 500));
+    await expect(processVersionCheck(makeJob(false))).rejects.toThrow();
+    expect(sharedRedis.set).not.toHaveBeenCalled();
   });
 });
