@@ -66,34 +66,6 @@ function alignSeries(series: GrowthDataPoint[] | undefined, allDates: string[]):
   return result;
 }
 
-/**
- * Calculate Y-axis range to show growth detail
- */
-function calculateYAxisRange(
-  moviesData: number[],
-  episodesData: number[],
-  musicData: number[]
-): { min: number; max: number } {
-  const allValues = [...moviesData, ...episodesData, ...musicData].filter((v) => v > 0);
-
-  if (allValues.length === 0) {
-    return { min: 0, max: 100 };
-  }
-
-  const minVal = Math.min(...allValues);
-  const maxVal = Math.max(...allValues);
-
-  // If range is small relative to values, zoom in to show growth detail
-  const range = maxVal - minVal;
-  const padding = Math.max(range * 0.1, 10); // At least 10 items padding
-
-  // Start from 0 if min is close to 0, otherwise zoom in
-  const yMin = minVal < maxVal * 0.2 ? 0 : Math.max(0, minVal - padding);
-  const yMax = maxVal + padding;
-
-  return { min: yMin, max: yMax };
-}
-
 export function LibraryGrowthChart({ data, isLoading, height = 250 }: LibraryGrowthChartProps) {
   const options = useMemo<Highcharts.Options>(() => {
     if (!data) return {};
@@ -112,9 +84,6 @@ export function LibraryGrowthChart({ data, isLoading, height = 250 }: LibraryGro
     const hasMusic = musicValues.some((v) => v > 0);
 
     if (!hasMovies && !hasEpisodes && !hasMusic) return {};
-
-    // Calculate Y-axis range for better visualization
-    const yRange = calculateYAxisRange(moviesValues, episodesValues, musicValues);
 
     const series: Highcharts.SeriesOptionsType[] = [];
 
@@ -195,13 +164,12 @@ export function LibraryGrowthChart({ data, isLoading, height = 250 }: LibraryGro
         title: { text: undefined },
         labels: { style: { color: 'hsl(var(--muted-foreground))' } },
         gridLineColor: 'hsl(var(--border))',
-        min: yRange.min,
-        max: yRange.max,
       },
       plotOptions: {
         area: {
           lineWidth: 2,
           fillOpacity: 0.2,
+          threshold: null,
           states: { hover: { lineWidth: 2 } },
         },
       },
