@@ -229,10 +229,14 @@ export async function proxyImage(options: ProxyOptions): Promise<ProxyResult> {
     imageUrl = `${baseUrl}${imagePath}${separator}X-Plex-Token=${token}`;
     headers['Accept'] = 'image/*';
   } else {
-    // Jellyfin - imagePath should include the full endpoint
+    // Jellyfin/Emby - imagePath should include the full endpoint
     const baseUrl = server.url.replace(/\/$/, '');
     imageUrl = `${baseUrl}${imagePath}`;
-    headers['X-Emby-Token'] = token;
+    if (server.type === 'jellyfin') {
+      headers['Authorization'] = `MediaBrowser Token="${token}"`;
+    } else {
+      headers['X-Emby-Token'] = token;
+    }
     headers['Accept'] = 'image/*';
   }
 

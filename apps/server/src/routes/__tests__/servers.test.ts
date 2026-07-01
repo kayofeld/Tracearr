@@ -43,6 +43,7 @@ vi.mock('../../services/mediaServer/index.js', () => ({
     verifyServerAdmin: vi.fn(),
     AdminVerifyError: {
       CONNECTION_FAILED: 'CONNECTION_FAILED',
+      INVALID_KEY: 'INVALID_KEY',
       NOT_ADMIN: 'NOT_ADMIN',
     },
   },
@@ -496,6 +497,31 @@ describe('Server Routes', () => {
       expect(response.json().message).toContain('admin');
     });
 
+    it('returns 401 when Jellyfin rejects the API key', async () => {
+      app = await buildTestApp(ownerUser);
+
+      mockDbSelectLimit([]);
+      vi.mocked(JellyfinClient.verifyServerAdmin).mockResolvedValue({
+        success: false,
+        code: 'INVALID_KEY',
+        message: 'Jellyfin rejected this API key (it may be invalid or expired).',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/servers',
+        payload: {
+          name: 'Bad Key',
+          type: 'jellyfin',
+          url: 'http://jellyfin.local:8096',
+          token: 'bad-key',
+        },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json().message).toContain('rejected');
+    });
+
     it('handles connection error to media server', async () => {
       app = await buildTestApp(ownerUser);
 
@@ -809,12 +835,12 @@ describe('Server Routes', () => {
 
       expect(response.statusCode).toBe(200);
 
-      // Verify fetch was called with X-Emby-Authorization header
+      // Verify fetch was called with Authorization header
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           headers: expect.objectContaining({
-            'X-Emby-Authorization': expect.stringContaining('MediaBrowser'),
+            Authorization: expect.stringContaining('MediaBrowser'),
           }),
         })
       );

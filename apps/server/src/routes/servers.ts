@@ -141,6 +141,9 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
           if (adminCheck.code === JellyfinClient.AdminVerifyError.CONNECTION_FAILED) {
             return reply.serviceUnavailable(adminCheck.message);
           }
+          if (adminCheck.code === JellyfinClient.AdminVerifyError.INVALID_KEY) {
+            return reply.unauthorized(adminCheck.message);
+          }
           return reply.forbidden(adminCheck.message);
         }
       } else if (type === 'emby') {
@@ -285,6 +288,9 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
             if (!adminCheck.success) {
               if (adminCheck.code === JellyfinClient.AdminVerifyError.CONNECTION_FAILED) {
                 return reply.serviceUnavailable(adminCheck.message);
+              }
+              if (adminCheck.code === JellyfinClient.AdminVerifyError.INVALID_KEY) {
+                return reply.unauthorized(adminCheck.message);
               }
               return reply.forbidden(adminCheck.message);
             }
@@ -630,10 +636,12 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
         imageUrl = `${baseUrl}/${imagePath}${separator}X-Plex-Token=${token}`;
         headers = { Accept: 'image/*' };
       } else {
-        // Jellyfin and Emby use X-Emby-Authorization header
         imageUrl = `${baseUrl}/${imagePath}`;
+        const authValue = `MediaBrowser Client="Tracearr", Device="Tracearr Server", DeviceId="tracearr-server", Version="1.0.0", Token="${token}"`;
+        const authHeaderName =
+          server.type === 'jellyfin' ? 'Authorization' : 'X-Emby-Authorization';
         headers = {
-          'X-Emby-Authorization': `MediaBrowser Client="Tracearr", Device="Tracearr Server", DeviceId="tracearr-server", Version="1.0.0", Token="${token}"`,
+          [authHeaderName]: authValue,
           Accept: 'image/*',
         };
       }

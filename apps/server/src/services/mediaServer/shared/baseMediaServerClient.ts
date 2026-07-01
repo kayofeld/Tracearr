@@ -109,8 +109,7 @@ export abstract class BaseMediaServerClient
   // ==========================================================================
 
   /**
-   * Build X-Emby-Authorization header value
-   * Used by both Jellyfin and Emby (identical format)
+   * Build the MediaBrowser auth scheme value (identical format for Jellyfin and Emby)
    */
   protected buildAuthHeader(): string {
     return buildJellyfinEmbyAuthHeader(this.apiKey);
@@ -120,8 +119,10 @@ export abstract class BaseMediaServerClient
    * Build headers for API requests
    */
   protected buildHeaders(): Record<string, string> {
+    const authHeaderName =
+      this.serverType === 'jellyfin' ? 'Authorization' : 'X-Emby-Authorization';
     return {
-      'X-Emby-Authorization': this.buildAuthHeader(),
+      [authHeaderName]: this.buildAuthHeader(),
       ...jellyfinEmbyHeaders(),
     };
   }
