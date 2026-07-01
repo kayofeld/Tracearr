@@ -194,7 +194,7 @@ Frontend runs at `localhost:5173`, API at `localhost:3000`.
 
 **Fastify** over Express because it's measurably faster and schema validation catches bad requests before they hit handlers.
 
-**Plex SSE** — Plex servers stream session updates in real-time via Server-Sent Events. No polling delay, instant detection. Jellyfin and Emby still use polling (they don't support SSE), but Plex sessions appear the moment they start.
+**SSE for instant sessions** — Plex streams session updates in real-time via Server-Sent Events, so streams appear the moment they start. Jellyfin and Emby get the same through the [Tracearr SSE plugin](https://github.com/Tracearr/Media-Server-SSE); without it they fall back to polling.
 
 ## Project Structure
 
@@ -203,7 +203,7 @@ tracearr/
 ├── apps/
 │   ├── web/          # React frontend
 │   ├── server/       # Fastify backend
-│   └── mobile/       # React Native app (coming soon)
+│   └── mobile/       # React Native app (iOS & Android)
 ├── packages/
 │   ├── shared/       # Types, schemas, constants
 │   └── translations/ # i18n support
@@ -239,13 +239,13 @@ Run `pnpm dev` in a terminal to start both apps, then use the "Debug All" config
 
 ## Roadmap
 
-**v1.5** (current)
+**Shipped**
 
 - [x] Multi-server Plex, Jellyfin, and Emby support
 - [x] Session tracking with full history
 - [x] Sharing detection rules
 - [x] Real-time WebSocket updates
-- [x] Plex SSE for instant session detection
+- [x] SSE for instant session detection (Plex built-in, Jellyfin/Emby via plugin)
 - [x] Discord + webhook notifications
 - [x] Interactive stream map
 - [x] Trust scores
@@ -259,19 +259,19 @@ Run `pnpm dev` in a terminal to start both apps, then use the "Debug All" config
 - [x] Account inactivity detection
 - [x] Bulk actions for violations, users, rules, sessions
 - [x] Enhanced IP geolocation (ASN, continent, postal code)
+- [x] Rule based automated stream termination
+- [x] Mobile app — [iOS](https://apps.apple.com/us/app/tracearr/id6755941553) and [Android](https://play.google.com/store/apps/details?id=com.tracearr.mobile)
 
-**v1.6** (next)
-
-- [ ] Mobile app (iOS & Android) — _in beta_
-- [ ] Rule based automated stream termination
-- [ ] Account suspension automation
-- [ ] Email notifications
-- [ ] Telegram notifier
-
-**v2.0** (future)
+**v1.5** (next)
 
 - [ ] Tiered access controls
 - [ ] Multi-admin support
+- [ ] Account suspension automation
+
+**v1.6**
+
+- [ ] Email notifications
+- [ ] Telegram notifier
 
 ## Project Statistics
 
