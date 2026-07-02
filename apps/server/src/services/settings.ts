@@ -50,6 +50,7 @@ const PUBLIC_DEFAULTS: Settings = {
 const INTERNAL_DEFAULTS = {
   tailscaleState: null as string | null,
   jwtRevokedBefore: null as string | null, // ISO 8601 — tokens issued before this timestamp are rejected
+  localLoginEnabled: true,
 };
 
 type InternalSettings = typeof INTERNAL_DEFAULTS;
