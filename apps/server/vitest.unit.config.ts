@@ -27,6 +27,7 @@ export default mergeConfig(
         'src/services/library/__tests__/*.test.ts',
         'src/services/rules/__tests__/*.test.ts',
         'src/lib/__tests__/*.test.ts',
+        'src/websocket/__tests__/*.test.ts',
       ],
       coverage: {
         provider: 'v8',

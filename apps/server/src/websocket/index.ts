@@ -6,9 +6,13 @@ import type { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import type { Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
+import { eq } from 'drizzle-orm';
 import type { ServerToClientEvents, ClientToServerEvents, AuthUser } from '@tracearr/shared';
 import { WS_EVENTS, REDIS_KEYS } from '@tracearr/shared';
 import type { Redis } from 'ioredis';
+import { db } from '../db/client.js';
+import { mobileSessions } from '../db/schema.js';
+import { resolveBetterAuthSession } from '../lib/sessionResolver.js';
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -33,6 +37,66 @@ function verifyToken(token: string): AuthUser {
   return decoded;
 }
 
+/**
+ * Resolves the authenticated user for a Socket.io handshake: legacy JWT
+ * first (mobile shim, old web tabs), then a Better Auth session (bearer
+ * token or cookie). Any resolution error denies the connection (fail-closed).
+ *
+ * Better Auth bearer tokens carry no `deviceId`, so mobile status for those
+ * sessions is derived by looking up `mobileSessions` by `betterAuthSessionId`;
+ * a match means the connection is a paired mobile device (and needs the
+ * blacklist check below), no match means it's a web session.
+ */
+export async function resolveSocketUser(handshake: {
+  token: string | undefined;
+  headers: Record<string, string | string[] | undefined>;
+}): Promise<AuthUser | null> {
+  if (handshake.token) {
+    try {
+      return verifyToken(handshake.token);
+    } catch {
+      // fall through to better auth
+    }
+  }
+
+  try {
+    const headers = new Headers();
+    if (handshake.token) headers.set('authorization', `Bearer ${handshake.token}`);
+    const cookie = handshake.headers.cookie;
+    if (cookie) headers.set('cookie', Array.isArray(cookie) ? cookie.join('; ') : cookie);
+
+    const resolved = await resolveBetterAuthSession(headers);
+    if (!resolved) return null;
+    if (!resolved.sessionId) return resolved.user;
+
+    const [mobileRow] = await db
+      .select({ deviceId: mobileSessions.deviceId })
+      .from(mobileSessions)
+      .where(eq(mobileSessions.betterAuthSessionId, resolved.sessionId))
+      .limit(1);
+
+    if (!mobileRow) return resolved.user;
+    return { ...resolved.user, mobile: true, deviceId: mobileRow.deviceId };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Checks whether a mobile device's token has been blacklisted (revoked).
+ * Fails closed: any Redis error denies the connection rather than letting
+ * it through unverified.
+ */
+export async function checkMobileBlacklist(redisClient: Redis, deviceId: string): Promise<boolean> {
+  try {
+    const blacklisted = await redisClient.get(REDIS_KEYS.MOBILE_BLACKLISTED_TOKEN(deviceId));
+    return !blacklisted;
+  } catch (err) {
+    console.error('[WebSocket] Blacklist check error:', err);
+    return false;
+  }
+}
+
 export function initializeWebSocket(
   httpServer: HttpServer,
   basePath = '',
@@ -55,44 +119,36 @@ export function initializeWebSocket(
 
   // Authentication middleware
   io.use((socket: TypedSocket, next) => {
-    try {
-      const token = socket.handshake.auth.token as string | undefined;
+    const token = socket.handshake.auth.token as string | undefined;
+    const headers = socket.handshake.headers as Record<string, string | string[] | undefined>;
 
-      if (!token) {
-        next(new Error('Authentication required'));
-        return;
-      }
+    resolveSocketUser({ token, headers })
+      .then((user) => {
+        if (!user) {
+          next(new Error('Authentication failed'));
+          return;
+        }
 
-      // Verify JWT and attach user to socket
-      const user = verifyToken(token);
-
-      // Check if this mobile device's token has been blacklisted (revoked)
-      if (user.mobile && user.deviceId && redis) {
-        redis
-          .get(REDIS_KEYS.MOBILE_BLACKLISTED_TOKEN(user.deviceId))
-          .then((blacklisted) => {
-            if (blacklisted) {
-              next(new Error('Session has been revoked'));
-            } else {
+        // Check if this mobile device's token has been blacklisted (revoked)
+        if (user.mobile && user.deviceId && redis) {
+          void checkMobileBlacklist(redis, user.deviceId).then((allowed) => {
+            if (allowed) {
               (socket.data as SocketData).user = user;
               next();
+            } else {
+              next(new Error('Session has been revoked'));
             }
-          })
-          .catch((err: unknown) => {
-            console.error('[WebSocket] Blacklist check error:', err);
-            // Allow connection on Redis failure (fail-open for availability)
-            (socket.data as SocketData).user = user;
-            next();
           });
-        return;
-      }
+          return;
+        }
 
-      (socket.data as SocketData).user = user;
-      next();
-    } catch (error) {
-      console.error('[WebSocket] Auth error:', error);
-      next(new Error('Authentication failed'));
-    }
+        (socket.data as SocketData).user = user;
+        next();
+      })
+      .catch((error: unknown) => {
+        console.error('[WebSocket] Auth error:', error);
+        next(new Error('Authentication failed'));
+      });
   });
 
   io.on('connection', (socket: TypedSocket) => {

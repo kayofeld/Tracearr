@@ -22,10 +22,17 @@ export async function getCachedServerIds(): Promise<string[]> {
   return serverIdsCache.ids;
 }
 
-export async function resolveBetterAuthUser(request: FastifyRequest): Promise<AuthUser | null> {
+interface BetterAuthSessionResult {
+  user: AuthUser;
+  // Undefined only if the session shape has no `.session.id` (never true for
+  // a real Better Auth response, but kept optional to fail soft rather than throw).
+  sessionId: string | undefined;
+}
+
+async function loadBetterAuthSession(headers: Headers): Promise<BetterAuthSessionResult | null> {
   let session;
   try {
-    session = await getAuth().api.getSession({ headers: fromNodeHeaders(request.headers) });
+    session = await getAuth().api.getSession({ headers });
   } catch {
     return null; // fail closed on lookup errors
   }
@@ -37,9 +44,29 @@ export async function resolveBetterAuthUser(request: FastifyRequest): Promise<Au
 
   const serverIds = role === 'owner' ? await getCachedServerIds() : [];
   return {
-    userId: user.id,
-    username: user.username ?? user.name,
-    role,
-    serverIds,
+    sessionId: session.session?.id,
+    user: {
+      userId: user.id,
+      username: user.username ?? user.name,
+      role,
+      serverIds,
+    },
   };
+}
+
+export async function resolveBetterAuthUser(request: FastifyRequest): Promise<AuthUser | null> {
+  const resolved = await loadBetterAuthSession(fromNodeHeaders(request.headers));
+  return resolved?.user ?? null;
+}
+
+/**
+ * Same lookup as `resolveBetterAuthUser`, but also returns the raw Better
+ * Auth session id. Used by the WebSocket middleware to detect whether a
+ * session belongs to a paired mobile device (via `mobileSessions`), which
+ * isn't derivable from the resolved `AuthUser` alone.
+ */
+export async function resolveBetterAuthSession(
+  headers: Headers
+): Promise<BetterAuthSessionResult | null> {
+  return loadBetterAuthSession(headers);
 }
