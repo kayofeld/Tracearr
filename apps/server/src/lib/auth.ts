@@ -2,13 +2,15 @@ import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { username as usernamePlugin, admin as adminPlugin, bearer } from 'better-auth/plugins';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
-import { Redis } from 'ioredis';
+import type { Redis } from 'ioredis';
 import { db } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { getSetting } from '../services/settings.js';
 import { requireBetterAuthSecret } from './env.js';
 import { assertSignupAllowed, assertClaimCode, assertUserCanLogin } from './authGuards.js';
+import { getRedis, closeRedis } from './redisShared.js';
+import { plexPlugin } from './plexPlugin.js';
 
 function buildAuth(redis: Redis) {
   const prefix = process.env.REDIS_PREFIX ?? '';
@@ -94,14 +96,13 @@ function buildAuth(redis: Redis) {
         }
       }),
     },
-    plugins: [usernamePlugin(), adminPlugin({ adminRoles: ['owner'] }), bearer()],
+    plugins: [usernamePlugin(), adminPlugin({ adminRoles: ['owner'] }), bearer(), plexPlugin()],
   });
 }
 
 type Auth = ReturnType<typeof buildAuth>;
 
 let authInstance: Auth | null = null;
-let redisClient: Redis | null = null;
 
 /**
  * Returns the singleton Better Auth instance, constructing it (and its
@@ -111,19 +112,15 @@ let redisClient: Redis | null = null;
 export function getAuth(): Auth {
   if (authInstance) return authInstance;
 
-  redisClient = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
-  authInstance = buildAuth(redisClient);
+  authInstance = buildAuth(getRedis());
   return authInstance;
 }
 
 /**
- * Quits the Redis client backing the auth instance, if one was created.
+ * Quits the shared Redis client backing the auth instance.
  * Safe to call even when getAuth() was never invoked.
  */
 export async function closeAuth(): Promise<void> {
-  if (redisClient) {
-    await redisClient.quit();
-    redisClient = null;
-  }
+  await closeRedis();
   authInstance = null;
 }

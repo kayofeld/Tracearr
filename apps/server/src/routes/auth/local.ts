@@ -10,7 +10,6 @@ import { eq, and, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../../db/client.js';
 import { users } from '../../db/schema.js';
-import { PlexClient } from '../../services/mediaServer/index.js';
 import { hashPassword, verifyPassword } from '../../utils/password.js';
 import { generateTokens } from './utils.js';
 import { getUserByEmail, getOwnerUser } from '../../services/userService.js';
@@ -24,19 +23,13 @@ const signupSchema = z.object({
   claimCode: z.string().optional(), // Optional claim code for first-time setup
 });
 
-const localLoginSchema = z.object({
+// Plex login now lives in the Better Auth plugin at /auth/plex/initiate.
+// Note: Jellyfin login is handled at /auth/jellyfin/login, not here
+const loginSchema = z.object({
   type: z.literal('local'),
   email: z.email(),
   password: z.string().min(1),
 });
-
-const plexLoginSchema = z.object({
-  type: z.literal('plex'),
-  forwardUrl: z.url().optional(),
-});
-
-// Note: Jellyfin login is handled at /auth/jellyfin/login, not here
-const loginSchema = z.discriminatedUnion('type', [localLoginSchema, plexLoginSchema]);
 
 export const localRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -135,48 +128,29 @@ export const localRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid login request');
     }
 
-    const { type } = body.data;
+    const { password } = body.data;
+    const email = body.data.email.toLowerCase();
 
-    if (type === 'local') {
-      const { password } = body.data;
-      const email = body.data.email.toLowerCase();
+    // Find user by email with password hash
+    const userRows = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.email, email), isNotNull(users.passwordHash)))
+      .limit(1);
 
-      // Find user by email with password hash
-      const userRows = await db
-        .select()
-        .from(users)
-        .where(and(eq(users.email, email), isNotNull(users.passwordHash)))
-        .limit(1);
-
-      const user = userRows[0];
-      if (!user?.passwordHash) {
-        return reply.unauthorized('Invalid email or password');
-      }
-
-      // Verify password
-      const valid = await verifyPassword(password, user.passwordHash);
-      if (!valid) {
-        return reply.unauthorized('Invalid email or password');
-      }
-
-      app.log.info({ userId: user.id }, 'Local login successful');
-
-      return generateTokens(app, user.id, user.username, user.role);
+    const user = userRows[0];
+    if (!user?.passwordHash) {
+      return reply.unauthorized('Invalid email or password');
     }
 
-    if (type === 'plex') {
-      // Plex OAuth - initiate flow
-      try {
-        const forwardUrl = body.data.forwardUrl;
-        const { pinId, authUrl } = await PlexClient.initiateOAuth(forwardUrl);
-        return { pinId, authUrl };
-      } catch (error) {
-        app.log.error({ err: error }, 'Failed to initiate Plex OAuth');
-        return reply.internalServerError('Failed to initiate Plex authentication');
-      }
+    // Verify password
+    const valid = await verifyPassword(password, user.passwordHash);
+    if (!valid) {
+      return reply.unauthorized('Invalid email or password');
     }
 
-    // This should not be reached due to discriminated union, but handle gracefully
-    return reply.badRequest('Invalid login type');
+    app.log.info({ userId: user.id }, 'Local login successful');
+
+    return generateTokens(app, user.id, user.username, user.role);
   });
 };
