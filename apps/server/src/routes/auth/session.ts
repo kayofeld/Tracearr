@@ -8,6 +8,7 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { and, eq } from 'drizzle-orm';
 import { JWT_CONFIG, REDIS_KEYS, canLogin, type AuthUser } from '@tracearr/shared';
 import {
   generateRefreshToken,
@@ -16,6 +17,8 @@ import {
   REFRESH_TOKEN_TTL,
 } from './utils.js';
 import { getUserById } from '../../services/userService.js';
+import { db } from '../../db/client.js';
+import { authAccounts } from '../../db/schema.js';
 
 // Schema
 const refreshSchema = z.object({
@@ -116,6 +119,17 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     // TODO: Admins should get servers where they're isServerAdmin=true
     const serverIds = user.role === 'owner' ? await getAllServerIds() : [];
 
+    const [credential] = await db
+      .select({ id: authAccounts.id })
+      .from(authAccounts)
+      .where(and(eq(authAccounts.userId, user.id), eq(authAccounts.providerId, 'credential')))
+      .limit(1);
+    const [plexLink] = await db
+      .select({ id: authAccounts.id })
+      .from(authAccounts)
+      .where(and(eq(authAccounts.userId, user.id), eq(authAccounts.providerId, 'plex')))
+      .limit(1);
+
     return {
       userId: user.id,
       username: user.username,
@@ -124,8 +138,8 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       role: user.role,
       aggregateTrustScore: user.aggregateTrustScore,
       serverIds,
-      hasPassword: !!user.passwordHash,
-      hasPlexLinked: !!user.plexAccountId,
+      hasPassword: !!user.passwordHash || !!credential,
+      hasPlexLinked: !!user.plexAccountId || !!plexLink,
     };
   });
 };

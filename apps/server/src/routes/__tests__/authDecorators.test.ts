@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import cookie from '@fastify/cookie';
+import { API_BASE_PATH } from '@tracearr/shared';
 
 vi.mock('../../lib/auth.js', () => ({
   getAuth: vi.fn(),
@@ -30,6 +31,8 @@ vi.mock('../../db/client.js', () => ({
 import { getAuth } from '../../lib/auth.js';
 import { db } from '../../db/client.js';
 import authPlugin from '../../plugins/auth.js';
+import { sessionRoutes } from '../auth/session.js';
+import { users, servers, authAccounts } from '../../db/schema.js';
 
 function mockBetterAuthSession(user: Record<string, unknown> | null) {
   const getSession = vi.fn().mockResolvedValue(user ? { user } : null);
@@ -39,12 +42,50 @@ function mockBetterAuthSession(user: Record<string, unknown> | null) {
   return getSession;
 }
 
+// Builds a chainable stand-in for a drizzle select query that resolves to
+// `rows` whether the caller awaits after `.from()` or continues on to
+// `.where().limit()`.
+function selectResult(rows: unknown[]) {
+  const chain: Record<string, unknown> = {
+    where: vi.fn(() => chain),
+    limit: vi.fn(() => Promise.resolve(rows)),
+    then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
+      Promise.resolve(rows).then(resolve, reject),
+  };
+  return chain;
+}
+
+// Routes `db.select().from(table)` to canned rows by table identity rather
+// than call order, since the authenticate decorator's server-id lookup runs
+// before the /me handler's own queries and the order between them isn't
+// stable across the suite (module-level cache in sessionResolver.ts).
+function tableAwareSelect(rowsByTable: {
+  users?: unknown[];
+  servers?: unknown[];
+  authAccountsSequence?: unknown[][];
+}) {
+  let authAccountsCallIndex = 0;
+  return () => ({
+    from: vi.fn((table: unknown) => {
+      if (table === users) return selectResult(rowsByTable.users ?? []);
+      if (table === servers) return selectResult(rowsByTable.servers ?? []);
+      if (table === authAccounts) {
+        const rows = rowsByTable.authAccountsSequence?.[authAccountsCallIndex] ?? [];
+        authAccountsCallIndex += 1;
+        return selectResult(rows);
+      }
+      return selectResult([]);
+    }),
+  });
+}
+
 async function buildTestApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
 
   await app.register(sensible);
   await app.register(cookie, { secret: 'test-cookie-secret' });
   await app.register(authPlugin);
+  await app.register(sessionRoutes, { prefix: `${API_BASE_PATH}/auth` });
 
   app.get('/test/protected', { preHandler: [app.authenticate] }, async (request) => {
     return request.user;
@@ -55,6 +96,35 @@ async function buildTestApp(): Promise<FastifyInstance> {
   });
 
   return app;
+}
+
+// Simulates a Better Auth owner session backed by a credential account row
+// (the shape a real sign-up would leave behind), since no live Postgres is
+// available to run an actual sign-up through the drizzle adapter.
+async function signUpOwner(_app: FastifyInstance): Promise<string> {
+  const userId = 'owner-1';
+  mockBetterAuthSession({ id: userId, username: 'owner', name: 'Owner', role: 'owner' });
+
+  vi.mocked(db.select).mockImplementation(
+    tableAwareSelect({
+      users: [
+        {
+          id: userId,
+          username: 'owner',
+          email: 'owner@example.com',
+          thumbnail: null,
+          role: 'owner',
+          aggregateTrustScore: 100,
+          passwordHash: null,
+          plexAccountId: null,
+        },
+      ],
+      servers: [{ id: 'server-1' }, { id: 'server-2' }],
+      authAccountsSequence: [[{ id: 'account-1' }], []],
+    }) as never
+  );
+
+  return 'better-auth.session_token=abc';
 }
 
 describe('auth decorators with better auth sessions', () => {
@@ -144,5 +214,18 @@ describe('auth decorators with better auth sessions', () => {
 
     const res = await app.inject({ method: 'GET', url: '/test/protected' });
     expect(res.statusCode).toBe(401);
+  });
+
+  it('me reports hasPassword from the credential account row', async () => {
+    const app = await buildTestApp();
+    const cookie = await signUpOwner(app);
+    const res = await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers: { cookie } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      username: expect.any(String),
+      role: 'owner',
+      hasPassword: true,
+      hasPlexLinked: false,
+    });
   });
 });
