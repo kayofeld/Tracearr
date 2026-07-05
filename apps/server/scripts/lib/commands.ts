@@ -46,32 +46,51 @@ function baKey(key: string): string {
 }
 
 /**
- * Deletes every Better Auth session for a user, in both the database and
- * the Redis secondary-storage cache Better Auth reads from first.
+ * Deletes every Better Auth session for a user from Redis - the
+ * secondary-storage cache Better Auth checks first on every session lookup,
+ * so a session whose Redis entry survives is still usable no matter what the
+ * database row says. Returns the token list it read, so the caller can
+ * delete the matching `auth_sessions` rows itself.
+ *
+ * The database rows are deliberately NOT deleted here. The caller deletes
+ * them inside the same transaction as the password write, which is what
+ * makes the whole reset retry-safe: the token list is read fresh from the
+ * database on every attempt, so as long as the `auth_sessions` rows still
+ * exist, a re-run can always rediscover their Redis keys and try again.
+ * Deleting the DB rows first (the old bug) orphans the Redis entries beyond
+ * recovery, because the token needed to build their key no longer exists
+ * anywhere once the row is gone.
  *
  * A password reset run through this CLI is a lockout/compromise recovery
- * action, so we fail closed here: any session that existed before the
- * reset is killed unconditionally, rather than trusting that a stolen or
+ * action, so we fail closed here: any session that existed before the reset
+ * is killed unconditionally, rather than trusting that a stolen or
  * still-open session is fine to leave alive. If Redis is unreachable this
- * throws and aborts the reset instead of silently leaving stale sessions
- * valid.
+ * throws, and the caller must run it BEFORE writing the new password, so a
+ * broken Redis can never result in a changed password with a pre-existing
+ * session still valid.
  */
-async function invalidateUserSessions(userId: string): Promise<void> {
+async function killSessionsInRedis(userId: string): Promise<{ token: string }[]> {
   const sessions = await db
     .select({ token: authSessions.token })
     .from(authSessions)
     .where(eq(authSessions.userId, userId));
 
-  if (sessions.length > 0) {
-    await db.delete(authSessions).where(eq(authSessions.userId, userId));
-  }
-
-  const redis = getRedis();
   const keys = [
     baKey(`active-sessions-${userId}`),
     ...sessions.map((s: { token: string }) => baKey(s.token)),
   ];
-  await redis.del(...keys);
+
+  try {
+    await getRedis().del(...keys);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Redis is unreachable, cannot safely invalidate existing sessions (${reason}). ` +
+        'The password was NOT changed. Fix Redis connectivity and re-run the command.'
+    );
+  }
+
+  return sessions;
 }
 
 async function findUserByUsername(username: string) {
@@ -106,33 +125,49 @@ export async function resetPasswordCommand(opts: {
 
   const hash = await hashPassword(opts.password);
 
-  const [existing] = await db
-    .select({ id: authAccounts.id })
-    .from(authAccounts)
-    .where(and(eq(authAccounts.userId, user.id), eq(authAccounts.providerId, 'credential')))
-    .limit(1);
+  // Fail closed BEFORE touching the password: kill every existing session in
+  // Redis first. If Redis is unreachable this throws here, and nothing below
+  // has run yet, so the old password and every existing session are both
+  // still fully intact - safe to just re-run once Redis is back.
+  const sessions = await killSessionsInRedis(user.id);
 
-  if (existing) {
-    await db
-      .update(authAccounts)
-      .set({ password: hash, updatedAt: new Date() })
-      .where(eq(authAccounts.id, existing.id));
-  } else {
-    await db.insert(authAccounts).values({
-      id: randomUUID(),
-      accountId: user.id,
-      providerId: 'credential',
-      userId: user.id,
-      password: hash,
-    });
-  }
+  // Everything that must land together lands in one transaction: the
+  // auth_accounts credential, the legacy users.passwordHash, and the
+  // auth_sessions rows for the tokens already killed in Redis above. If this
+  // fails partway it rolls back completely - the password stays unchanged
+  // and the (still-intact) auth_sessions rows let a re-run rediscover the
+  // same tokens, so redis.del just no-ops on them and the retry heals clean.
+  await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: authAccounts.id })
+      .from(authAccounts)
+      .where(and(eq(authAccounts.userId, user.id), eq(authAccounts.providerId, 'credential')))
+      .limit(1);
 
-  await db
-    .update(users)
-    .set({ passwordHash: hash, updatedAt: new Date() })
-    .where(eq(users.id, user.id));
+    if (existing) {
+      await tx
+        .update(authAccounts)
+        .set({ password: hash, updatedAt: new Date() })
+        .where(eq(authAccounts.id, existing.id));
+    } else {
+      await tx.insert(authAccounts).values({
+        id: randomUUID(),
+        accountId: user.id,
+        providerId: 'credential',
+        userId: user.id,
+        password: hash,
+      });
+    }
 
-  await invalidateUserSessions(user.id);
+    await tx
+      .update(users)
+      .set({ passwordHash: hash, updatedAt: new Date() })
+      .where(eq(users.id, user.id));
+
+    if (sessions.length > 0) {
+      await tx.delete(authSessions).where(eq(authSessions.userId, user.id));
+    }
+  });
 }
 
 /**
