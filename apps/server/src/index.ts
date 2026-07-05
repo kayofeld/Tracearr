@@ -204,7 +204,8 @@ async function refreshTimescaleCache(): Promise<void> {
 const BASE_PATH = process.env.BASE_PATH?.replace(/\/+$/, '').replace(/^\/?/, '/') || '';
 
 // ============================================================================
-// Phase 1: Build the Fastify app (always succeeds, even without DB/Redis)
+// Phase 1: Build the Fastify app (builds without DB/Redis, but fails fast if
+// required secrets like BETTER_AUTH_SECRET are missing)
 // ============================================================================
 
 async function buildApp(options: { trustProxy?: boolean } = {}) {

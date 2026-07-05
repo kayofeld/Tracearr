@@ -34,11 +34,13 @@ function collectFiles(dir: string, ext: string[] = ['.ts', '.tsx']): string[] {
 // ==========================================================================
 describe('frontend: no hardcoded fetch URLs', () => {
   // Matches fetch('/anything') or fetch("/anything") — direct fetch calls that
-  // bypass the API client and don't use BASE_PATH.
-  // Allowed: fetch(`${BASE_PATH}/...`) or fetch(`${someVar}/...`), and client
-  // methods like authClient.$fetch('/...') that resolve against a
-  // BASE_PATH-aware baseURL (the lookbehind skips anything but a bare fetch).
-  const HARDCODED_FETCH = /(?<![\w$.])fetch\(\s*['"]\/[^'"]*/g;
+  // bypass the API client and don't use BASE_PATH. This includes window.fetch(...)
+  // and any other object-qualified bare fetch, since those still hit the origin
+  // root and skip BASE_PATH.
+  // Allowed: fetch(`${BASE_PATH}/...`) or fetch(`${someVar}/...`), and
+  // authClient.$fetch('/...') specifically, which resolves against a
+  // BASE_PATH-aware baseURL (the lookbehind only skips the $fetch method name).
+  const HARDCODED_FETCH = /(?<!\$)fetch\(\s*['"]\/[^'"]*/g;
 
   const files = collectFiles(WEB_SRC);
 
@@ -64,6 +66,24 @@ describe('frontend: no hardcoded fetch URLs', () => {
     }
 
     expect(violations).toEqual([]);
+  });
+
+  it('flags a genuine bare fetch() call with a hardcoded path', () => {
+    const line = `  const res = await fetch('/api/v1/servers');`;
+    expect(HARDCODED_FETCH.test(line)).toBe(true);
+    HARDCODED_FETCH.lastIndex = 0;
+  });
+
+  it('flags a window.fetch() call with a hardcoded path', () => {
+    const line = `  const res = await window.fetch('/api/v1/servers');`;
+    expect(HARDCODED_FETCH.test(line)).toBe(true);
+    HARDCODED_FETCH.lastIndex = 0;
+  });
+
+  it('still exempts authClient.$fetch() calls', () => {
+    const line = `  const { error } = await authClient.$fetch('/sign-up/email');`;
+    expect(HARDCODED_FETCH.test(line)).toBe(false);
+    HARDCODED_FETCH.lastIndex = 0;
   });
 });
 
