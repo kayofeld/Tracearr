@@ -42,8 +42,15 @@ vi.mock('../../services/settings.js', () => ({
   setSetting: vi.fn(),
 }));
 
+// Stub Better Auth: this harness mocks the db, so the drizzle adapter cannot
+// create real sessions. Deterministic values keep the pair flow testable.
+vi.mock('../../lib/auth.js', () => ({
+  getAuth: vi.fn(),
+}));
+
 // Import mocked db and routes
 import { db } from '../../db/client.js';
+import { getAuth } from '../../lib/auth.js';
 import { mobileRoutes } from '../mobile.js';
 import { getSetting, setSetting as _setSetting } from '../../services/settings.js';
 
@@ -142,6 +149,20 @@ describe('Mobile Routes - Beta Mode Enabled', () => {
     mockRedis.eval.mockReset();
     mockRedis.ttl.mockReset();
     mockJwt.sign.mockReset();
+    vi.mocked(getAuth).mockReset();
+    vi.mocked(getAuth).mockReturnValue({
+      api: {
+        getSession: vi.fn().mockResolvedValue(null),
+      },
+      $context: Promise.resolve({
+        internalAdapter: {
+          createSession: vi
+            .fn()
+            .mockResolvedValue({ id: 'ba-session-id', token: 'ba-session-token' }),
+          deleteSession: vi.fn().mockResolvedValue(undefined),
+        },
+      }),
+    } as unknown as ReturnType<typeof getAuth>);
   });
 
   afterEach(async () => {
@@ -232,7 +253,7 @@ describe('Mobile Routes - Beta Mode Enabled', () => {
       // In beta mode, already-used tokens should be accepted
       expect(response.statusCode).toBe(200);
       const body = response.json();
-      expect(body.accessToken).toBe('mock.jwt.token');
+      expect(body.accessToken).toBe('ba-session-token');
     });
 
     it('does not mark token as used after pairing', async () => {
@@ -404,7 +425,7 @@ describe('Mobile Routes - Beta Mode Enabled', () => {
       // In beta mode, should succeed even at device limit
       expect(response.statusCode).toBe(200);
       const body = response.json();
-      expect(body.accessToken).toBe('mock.jwt.token');
+      expect(body.accessToken).toBe('ba-session-token');
     });
 
     it('allows pairing when exceeding device limit', async () => {

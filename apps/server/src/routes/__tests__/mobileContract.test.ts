@@ -50,7 +50,17 @@ vi.mock('../../services/settings.js', () => ({
   setSetting: vi.fn(),
 }));
 
+// getAuth is stubbed because this harness mocks the db out from under Better
+// Auth (its drizzle adapter cannot run against the vi.fn() db above), the same
+// way the db itself is mocked. Deterministic values only; nothing here is
+// under test. The real pair flow with a live createSession is exercised in the
+// live-DB integration gate. The frozen contract assertions below are unchanged.
+vi.mock('../../lib/auth.js', () => ({
+  getAuth: vi.fn(),
+}));
+
 import { db } from '../../db/client.js';
+import { getAuth } from '../../lib/auth.js';
 import { mobileRoutes } from '../mobile.js';
 
 const mockRedis = {
@@ -139,6 +149,20 @@ describe('mobile contract freeze', () => {
     mockRedis.eval.mockReset();
     mockRedis.ttl.mockReset();
     mockJwt.sign.mockReset();
+    vi.mocked(getAuth).mockReset();
+    vi.mocked(getAuth).mockReturnValue({
+      api: {
+        getSession: vi.fn().mockResolvedValue(null),
+      },
+      $context: Promise.resolve({
+        internalAdapter: {
+          createSession: vi
+            .fn()
+            .mockResolvedValue({ id: 'ba-session-id', token: 'ba-session-token' }),
+          deleteSession: vi.fn().mockResolvedValue(undefined),
+        },
+      }),
+    } as unknown as ReturnType<typeof getAuth>);
   });
 
   afterEach(async () => {

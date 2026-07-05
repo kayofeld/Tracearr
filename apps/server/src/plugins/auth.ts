@@ -12,8 +12,9 @@ import { db } from '../db/client.js';
 import { users, mobileSessions } from '../db/schema.js';
 import { getSetting } from '../services/settings.js';
 import { resolveBetterAuthUser } from '../lib/sessionResolver.js';
+import { hashSha256 } from '../utils/hash.js';
 
-// Module-level cache — populated at startup and refreshed after restore
+// Module-level cache - populated at startup and refreshed after restore
 let _jwtRevokedBefore: number | null = null; // Unix timestamp (seconds)
 
 export async function loadJwtRevokeSettings(): Promise<void> {
@@ -111,41 +112,97 @@ const authPlugin: FastifyPluginAsync = async (app) => {
     }
   });
 
-  // Require mobile token decorator - validates token was issued for mobile app
-  // Also checks if the device has been blacklisted (session revoked)
+  // Require mobile token decorator - dual-verify: legacy mobile JWTs first,
+  // then Better Auth bearer tokens mapped to a paired device via
+  // mobileSessions.refreshTokenHash. Both paths enforce the device blacklist
+  // and the throttled lastSeenAt update, and both fail closed.
   app.decorate('requireMobile', async function (request: FastifyRequest, reply: FastifyReply) {
+    let legacyVerified = false;
     try {
       await request.jwtVerify();
-      if (isTokenRevoked((request.user as AuthUser & { iat?: number }).iat)) {
-        return reply.unauthorized('Session invalidated — please log in again');
-      }
+      legacyVerified = true;
+    } catch {
+      // Not a legacy JWT - fall through to the Better Auth bearer path
+    }
 
-      if (!request.user.mobile) {
-        reply.forbidden('Mobile access token required');
-        return;
-      }
+    if (legacyVerified) {
+      try {
+        if (isTokenRevoked((request.user as AuthUser & { iat?: number }).iat)) {
+          return reply.unauthorized('Session invalidated. Please log in again');
+        }
 
-      // Check if this device's token has been blacklisted (session revoked)
-      if (request.user.deviceId) {
-        const blacklisted = await app.redis.get(
-          REDIS_KEYS.MOBILE_BLACKLISTED_TOKEN(request.user.deviceId)
-        );
-        if (blacklisted) {
-          reply.unauthorized('Session has been revoked');
+        if (!request.user.mobile) {
+          reply.forbidden('Mobile access token required');
           return;
         }
 
-        // Throttled lastSeenAt update — at most once per CACHE_TTL.MOBILE_LAST_SEEN
-        const throttleKey = REDIS_KEYS.MOBILE_LAST_SEEN(request.user.deviceId);
-        const alreadyRecent = await app.redis.get(throttleKey);
-        if (!alreadyRecent) {
-          await app.redis.set(throttleKey, '1', 'EX', CACHE_TTL.MOBILE_LAST_SEEN);
-          db.update(mobileSessions)
-            .set({ lastSeenAt: new Date() })
-            .where(eq(mobileSessions.deviceId, request.user.deviceId))
-            .catch(() => undefined);
+        // Check if this device's token has been blacklisted (session revoked)
+        if (request.user.deviceId) {
+          const blacklisted = await app.redis.get(
+            REDIS_KEYS.MOBILE_BLACKLISTED_TOKEN(request.user.deviceId)
+          );
+          if (blacklisted) {
+            reply.unauthorized('Session has been revoked');
+            return;
+          }
+
+          // Throttled lastSeenAt update - at most once per CACHE_TTL.MOBILE_LAST_SEEN
+          const throttleKey = REDIS_KEYS.MOBILE_LAST_SEEN(request.user.deviceId);
+          const alreadyRecent = await app.redis.get(throttleKey);
+          if (!alreadyRecent) {
+            await app.redis.set(throttleKey, '1', 'EX', CACHE_TTL.MOBILE_LAST_SEEN);
+            db.update(mobileSessions)
+              .set({ lastSeenAt: new Date() })
+              .where(eq(mobileSessions.deviceId, request.user.deviceId))
+              .catch(() => undefined);
+          }
         }
+      } catch {
+        reply.unauthorized('Invalid or expired token');
       }
+      return;
+    }
+
+    // Better Auth bearer path: the pair endpoint hands the app a Better Auth
+    // session token and stores its sha256 hash on the mobileSessions row, so
+    // a resolved session plus a matching row identifies the paired device.
+    try {
+      const baUser = await resolveBetterAuthUser(request);
+      if (!baUser) {
+        return reply.unauthorized('Invalid or expired token');
+      }
+
+      const authHeader = request.headers.authorization ?? '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      if (!token) {
+        return reply.unauthorized('Mobile access token required');
+      }
+
+      const [row] = await db
+        .select()
+        .from(mobileSessions)
+        .where(eq(mobileSessions.refreshTokenHash, hashSha256(token)))
+        .limit(1);
+      if (!row) {
+        return reply.forbidden('Mobile access token required');
+      }
+
+      const blacklisted = await app.redis.get(REDIS_KEYS.MOBILE_BLACKLISTED_TOKEN(row.deviceId));
+      if (blacklisted) {
+        return reply.unauthorized('Session has been revoked');
+      }
+
+      const throttleKey = REDIS_KEYS.MOBILE_LAST_SEEN(row.deviceId);
+      const alreadyRecent = await app.redis.get(throttleKey);
+      if (!alreadyRecent) {
+        await app.redis.set(throttleKey, '1', 'EX', CACHE_TTL.MOBILE_LAST_SEEN);
+        db.update(mobileSessions)
+          .set({ lastSeenAt: new Date() })
+          .where(eq(mobileSessions.deviceId, row.deviceId))
+          .catch(() => undefined);
+      }
+
+      request.user = { ...baUser, mobile: true, deviceId: row.deviceId };
     } catch {
       reply.unauthorized('Invalid or expired token');
     }

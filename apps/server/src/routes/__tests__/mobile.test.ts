@@ -54,8 +54,15 @@ vi.mock('../../services/settings.js', () => ({
   setSetting: vi.fn(),
 }));
 
+// Stub Better Auth: this harness mocks the db, so the drizzle adapter cannot
+// create real sessions. Deterministic values keep the pair flow testable.
+vi.mock('../../lib/auth.js', () => ({
+  getAuth: vi.fn(),
+}));
+
 // Import mocked db, routes, termination service, websocket, and settings
 import { db } from '../../db/client.js';
+import { getAuth } from '../../lib/auth.js';
 import { mobileRoutes } from '../mobile.js';
 import { terminateSession } from '../../services/termination.js';
 import { disconnectMobileDevice, disconnectAllMobileDevices } from '../../websocket/index.js';
@@ -269,6 +276,20 @@ describe('Mobile Routes', () => {
     mockRedis.ttl.mockReset();
     mockRedis.multi.mockReset().mockImplementation(() => createMultiMock());
     mockJwt.sign.mockReset();
+    vi.mocked(getAuth).mockReset();
+    vi.mocked(getAuth).mockReturnValue({
+      api: {
+        getSession: vi.fn().mockResolvedValue(null),
+      },
+      $context: Promise.resolve({
+        internalAdapter: {
+          createSession: vi
+            .fn()
+            .mockResolvedValue({ id: 'ba-session-id', token: 'ba-session-token' }),
+          deleteSession: vi.fn().mockResolvedValue(undefined),
+        },
+      }),
+    } as unknown as ReturnType<typeof getAuth>);
   });
 
   afterEach(async () => {
@@ -937,8 +958,8 @@ describe('Mobile Routes', () => {
 
       expect(response.statusCode).toBe(200);
       const body = response.json();
-      expect(body.accessToken).toBe('mock.jwt.token');
-      expect(body.refreshToken).toBeDefined();
+      expect(body.accessToken).toBe('ba-session-token');
+      expect(body.refreshToken).toBe('ba-session-token');
       expect(body.server.id).toBe(mockServerId);
       expect(body.server.name).toBe('MyServer');
       expect(body.server.type).toBe('plex');

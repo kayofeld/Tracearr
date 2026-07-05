@@ -20,7 +20,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { createHash, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import { eq, and, gt, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type {
@@ -36,9 +36,18 @@ import {
   terminateSessionBodySchema,
 } from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { mobileTokens, mobileSessions, servers, users, sessions } from '../db/schema.js';
+import {
+  mobileTokens,
+  mobileSessions,
+  servers,
+  users,
+  sessions,
+  authSessions,
+} from '../db/schema.js';
+import { getAuth } from '../lib/auth.js';
 import { terminateSession } from '../services/termination.js';
 import { getSetting, setSetting } from '../services/settings.js';
+import { hashSha256 } from '../utils/hash.js';
 import { hasServerAccess } from '../utils/serverFiltering.js';
 import { disconnectMobileDevice, disconnectAllMobileDevices } from '../websocket/index.js';
 
@@ -109,13 +118,6 @@ function generateMobileToken(): string {
 }
 
 /**
- * Hash a token using SHA-256
- */
-function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
-}
-
-/**
  * Generate a refresh token
  */
 function generateRefreshToken(): string {
@@ -133,6 +135,34 @@ async function deleteSessionRefreshTokens(
   if (session.previousRefreshTokenHash) {
     await redis.del(REDIS_KEYS.MOBILE_REFRESH_TOKEN(session.previousRefreshTokenHash));
   }
+}
+
+/**
+ * Delete the Better Auth session linked to a mobile session so a revoked
+ * device cannot keep using its bearer token. The adapter delete (by raw token,
+ * recovered from the auth_sessions row) also clears the secondary-storage
+ * cache; the direct row delete is an idempotent fallback in case the adapter
+ * call fails. The device blacklist remains the immediate control either way.
+ */
+async function revokeBetterAuthSession(betterAuthSessionId: string | null): Promise<void> {
+  if (!betterAuthSessionId) return;
+
+  const [row] = await db
+    .select({ token: authSessions.token })
+    .from(authSessions)
+    .where(eq(authSessions.id, betterAuthSessionId))
+    .limit(1);
+
+  if (row) {
+    try {
+      const authCtx = await getAuth().$context;
+      await authCtx.internalAdapter.deleteSession(row.token);
+    } catch {
+      // fall through to the direct delete below
+    }
+  }
+
+  await db.delete(authSessions).where(eq(authSessions.id, betterAuthSessionId));
 }
 
 export const mobileRoutes: FastifyPluginAsync = async (app) => {
@@ -311,7 +341,7 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
 
         // Generate token
         const token = generateMobileToken();
-        const tokenHash = hashToken(token);
+        const tokenHash = hashSha256(token);
         // In beta mode, tokens effectively never expire
         const expiryMs = isBetaMode()
           ? BETA_TOKEN_EXPIRY_YEARS * 365 * 24 * 60 * 60 * 1000
@@ -379,6 +409,7 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
         '1'
       );
       await deleteSessionRefreshTokens(app.redis, session);
+      await revokeBetterAuthSession(session.betterAuthSessionId);
     }
     disconnectAllMobileDevices(authUser.userId);
     await db.delete(mobileSessions);
@@ -412,6 +443,9 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
         '1'
       );
       await deleteSessionRefreshTokens(app.redis, session);
+
+      // 2. Kill the linked Better Auth session (BA-backed pairings)
+      await revokeBetterAuthSession(session.betterAuthSessionId);
     }
 
     // 3. Force-disconnect all mobile sockets for this user
@@ -472,7 +506,10 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
     // 3. Delete refresh tokens from Redis
     await deleteSessionRefreshTokens(app.redis, session);
 
-    // 4. Delete session from DB (notification_preferences cascade-deleted via FK)
+    // 4. Kill the linked Better Auth session (BA-backed pairings)
+    await revokeBetterAuthSession(session.betterAuthSessionId);
+
+    // 5. Delete session from DB (notification_preferences cascade-deleted via FK)
     await db.delete(mobileSessions).where(eq(mobileSessions.id, id));
 
     app.log.info(
@@ -581,7 +618,7 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
       return reply.unauthorized('Invalid mobile token');
     }
 
-    const tokenHash = hashToken(token);
+    const tokenHash = hashSha256(token);
 
     // Check max devices before attempting pair
     const sessionsCount = await db
@@ -613,7 +650,13 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
       serverType: 'plex' | 'jellyfin' | 'emby';
       serverIds: string[];
       oldRefreshTokenHash?: string; // Track old hash for cleanup outside transaction
+      oldBetterAuthSessionId?: string | null; // Previous BA session to revoke on re-pair
     };
+
+    // Better Auth manages its own writes on a separate connection, so the
+    // session it creates commits independently of this transaction. Track it
+    // so a transaction failure can delete the orphaned session (fail closed).
+    const createdBaSession: { current: { id: string; token: string } | null } = { current: null };
 
     try {
       result = await db.transaction(async (tx) => {
@@ -664,9 +707,14 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
         const serverId = primaryServer?.id || '';
         const serverType = primaryServer?.type || 'plex';
 
-        // Generate refresh token
-        const newRefreshToken = generateRefreshToken();
-        const refreshTokenHash = hashToken(newRefreshToken);
+        // Create the Better Auth session that backs this pairing. Both the
+        // access and refresh tokens are the opaque BA session token; the
+        // refresh lookup path keeps working because the row still stores
+        // its sha256 hash.
+        const authCtx = await getAuth().$context;
+        const baSession = await authCtx.internalAdapter.createSession(owner.id);
+        createdBaSession.current = { id: baSession.id, token: baSession.token };
+        const refreshTokenHash = hashSha256(baSession.token);
 
         // Track old refresh token hash for cleanup (if updating existing session)
         let oldHash: string | undefined;
@@ -681,6 +729,7 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
             .set({
               refreshTokenHash,
               previousRefreshTokenHash: null,
+              betterAuthSessionId: baSession.id,
               deviceName,
               platform,
               deviceSecret: deviceSecret ?? null,
@@ -692,6 +741,7 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
           // Create new session - link to the owner user who generated the pairing token
           await tx.insert(mobileSessions).values({
             refreshTokenHash,
+            betterAuthSessionId: baSession.id,
             deviceName,
             deviceId,
             platform,
@@ -709,31 +759,30 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
             .where(eq(mobileTokens.id, tokenRow.id));
         }
 
-        // Generate access token
-        const accessToken = app.jwt.sign(
-          {
-            userId: owner.id,
-            username: owner.username,
-            role: 'owner',
-            serverIds,
-            mobile: true,
-            deviceId,
-          },
-          { expiresIn: MOBILE_ACCESS_EXPIRY }
-        );
-
         return {
-          accessToken,
-          refreshToken: newRefreshToken,
+          accessToken: baSession.token,
+          refreshToken: baSession.token,
           owner: { id: owner.id, username: owner.username },
           serverName,
           serverId,
           serverType,
           serverIds,
           oldRefreshTokenHash: oldHash,
+          oldBetterAuthSessionId: existingSession[0]?.betterAuthSessionId ?? null,
         };
       });
     } catch (err) {
+      // The BA session commits outside this transaction; remove it so a
+      // failed pairing never leaves a valid orphaned session behind.
+      if (createdBaSession.current) {
+        try {
+          const authCtx = await getAuth().$context;
+          await authCtx.internalAdapter.deleteSession(createdBaSession.current.token);
+        } catch {
+          // best effort; the session is unreachable without the pair response
+        }
+      }
+
       const message = err instanceof Error ? err.message : 'Unknown error';
 
       if (message === 'INVALID_TOKEN') {
@@ -762,9 +811,14 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
       await app.redis.del(REDIS_KEYS.MOBILE_REFRESH_TOKEN(result.oldRefreshTokenHash));
     }
 
+    // Revoke the previous Better Auth session if this device re-paired
+    if (result.oldBetterAuthSessionId) {
+      await revokeBetterAuthSession(result.oldBetterAuthSessionId);
+    }
+
     // Store new refresh token in Redis
     await app.redis.setex(
-      REDIS_KEYS.MOBILE_REFRESH_TOKEN(hashToken(result.refreshToken)),
+      REDIS_KEYS.MOBILE_REFRESH_TOKEN(hashSha256(result.refreshToken)),
       MOBILE_REFRESH_TTL,
       JSON.stringify({ userId: result.owner.id, deviceId })
     );
@@ -825,7 +879,7 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { refreshToken } = body.data;
-    const refreshTokenHash = hashToken(refreshToken);
+    const refreshTokenHash = hashSha256(refreshToken);
 
     // Look up refresh token in Redis, fall back to DB
     let userId: string;
@@ -835,7 +889,7 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
     if (stored) {
       ({ userId, deviceId } = JSON.parse(stored) as { userId: string; deviceId: string });
     } else {
-      // Redis miss — check DB
+      // Redis miss - check DB
       const dbSession = await db
         .select()
         .from(mobileSessions)
@@ -897,6 +951,32 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
       return reply.unauthorized('Session has been revoked');
     }
 
+    // Better Auth backed pairing: the token is the BA session token, so
+    // verify it via getSession (which also extends the session per updateAge)
+    // and return it unrotated in both fields.
+    if (sessionRow[0]!.betterAuthSessionId) {
+      let baSession = null;
+      try {
+        const headers = new Headers({ authorization: `Bearer ${refreshToken}` });
+        baSession = await getAuth().api.getSession({ headers });
+      } catch {
+        baSession = null; // fail closed on lookup errors
+      }
+      if (!baSession) {
+        return reply.unauthorized('Invalid or expired refresh token');
+      }
+
+      await db
+        .update(mobileSessions)
+        .set({ lastSeenAt: new Date() })
+        .where(eq(mobileSessions.id, sessionRow[0]!.id));
+
+      return {
+        accessToken: refreshToken,
+        refreshToken,
+      };
+    }
+
     // Get all server IDs
     const allServers = await db.select({ id: servers.id }).from(servers);
     const serverIds = allServers.map((s) => s.id);
@@ -916,7 +996,7 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
 
     // Rotate refresh token
     const newRefreshToken = generateRefreshToken();
-    const newRefreshTokenHash = hashToken(newRefreshToken);
+    const newRefreshTokenHash = hashSha256(newRefreshToken);
 
     await db
       .update(mobileSessions)
