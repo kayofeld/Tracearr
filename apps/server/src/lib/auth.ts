@@ -6,6 +6,7 @@ import {
   bearer,
   genericOAuth,
 } from 'better-auth/plugins';
+import { adminAc } from 'better-auth/plugins/admin/access';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import type { Redis } from 'ioredis';
 import { db } from '../db/client.js';
@@ -118,7 +119,12 @@ function buildAuth(redis: Redis) {
     },
     plugins: [
       usernamePlugin(),
-      adminPlugin({ adminRoles: ['owner'] }),
+      // adminRoles must have a matching entry in `roles` - the admin plugin
+      // validates adminRoles against Object.keys(roles ?? { admin, user })
+      // at construction time and throws BetterAuthError otherwise. Only
+      // 'owner' needs admin powers today; admin/viewer/member/disabled/
+      // pending (see schema.ts users.role) never reach this plugin.
+      adminPlugin({ adminRoles: ['owner'], roles: { owner: adminAc } }),
       bearer(),
       plexPlugin(),
       ...(oidcConfigured
