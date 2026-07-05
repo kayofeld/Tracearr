@@ -8,9 +8,13 @@ import { SocketProvider } from '@/hooks/useSocket';
 import { MaintenanceProvider } from '@/hooks/useMaintenanceMode';
 import { ThemeProvider } from '@/components/theme-provider';
 import { BASE_URL } from '@/lib/basePath';
+import { sweepLegacyTokens } from '@/lib/legacyTokenSweep';
 import { App } from './App';
 import { i18nReady } from './i18n';
 import './styles/globals.css';
+
+// Run before anything else can read stale localStorage tokens from pre-cookie-session builds.
+sweepLegacyTokens();
 
 const queryClient = new QueryClient({
   defaultOptions: {
