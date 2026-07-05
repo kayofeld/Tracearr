@@ -1,7 +1,8 @@
 import { createContext, useContext, useCallback, useMemo, useEffect, type ReactNode } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AuthUser } from '@tracearr/shared';
-import { api, tokenStorage, AUTH_STATE_CHANGE_EVENT, BASE_URL } from '@/lib/api';
+import { api, AUTH_STATE_CHANGE_EVENT, BASE_URL } from '@/lib/api';
+import { authClient } from '@/lib/authClient';
 
 interface UserProfile extends AuthUser {
   email: string | null;
@@ -31,10 +32,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   } = useQuery({
     queryKey: ['auth', 'me'],
     queryFn: async () => {
-      // Don't even try if no token
-      if (!tokenStorage.getAccessToken()) {
-        return null;
-      }
       try {
         const user = await api.auth.me();
         // Return full user profile including thumbUrl
@@ -50,9 +47,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           hasPlexLinked: user.hasPlexLinked,
         } as UserProfile;
       } catch {
-        // Don't clear tokens on network errors (e.g., server restart)
-        // The API layer already clears tokens on real auth failures (401 + failed refresh)
-        // Just return null to indicate "not currently authenticated"
+        // No session cookie, an expired session, or a network error - either way
+        // there's no authenticated user to show right now.
         return null;
       }
     },
@@ -60,9 +56,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // - 3 retries (industry standard)
     // - Exponential backoff with full jitter to prevent thundering herd
     // - Cap at 10s to prevent excessively long waits
-    // - Only retry on network errors, not on 4xx auth errors (handled by API layer)
+    // - Only retry on network errors, not on 4xx auth errors
     retry: (failureCount, error) => {
-      // Don't retry on auth errors (4xx) - API layer handles token refresh
+      // Don't retry on auth errors (4xx) - there's no session to recover
       // Only retry on network errors (TypeError: fetch failed, etc.)
       if (error instanceof Error && error.message.includes('401')) return false;
       if (error instanceof Error && error.message.includes('403')) return false;
@@ -84,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refetchOnWindowFocus: true,
   });
 
-  // Listen for auth state changes (e.g., token cleared due to failed refresh)
+  // Listen for auth state changes (e.g., session cookie rejected by the API)
   useEffect(() => {
     const handleAuthChange = () => {
       // Immediately clear auth data and redirect to login
@@ -97,47 +93,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(AUTH_STATE_CHANGE_EVENT, handleAuthChange);
   }, [queryClient]);
 
-  const logoutMutation = useMutation({
-    mutationFn: async () => {
-      try {
-        await api.auth.logout();
-      } catch {
-        // Ignore API errors - we're logging out anyway
-      } finally {
-        // Use silent mode to avoid double-redirect (we handle redirect in onSettled)
-        tokenStorage.clearTokens(true);
-      }
-    },
-    onSettled: () => {
-      // Always redirect, whether success or failure
-      queryClient.setQueryData(['auth', 'me'], null);
-      queryClient.clear();
-      window.location.href = `${BASE_URL}login`;
-    },
-  });
-
   const logout = useCallback(async () => {
-    await logoutMutation.mutateAsync();
-  }, [logoutMutation]);
-
-  // Optimistic authentication pattern (industry standard):
-  // - If we have tokens in localStorage, assume authenticated until tokens are cleared
-  // - Tokens only get cleared on explicit 401/403 from the server
-  // - This prevents "logout" during temporary server unavailability (restarts, network issues)
-  // See: https://github.com/TanStack/query/discussions/1547
-  const hasTokens = !!tokenStorage.getAccessToken();
+    await authClient.signOut();
+    queryClient.setQueryData(['auth', 'me'], null);
+    await queryClient.invalidateQueries({ queryKey: ['auth'] });
+  }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user: userData ?? null,
       isLoading,
-      // Optimistic: authenticated if we have tokens (server might just be temporarily down)
-      // Only false when tokens are explicitly cleared (logout or 401/403 rejection)
-      isAuthenticated: hasTokens,
+      isAuthenticated: !!userData,
       logout,
       refetch,
     }),
-    [userData, isLoading, hasTokens, logout, refetch]
+    [userData, isLoading, logout, refetch]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -156,8 +126,8 @@ export function useRequireAuth(): AuthContextValue {
   const auth = useAuth();
 
   useEffect(() => {
-    // isAuthenticated is now token-based (optimistic auth)
-    // So this only triggers when tokens don't exist (never logged in, or explicitly logged out)
+    // Only triggers once the /me query has resolved with no session
+    // (never logged in, session expired, or explicitly logged out)
     if (!auth.isAuthenticated) {
       window.location.href = `${BASE_URL}login`;
     }

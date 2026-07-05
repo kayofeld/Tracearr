@@ -30,7 +30,6 @@ import { WS_EVENTS } from '@tracearr/shared';
 import { useAuth } from './useAuth';
 import { useMaintenanceMode } from './useMaintenanceMode';
 import { toast } from 'sonner';
-import { tokenStorage } from '@/lib/api';
 import { useChannelRouting } from './queries';
 import { api } from '@/lib/api';
 
@@ -132,13 +131,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Get JWT token for authentication
-    const token = tokenStorage.getAccessToken();
-    if (!token) {
-      return;
-    }
-
-    // Create socket connection with auth token
+    // Session cookie rides the handshake via withCredentials
     const newSocket: TypedSocket = io({
       path: `${BASE_PATH}/socket.io`,
       withCredentials: true,
@@ -146,9 +139,6 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
-      auth: {
-        token,
-      },
     });
 
     newSocket.on('connect', () => {
@@ -402,7 +392,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       unhealthyServers,
       serverConnectionStatuses,
     }),
-    [socket, isConnected, subscribeSessions, unsubscribeSessions, unhealthyServers, serverConnectionStatuses]
+    [
+      socket,
+      isConnected,
+      subscribeSessions,
+      unsubscribeSessions,
+      unhealthyServers,
+      serverConnectionStatuses,
+    ]
   );
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;

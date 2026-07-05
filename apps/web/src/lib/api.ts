@@ -202,74 +202,18 @@ export const tokenStorage = {
   },
 };
 
+// Base URL for the API itself, e.g. "/api/v1" (or "/tracearr/api/v1" behind a subpath).
+// Used by both ApiClient and authClient so they always target the same origin/basePath.
+export const API_BASE_URL = `${BASE_PATH}${API_BASE_PATH}`;
+
 class ApiClient {
   private baseUrl: string;
-  private isRefreshing = false;
-  private refreshPromise: Promise<boolean> | null = null;
 
-  constructor(baseUrl: string = `${BASE_PATH}${API_BASE_PATH}`) {
+  constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl;
   }
 
-  /**
-   * Attempt to refresh the access token using the refresh token
-   * Returns true if refresh succeeded, false otherwise
-   */
-  private async refreshAccessToken(): Promise<boolean> {
-    const refreshToken = tokenStorage.getRefreshToken();
-    if (!refreshToken) {
-      return false;
-    }
-
-    try {
-      const response = await fetch(`${this.baseUrl}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
-      });
-
-      if (!response.ok) {
-        // Only clear tokens on explicit auth rejection (401/403)
-        // Don't clear on server errors (500, 502, 503) - server might be restarting
-        if (response.status === 401 || response.status === 403) {
-          tokenStorage.clearTokens();
-        }
-        return false;
-      }
-
-      const data = await response.json();
-      if (data.accessToken && data.refreshToken) {
-        tokenStorage.setTokens(data.accessToken, data.refreshToken);
-        return true;
-      }
-
-      return false;
-    } catch {
-      // Network error (server down, timeout, etc.)
-      // DON'T clear tokens - they might still be valid when server comes back
-      return false;
-    }
-  }
-
-  /**
-   * Handle token refresh with deduplication
-   * Multiple concurrent 401s will share the same refresh attempt
-   */
-  private async handleTokenRefresh(): Promise<boolean> {
-    if (this.isRefreshing) {
-      return this.refreshPromise!;
-    }
-
-    this.isRefreshing = true;
-    this.refreshPromise = this.refreshAccessToken().finally(() => {
-      this.isRefreshing = false;
-      this.refreshPromise = null;
-    });
-
-    return this.refreshPromise;
-  }
-
-  private async request<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
+  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
       ...(options.headers as Record<string, string>),
     };
@@ -280,37 +224,28 @@ class ApiClient {
       headers['Content-Type'] = 'application/json';
     }
 
-    // Add Authorization header if we have a token
-    const token = tokenStorage.getAccessToken();
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
       credentials: 'include',
       headers,
     });
 
-    // Handle 401 with automatic token refresh (skip for auth endpoints to avoid loops)
-    // Note: /auth/me is NOT in this list - it SHOULD trigger token refresh on 401
-    const noRetryPaths = [
+    // A 401 means the session cookie is missing or expired - there's no token to
+    // refresh anymore, so just clear the cached auth state and let the auth
+    // context redirect to login. Skip this for auth endpoints where a 401/403
+    // is an expected response (e.g. bad login credentials) rather than a lost session.
+    const noAuthClearPaths = [
       '/auth/login',
       '/auth/signup',
-      '/auth/refresh',
       '/auth/logout',
       '/auth/plex/check-pin',
       '/auth/callback',
     ];
-    const shouldRetry = !noRetryPaths.some((p) => path.startsWith(p));
-    if (response.status === 401 && !isRetry && shouldRetry) {
-      const refreshed = await this.handleTokenRefresh();
-      if (refreshed) {
-        // Retry the original request with new token
-        return this.request<T>(path, options, true);
-      }
-      // Refresh failed - tokens already cleared by refreshAccessToken() if it was a real auth failure
-      // Don't clear here - might just be a network error (server restarting)
+    const shouldClearAuth = !noAuthClearPaths.some((p) => path.startsWith(p));
+    if (response.status === 401 && shouldClearAuth) {
+      window.dispatchEvent(
+        new CustomEvent(AUTH_STATE_CHANGE_EVENT, { detail: { type: 'logout' } })
+      );
     }
 
     // Detect maintenance mode (503 with maintenance flag)
