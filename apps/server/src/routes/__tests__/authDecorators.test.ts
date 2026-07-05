@@ -229,3 +229,21 @@ describe('auth decorators with better auth sessions', () => {
     });
   });
 });
+
+describe('auth plugin startup validation', () => {
+  const original = process.env.BETTER_AUTH_SECRET;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.BETTER_AUTH_SECRET;
+    else process.env.BETTER_AUTH_SECRET = original;
+  });
+
+  it('refuses to register when BETTER_AUTH_SECRET is missing', async () => {
+    delete process.env.BETTER_AUTH_SECRET;
+    const app = Fastify({ logger: false });
+    await app.register(sensible);
+    await app.register(cookie, { secret: 'test-cookie-secret' });
+    await expect(app.register(authPlugin).after()).rejects.toThrow('BETTER_AUTH_SECRET');
+    await app.close();
+  });
+});
