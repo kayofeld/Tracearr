@@ -35,8 +35,10 @@ function collectFiles(dir: string, ext: string[] = ['.ts', '.tsx']): string[] {
 describe('frontend: no hardcoded fetch URLs', () => {
   // Matches fetch('/anything') or fetch("/anything") — direct fetch calls that
   // bypass the API client and don't use BASE_PATH.
-  // Allowed: fetch(`${BASE_PATH}/...`) or fetch(`${someVar}/...`)
-  const HARDCODED_FETCH = /fetch\(\s*['"]\/[^'"]*/g;
+  // Allowed: fetch(`${BASE_PATH}/...`) or fetch(`${someVar}/...`), and client
+  // methods like authClient.$fetch('/...') that resolve against a
+  // BASE_PATH-aware baseURL (the lookbehind skips anything but a bare fetch).
+  const HARDCODED_FETCH = /(?<![\w$.])fetch\(\s*['"]\/[^'"]*/g;
 
   const files = collectFiles(WEB_SRC);
 

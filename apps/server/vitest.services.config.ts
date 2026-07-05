@@ -25,6 +25,10 @@ export default mergeConfig(
         'src/jobs/poller/__tests__/*.test.ts',
         'src/db/__tests__/*.test.ts',
       ],
+      // Integration tests need the live 5433 test database and its setup file
+      // (vitest.integration.config.ts); the src/db glob above would otherwise
+      // pull them in here without that environment.
+      exclude: ['**/node_modules/**', '**/dist/**', '**/*.integration.test.ts'],
       coverage: {
         provider: 'v8',
         reporter: ['text', 'json', 'json-summary'],
