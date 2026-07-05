@@ -33,6 +33,7 @@ process.env.DATABASE_URL =
   process.env.TEST_DATABASE_URL || 'postgresql://test:test@localhost:5433/tracearr_test';
 // Use port 6380 for test Redis to avoid conflicts with dev
 process.env.REDIS_URL = process.env.TEST_REDIS_URL || 'redis://localhost:6380';
+process.env.BETTER_AUTH_SECRET = 'test-better-auth-secret-32-chars!!';
 
 // Install custom vitest matchers from test-utils
 installMatchers();

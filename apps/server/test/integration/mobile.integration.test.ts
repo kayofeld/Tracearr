@@ -597,7 +597,10 @@ describe('Mobile Authentication Integration Tests', () => {
       mobileJwt = pairBody.accessToken;
     });
 
-    it('should refresh token and rotate refresh token', async () => {
+    it('returns the same token for better auth backed sessions', async () => {
+      // Pairing is Better Auth backed now, so the refresh token IS the BA
+      // session token. Refresh verifies + extends the session and returns
+      // it unrotated (see mobile.ts betterAuthSessionId branch).
       const res = await app.inject({
         method: 'POST',
         url: '/api/v1/mobile/refresh',
@@ -608,32 +611,86 @@ describe('Mobile Authentication Integration Tests', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.accessToken).toBeDefined();
-      expect(body.refreshToken).toBeDefined();
+      expect(typeof body.accessToken).toBe('string');
+      expect(typeof body.refreshToken).toBe('string');
 
-      // New refresh token should be different (rotation)
-      expect(body.refreshToken).not.toBe(validRefreshToken);
+      // Unrotated: same token returned back
+      expect(body.refreshToken).toBe(validRefreshToken);
 
-      // Old refresh token is allowed during the 30s grace period (handles mobile network retries)
-      // Verify it still works within the grace window but returns a fresh token pair
+      // Session remains valid for a subsequent refresh call
       const secondRes = await app.inject({
         method: 'POST',
         url: '/api/v1/mobile/refresh',
         payload: {
-          refreshToken: validRefreshToken,
+          refreshToken: body.refreshToken,
         },
       });
 
       expect(secondRes.statusCode).toBe(200);
       const secondBody = secondRes.json();
-      expect(secondBody.accessToken).toBeDefined();
-      expect(secondBody.refreshToken).toBeDefined();
-      // Grace period replay should still rotate to yet another token
-      expect(secondBody.refreshToken).not.toBe(validRefreshToken);
+      expect(typeof secondBody.accessToken).toBe('string');
+      expect(typeof secondBody.refreshToken).toBe('string');
+      expect(secondBody.refreshToken).toBe(validRefreshToken);
 
       // Update for subsequent tests
       validRefreshToken = body.refreshToken;
       mobileJwt = body.accessToken;
+    });
+
+    it('rotates the refresh token for legacy (non-Better-Auth) pairings', async () => {
+      // Simulate a pairing created before the Better Auth migration: a
+      // mobileSessions row with a refreshTokenHash but no betterAuthSessionId.
+      const legacyRefreshToken = generateTestMobileToken();
+      const legacyRefreshTokenHash = hashToken(legacyRefreshToken);
+
+      await db.insert(mobileSessions).values({
+        userId: testData.ownerId,
+        refreshTokenHash: legacyRefreshTokenHash,
+        deviceName: 'Legacy Device',
+        deviceId: 'device-legacy-test',
+        platform: 'ios',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/mobile/refresh',
+        payload: {
+          refreshToken: legacyRefreshToken,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.accessToken).toBeDefined();
+      expect(body.refreshToken).toBeDefined();
+
+      // Legacy sessions still rotate on every refresh
+      expect(body.refreshToken).not.toBe(legacyRefreshToken);
+
+      // Old refresh token is allowed during the 30s grace period (handles mobile network retries)
+      // but each replay still rotates to a fresh token pair
+      const secondRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/mobile/refresh',
+        payload: {
+          refreshToken: legacyRefreshToken,
+        },
+      });
+
+      expect(secondRes.statusCode).toBe(200);
+      const secondBody = secondRes.json();
+      expect(secondBody.refreshToken).not.toBe(legacyRefreshToken);
+      expect(secondBody.refreshToken).not.toBe(body.refreshToken);
+
+      // The stored hash advances on every rotation, confirming the legacy
+      // path never settles on a single unrotated token like the BA path does
+      const [sessionRow] = await db
+        .select()
+        .from(mobileSessions)
+        .where(eq(mobileSessions.deviceId, 'device-legacy-test'));
+
+      expect(sessionRow.betterAuthSessionId).toBeNull();
+      expect(sessionRow.refreshTokenHash).not.toBe(legacyRefreshTokenHash);
     });
 
     it('should reject invalid refresh token', async () => {
