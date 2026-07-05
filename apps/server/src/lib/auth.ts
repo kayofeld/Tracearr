@@ -1,6 +1,11 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { username as usernamePlugin, admin as adminPlugin, bearer } from 'better-auth/plugins';
+import {
+  username as usernamePlugin,
+  admin as adminPlugin,
+  bearer,
+  genericOAuth,
+} from 'better-auth/plugins';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import type { Redis } from 'ioredis';
 import { db } from '../db/client.js';
@@ -11,6 +16,15 @@ import { requireBetterAuthSecret } from './env.js';
 import { assertSignupAllowed, assertClaimCode, assertUserCanLogin } from './authGuards.js';
 import { getRedis, closeRedis } from './redisShared.js';
 import { plexPlugin } from './plexPlugin.js';
+
+const oidcEnv = {
+  issuer: process.env.OIDC_ISSUER_URL,
+  clientId: process.env.OIDC_CLIENT_ID,
+  clientSecret: process.env.OIDC_CLIENT_SECRET,
+};
+
+/** True only when all three required OIDC env vars are set. Config-gates the genericOAuth plugin. */
+export const oidcConfigured = !!(oidcEnv.issuer && oidcEnv.clientId && oidcEnv.clientSecret);
 
 function buildAuth(redis: Redis) {
   const prefix = process.env.REDIS_PREFIX ?? '';
@@ -50,6 +64,12 @@ function buildAuth(redis: Redis) {
       updateAge: 60 * 60 * 24,
       storeSessionInDatabase: true,
       cookieCache: { enabled: true, maxAge: 5 * 60 },
+    },
+    account: {
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ['oidc'],
+      },
     },
     secondaryStorage: {
       get: async (key) => redis.get(rkey(key)),
@@ -96,7 +116,28 @@ function buildAuth(redis: Redis) {
         }
       }),
     },
-    plugins: [usernamePlugin(), adminPlugin({ adminRoles: ['owner'] }), bearer(), plexPlugin()],
+    plugins: [
+      usernamePlugin(),
+      adminPlugin({ adminRoles: ['owner'] }),
+      bearer(),
+      plexPlugin(),
+      ...(oidcConfigured
+        ? [
+            genericOAuth({
+              config: [
+                {
+                  providerId: 'oidc',
+                  clientId: oidcEnv.clientId!,
+                  clientSecret: oidcEnv.clientSecret!,
+                  discoveryUrl: `${oidcEnv.issuer!.replace(/\/$/, '')}/.well-known/openid-configuration`,
+                  scopes: ['openid', 'email', 'profile'],
+                  pkce: true,
+                },
+              ],
+            }),
+          ]
+        : []),
+    ],
   });
 }
 

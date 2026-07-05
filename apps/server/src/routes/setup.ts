@@ -8,6 +8,7 @@ import { db } from '../db/client.js';
 import { servers, users } from '../db/schema.js';
 import { isClaimCodeEnabled } from '../utils/claimCode.js';
 import { getSetting } from '../services/settings.js';
+import { oidcConfigured } from '../lib/auth.js';
 
 export const setupRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -31,7 +32,10 @@ export const setupRoutes: FastifyPluginAsync = async (app) => {
       db.select({ id: users.id }).from(users).where(isNotNull(users.passwordHash)).limit(1),
     ]);
 
-    const primaryAuthMethod = await getSetting('primaryAuthMethod');
+    const [primaryAuthMethod, localLoginEnabled] = await Promise.all([
+      getSetting('primaryAuthMethod'),
+      getSetting('localLoginEnabled'),
+    ]);
 
     const needsSetup = ownerList.length === 0;
 
@@ -42,6 +46,12 @@ export const setupRoutes: FastifyPluginAsync = async (app) => {
       hasJellyfinServers: jellyfinServerList.length > 0,
       hasPasswordAuth: passwordUserList.length > 0,
       primaryAuthMethod,
+      authMethods: {
+        local: localLoginEnabled,
+        plex: true,
+        oidc: oidcConfigured,
+        oidcProviderName: oidcConfigured ? (process.env.OIDC_PROVIDER_NAME ?? 'SSO') : null,
+      },
     };
   });
 };

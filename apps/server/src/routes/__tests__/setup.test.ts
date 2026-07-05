@@ -33,7 +33,8 @@ import { setupRoutes } from '../setup.js';
  * 2. Jellyfin servers (where type = 'jellyfin')
  * 3. Owners (where role = 'owner')
  * 4. Password users (where passwordHash is not null)
- * Plus a 5th query for settings (which may fail and default to 'local')
+ * Plus 2 settings queries (primaryAuthMethod, localLoginEnabled), which fall
+ * through to defaults ('local', true) when unmocked.
  */
 function mockDbSelectMultiple(results: unknown[][]) {
   let callIndex = 0;
@@ -105,6 +106,12 @@ describe('Setup Routes', () => {
         hasJellyfinServers: false,
         hasPasswordAuth: false,
         primaryAuthMethod: 'local',
+        authMethods: {
+          local: true,
+          plex: true,
+          oidc: false,
+          oidcProviderName: null,
+        },
       });
     });
 
@@ -136,6 +143,12 @@ describe('Setup Routes', () => {
         hasJellyfinServers: false,
         hasPasswordAuth: false,
         primaryAuthMethod: 'local',
+        authMethods: {
+          local: true,
+          plex: true,
+          oidc: false,
+          oidcProviderName: null,
+        },
       });
     });
 
@@ -164,6 +177,12 @@ describe('Setup Routes', () => {
         hasJellyfinServers: true,
         hasPasswordAuth: true,
         primaryAuthMethod: 'local',
+        authMethods: {
+          local: true,
+          plex: true,
+          oidc: false,
+          oidcProviderName: null,
+        },
       });
     });
 
@@ -192,6 +211,12 @@ describe('Setup Routes', () => {
         hasJellyfinServers: false,
         hasPasswordAuth: false,
         primaryAuthMethod: 'local',
+        authMethods: {
+          local: true,
+          plex: true,
+          oidc: false,
+          oidcProviderName: null,
+        },
       });
     });
 
@@ -220,6 +245,12 @@ describe('Setup Routes', () => {
         hasJellyfinServers: false,
         hasPasswordAuth: true,
         primaryAuthMethod: 'local',
+        authMethods: {
+          local: true,
+          plex: true,
+          oidc: false,
+          oidcProviderName: null,
+        },
       });
     });
 
@@ -248,6 +279,12 @@ describe('Setup Routes', () => {
         hasJellyfinServers: true,
         hasPasswordAuth: false,
         primaryAuthMethod: 'local',
+        authMethods: {
+          local: true,
+          plex: true,
+          oidc: false,
+          oidcProviderName: null,
+        },
       });
     });
 
@@ -276,6 +313,12 @@ describe('Setup Routes', () => {
         hasJellyfinServers: false,
         hasPasswordAuth: false,
         primaryAuthMethod: 'local',
+        authMethods: {
+          local: true,
+          plex: true,
+          oidc: false,
+          oidcProviderName: null,
+        },
       });
     });
 
@@ -304,6 +347,12 @@ describe('Setup Routes', () => {
         hasJellyfinServers: true,
         hasPasswordAuth: true,
         primaryAuthMethod: 'local',
+        authMethods: {
+          local: true,
+          plex: true,
+          oidc: false,
+          oidcProviderName: null,
+        },
       });
     });
   });

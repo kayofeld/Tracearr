@@ -146,6 +146,21 @@ export interface AuthUser {
   deviceId?: string; // Device identifier for mobile tokens
 }
 
+export interface SetupStatus {
+  needsSetup: boolean;
+  requiresClaimCode: boolean;
+  hasServers: boolean;
+  hasJellyfinServers: boolean;
+  hasPasswordAuth: boolean;
+  primaryAuthMethod: 'jellyfin' | 'local';
+  authMethods: {
+    local: boolean;
+    plex: boolean;
+    oidc: boolean;
+    oidcProviderName: string | null;
+  };
+}
+
 // Session types
 export type SessionState = 'playing' | 'paused' | 'stopped';
 
