@@ -46,8 +46,32 @@ describe('getAuth construction', () => {
       expect(() => getOidcAuth()).not.toThrow();
 
       const auth = getOidcAuth();
-      const pluginIds = auth.options.plugins?.map((p) => p.id);
+      const plugins = auth.options.plugins ?? [];
+      const pluginIds = plugins.map((p) => p.id);
       expect(pluginIds).toEqual(['username', 'admin', 'bearer', 'plex', 'generic-oauth']);
+      // Forbidden plugins must never appear, regardless of OIDC config.
+      for (const forbidden of ['api-key', 'sso', 'oidc-provider', 'scim']) {
+        expect(pluginIds).not.toContain(forbidden);
+      }
+
+      const genericOAuthPlugin = plugins.find((p) => p.id === 'generic-oauth') as unknown as {
+        options: { config: Array<Record<string, unknown>> };
+      };
+      expect(genericOAuthPlugin.options.config).toEqual([
+        {
+          providerId: 'oidc',
+          clientId: 'test-client',
+          clientSecret: 'test-secret',
+          discoveryUrl: 'https://auth.example.com/.well-known/openid-configuration',
+          scopes: ['openid', 'email', 'profile'],
+          pkce: true,
+        },
+      ]);
+
+      expect(auth.options.account?.accountLinking).toMatchObject({
+        enabled: true,
+        trustedProviders: ['oidc'],
+      });
 
       await closeOidcAuth();
     } finally {

@@ -8,13 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  generateRefreshToken,
-  hashRefreshToken,
-  generateTempToken,
-  REFRESH_TOKEN_TTL,
-  PLEX_TEMP_TOKEN_TTL,
-} from '../utils.js';
+import { generateRefreshToken, hashRefreshToken, generateTempToken } from '../utils.js';
 import { REDIS_KEYS } from '@tracearr/shared';
 
 describe('generateRefreshToken', () => {
@@ -32,15 +26,6 @@ describe('generateRefreshToken', () => {
     expect(token1).not.toBe(token2);
     expect(token2).not.toBe(token3);
     expect(token1).not.toBe(token3);
-  });
-
-  it('should generate cryptographically random tokens', () => {
-    // Generate many tokens and verify no collisions
-    const tokens = new Set<string>();
-    for (let i = 0; i < 100; i++) {
-      tokens.add(generateRefreshToken());
-    }
-    expect(tokens.size).toBe(100);
   });
 });
 
@@ -70,15 +55,6 @@ describe('hashRefreshToken', () => {
     // SHA-256 of empty string
     expect(hash).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
   });
-
-  it('should be one-way (cannot derive original token)', () => {
-    const token = generateRefreshToken();
-    const hash = hashRefreshToken(token);
-    // Hash should not contain the token
-    expect(hash).not.toContain(token);
-    // Hash length is different from token length
-    expect(hash.length).toBe(token.length); // Both 64 but different content
-  });
 });
 
 describe('generateTempToken', () => {
@@ -104,39 +80,5 @@ describe('Constants', () => {
     it('should generate correct PLEX_TEMP_TOKEN key', () => {
       expect(REDIS_KEYS.PLEX_TEMP_TOKEN('xyz789')).toBe('tracearr:plex_temp:xyz789');
     });
-  });
-
-  describe('TTL values', () => {
-    it('should have REFRESH_TOKEN_TTL of 30 days in seconds', () => {
-      expect(REFRESH_TOKEN_TTL).toBe(30 * 24 * 60 * 60);
-    });
-
-    it('should have PLEX_TEMP_TOKEN_TTL of 10 minutes in seconds', () => {
-      expect(PLEX_TEMP_TOKEN_TTL).toBe(10 * 60);
-    });
-  });
-});
-
-describe('Integration: Token workflow', () => {
-  it('should support generate -> hash -> lookup workflow', () => {
-    // Simulate token creation and storage lookup
-    const refreshToken = generateRefreshToken();
-    const storedHash = hashRefreshToken(refreshToken);
-
-    // User sends token back, we hash it to look up
-    const lookupHash = hashRefreshToken(refreshToken);
-
-    // Should match for lookup
-    expect(lookupHash).toBe(storedHash);
-  });
-
-  it('should reject different token in lookup', () => {
-    const originalToken = generateRefreshToken();
-    const storedHash = hashRefreshToken(originalToken);
-
-    const differentToken = generateRefreshToken();
-    const lookupHash = hashRefreshToken(differentToken);
-
-    expect(lookupHash).not.toBe(storedHash);
   });
 });

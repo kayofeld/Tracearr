@@ -385,27 +385,9 @@ describe('better auth security (integration)', () => {
     expect(allowedAfter).toBe(false);
   });
 
-  it('single-owner gate: a second sign-up is rejected and creates no second row', async () => {
-    const first = await signUpOwner(app);
-
-    const second = await app.inject({
-      method: 'POST',
-      url: `${API_BASE_PATH}/auth/sign-up/email`,
-      headers: { 'content-type': 'application/json' },
-      payload: {
-        email: `intruder-${randomUUID()}@example.com`,
-        password: 'Intruder!12345',
-        name: 'Intruder',
-        username: `intruder${randomUUID().replace(/-/g, '').slice(0, 10)}`,
-      },
-    });
-
-    expect(second.statusCode).toBe(403);
-    const rows = await db.select().from(users);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.id).toBe(first.userId);
-  });
-
+  // The second-sign-up-over-the-endpoint case lives in
+  // betterAuthSignup.integration.test.ts ('rejects a second sign-up once an
+  // owner exists'); this file only covers the shared guard below.
   it('single-owner gate: assertSignupAllowed (shared by every creation path) rejects once an owner exists', async () => {
     // Every user-creation entry point funnels through this same guard:
     // email/password sign-up via the databaseHooks.user.create.before hook

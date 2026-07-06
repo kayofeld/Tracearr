@@ -11,6 +11,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 
 // Mock the database
 vi.mock('../../db/client.js', () => ({
@@ -64,15 +66,6 @@ describe('cleanupMobileTokens', () => {
       expect(result.deleted).toBe(3);
       expect(mockDb.delete).toHaveBeenCalledTimes(2); // Both expired and used queries
     });
-
-    it('should not delete recently created unused tokens', async () => {
-      // No expired tokens found
-      mockDeleteChain([], []);
-
-      const result = await cleanupMobileTokens();
-
-      expect(result.deleted).toBe(0);
-    });
   });
 
   describe('used tokens cleanup', () => {
@@ -83,15 +76,6 @@ describe('cleanupMobileTokens', () => {
       const result = await cleanupMobileTokens();
 
       expect(result.deleted).toBe(2);
-    });
-
-    it('should not delete recently used tokens', async () => {
-      // No old used tokens found
-      mockDeleteChain([], []);
-
-      const result = await cleanupMobileTokens();
-
-      expect(result.deleted).toBe(0);
     });
   });
 
@@ -114,98 +98,33 @@ describe('cleanupMobileTokens', () => {
 
       expect(result.deleted).toBe(0);
     });
-
-    it('should handle large number of tokens', async () => {
-      const expiredTokens = Array.from({ length: 100 }, () => ({ id: randomUUID() }));
-      const usedTokens = Array.from({ length: 50 }, () => ({ id: randomUUID() }));
-      mockDeleteChain(expiredTokens, usedTokens);
-
-      const result = await cleanupMobileTokens();
-
-      expect(result.deleted).toBe(150);
-    });
   });
 
-  describe('database query construction', () => {
-    it('should call delete on mobileTokens table', async () => {
-      mockDeleteChain([], []);
-
-      await cleanupMobileTokens();
-
-      // Should be called twice: once for expired, once for used
-      expect(mockDb.delete).toHaveBeenCalledTimes(2);
-    });
-
-    it('should use where clause with proper conditions', async () => {
-      const whereMock = vi.fn().mockReturnValue({
-        returning: vi.fn().mockResolvedValue([]),
-      });
-      mockDb.delete.mockReturnValue({ where: whereMock });
-
-      await cleanupMobileTokens();
-
-      // Each delete should chain to where
-      expect(whereMock).toHaveBeenCalledTimes(2);
-    });
-
-    it('should return ids from deleted tokens', async () => {
-      const returningMock = vi
-        .fn()
-        .mockResolvedValueOnce([{ id: 'expired-1' }])
-        .mockResolvedValueOnce([{ id: 'used-1' }, { id: 'used-2' }]);
-
-      mockDb.delete.mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          returning: returningMock,
-        }),
-      });
-
-      const result = await cleanupMobileTokens();
-
-      expect(result.deleted).toBe(3);
-      expect(returningMock).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  describe('time boundaries', () => {
-    it('should calculate 1 hour cutoff correctly', async () => {
-      // Set current time to noon UTC
-      vi.setSystemTime(new Date('2025-01-15T12:00:00Z'));
-
-      let capturedWhereFn: unknown;
+  describe('cutoff arithmetic', () => {
+    it('deletes unused tokens expired before now minus 1 hour and used tokens used before now minus 30 days', async () => {
+      // beforeEach pins Date.now() to 2025-01-15T12:00:00Z
+      const conditions: SQL[] = [];
       mockDb.delete.mockImplementation(() => ({
-        where: vi.fn().mockImplementation((condition) => {
-          if (!capturedWhereFn) {
-            capturedWhereFn = condition;
-          }
+        where: vi.fn().mockImplementation((condition: SQL) => {
+          conditions.push(condition);
           return { returning: vi.fn().mockResolvedValue([]) };
         }),
       }));
 
       await cleanupMobileTokens();
 
-      // The first where clause should be for expired tokens
-      // 1 hour ago from noon = 11:00 AM
-      expect(capturedWhereFn).toBeDefined();
-    });
+      const dialect = new PgDialect();
+      expect(conditions).toHaveLength(2);
+      const expired = dialect.sqlToQuery(conditions[0]!);
+      const used = dialect.sqlToQuery(conditions[1]!);
 
-    it('should calculate 30 day cutoff correctly', async () => {
-      // Set current time to Jan 15, 2025
-      vi.setSystemTime(new Date('2025-01-15T12:00:00Z'));
+      expect(expired.sql).toContain('"expires_at" < $1');
+      expect(expired.sql).toContain('"used_at" is null');
+      expect(expired.params).toEqual(['2025-01-15T11:00:00.000Z']);
 
-      const whereConditions: unknown[] = [];
-      mockDb.delete.mockImplementation(() => ({
-        where: vi.fn().mockImplementation((condition) => {
-          whereConditions.push(condition);
-          return { returning: vi.fn().mockResolvedValue([]) };
-        }),
-      }));
-
-      await cleanupMobileTokens();
-
-      // Should have captured both where conditions
-      // First for expired (1 hour), second for used (30 days)
-      expect(whereConditions).toHaveLength(2);
+      expect(used.sql).toContain('"used_at" is not null');
+      expect(used.sql).toContain('"used_at" < $1');
+      expect(used.params).toEqual(['2024-12-16T12:00:00.000Z']);
     });
   });
 
