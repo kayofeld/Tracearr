@@ -43,6 +43,17 @@ describe('getAuth construction', () => {
     expect(auth.options.advanced?.database?.generateId).toBeTypeOf('function');
   });
 
+  it('exposes the atomic secondary storage operations', () => {
+    // better-auth 1.6.23 builds an atomic rate-limit consume only when
+    // increment exists, and consumes single-use verification values
+    // atomically only when getAndDelete exists; without them it warns and
+    // falls back to non-atomic paths. Behavior is covered by
+    // betterAuthStorageAtomicity.integration.test.ts against real Redis.
+    const storage = getAuth().options.secondaryStorage;
+    expect(storage?.increment).toBeTypeOf('function');
+    expect(storage?.getAndDelete).toBeTypeOf('function');
+  });
+
   it('constructs the real auth instance with OIDC configured, alongside the default plugins', async () => {
     process.env.OIDC_ISSUER_URL = 'https://auth.example.com';
     process.env.OIDC_CLIENT_ID = 'test-client';

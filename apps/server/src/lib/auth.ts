@@ -37,6 +37,18 @@ export const oidcConfigured = !!(oidcEnv.issuer && oidcEnv.clientId && oidcEnv.c
  */
 export const CLIENT_IP_HEADER = 'x-tracearr-client-ip';
 
+// TTL only on creation: the rate-limit window is fixed from first hit, later
+// increments must not slide it. Lua instead of EXPIRE NX (7.0+) or GETDEL
+// (6.2+) because self-hosted Redis versions vary and the repo documents no
+// minimum; scripts run on anything 2.6+.
+const INCREMENT_SCRIPT = `local value = redis.call('INCR', KEYS[1])
+if value == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return value`;
+
+const GET_AND_DELETE_SCRIPT = `local value = redis.call('GET', KEYS[1])
+if value then redis.call('DEL', KEYS[1]) end
+return value`;
+
 function buildAuth(redis: Redis) {
   const prefix = process.env.REDIS_PREFIX ?? '';
   const rkey = (k: string) => `${prefix}tracearr:ba:${k}`;
@@ -104,6 +116,12 @@ function buildAuth(redis: Redis) {
       delete: async (key) => {
         await redis.del(rkey(key));
       },
+      increment: async (key, ttl) => {
+        const value = await redis.eval(INCREMENT_SCRIPT, 1, rkey(key), ttl);
+        return Number(value);
+      },
+      getAndDelete: async (key) =>
+        (await redis.eval(GET_AND_DELETE_SCRIPT, 1, rkey(key))) as string | null,
     },
     rateLimit: {
       enabled: true,
