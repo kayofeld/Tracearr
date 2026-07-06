@@ -10,6 +10,7 @@ import {
 import { adminAc } from 'better-auth/plugins/admin/access';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import type { Redis } from 'ioredis';
+import { LOGIN_ROLES } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
@@ -80,6 +81,43 @@ export function trustedOriginsForRequest(request?: Request): string[] {
   return origins;
 }
 
+/**
+ * The username plugin resolves sign-in (and username-taken checks) with an
+ * unconstrained findOne on users.username. The users table also holds member
+ * rows synced from media servers with arbitrary usernames, so a member whose
+ * stored username equals a login username can be the row findOne returns and
+ * silently break the real user's username/password login (the member has no
+ * credential account, and the session hook rejects non-login roles anyway).
+ * A username is only a login identifier for login-capable roles, exactly the
+ * scope of the users_login_username_unique partial index, so every
+ * user-by-username lookup is narrowed to those roles here. The plugin offers
+ * no option for this, hence the adapter wrap.
+ */
+function withLoginScopedUsernameLookup(
+  factory: ReturnType<typeof drizzleAdapter>
+): ReturnType<typeof drizzleAdapter> {
+  return (options) => {
+    const adapter = factory(options);
+    const findOne: typeof adapter.findOne = (data) => {
+      if (
+        data.model === 'user' &&
+        data.where.some((w) => w.field === 'username') &&
+        !data.where.some((w) => w.field === 'role')
+      ) {
+        return adapter.findOne({
+          ...data,
+          where: [
+            ...data.where,
+            { field: 'role', operator: 'in', value: [...LOGIN_ROLES], connector: 'AND' },
+          ],
+        });
+      }
+      return adapter.findOne(data);
+    };
+    return { ...adapter, findOne };
+  };
+}
+
 function buildAuth(redis: Redis) {
   const prefix = process.env.REDIS_PREFIX ?? '';
   const rkey = (k: string) => `${prefix}tracearr:ba:${k}`;
@@ -88,15 +126,17 @@ function buildAuth(redis: Redis) {
     basePath: '/api/v1/auth',
     secret: requireBetterAuthSecret(),
     trustedOrigins: trustedOriginsForRequest,
-    database: drizzleAdapter(db, {
-      provider: 'pg',
-      schema: {
-        user: schema.users,
-        session: schema.authSessions,
-        account: schema.authAccounts,
-        verification: schema.authVerifications,
-      },
-    }),
+    database: withLoginScopedUsernameLookup(
+      drizzleAdapter(db, {
+        provider: 'pg',
+        schema: {
+          user: schema.users,
+          session: schema.authSessions,
+          account: schema.authAccounts,
+          verification: schema.authVerifications,
+        },
+      })
+    ),
     advanced: {
       // Better Auth decides the cookie Secure flag (and the __Secure- name
       // prefix) once at init from NODE_ENV, so in production every cookie

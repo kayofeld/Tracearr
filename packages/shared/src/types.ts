@@ -23,7 +23,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, number> = {
 } as const;
 
 // Roles that can log into Tracearr
-const LOGIN_ROLES: UserRole[] = ['owner', 'admin', 'viewer'];
+export const LOGIN_ROLES: UserRole[] = ['owner', 'admin', 'viewer'];
 
 // Role helper functions
 export const canLogin = (role: UserRole): boolean => LOGIN_ROLES.includes(role);

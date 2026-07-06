@@ -16,6 +16,7 @@ export const {
   users,
   authAccounts,
   authSessions,
+  plexAccounts,
   hashPassword,
   setSetting,
   getSetting,
@@ -225,7 +226,12 @@ export interface UserSummary {
   loginMethods: string[];
 }
 
-/** Lists all users with their login methods, derived from auth_accounts providers. */
+/**
+ * Lists all users with their login methods, derived from auth_accounts
+ * providers. A plex auth_accounts row alone does not grant login (the plex
+ * plugin re-checks allow_login at check-pin), so 'plex' is only reported when
+ * the linked plex_accounts row actually allows login.
+ */
 export async function listUsersCommand(): Promise<UserSummary[]> {
   const rows = await db
     .select({ id: users.id, username: users.username, email: users.email, role: users.role })
@@ -233,11 +239,31 @@ export async function listUsersCommand(): Promise<UserSummary[]> {
     .orderBy(asc(users.createdAt));
 
   const accounts = await db
-    .select({ userId: authAccounts.userId, providerId: authAccounts.providerId })
+    .select({
+      userId: authAccounts.userId,
+      providerId: authAccounts.providerId,
+      accountId: authAccounts.accountId,
+    })
     .from(authAccounts);
 
+  const loginPlexAccounts = await db
+    .select({ userId: plexAccounts.userId, plexAccountId: plexAccounts.plexAccountId })
+    .from(plexAccounts)
+    .where(eq(plexAccounts.allowLogin, true));
+  const plexLoginKeys = new Set(
+    (loginPlexAccounts as { userId: string; plexAccountId: string }[]).map(
+      (a) => `${a.userId}:${a.plexAccountId}`
+    )
+  );
+
   const methodsByUser = new Map<string, Set<string>>();
-  for (const account of accounts as { userId: string; providerId: string }[]) {
+  for (const account of accounts as { userId: string; providerId: string; accountId: string }[]) {
+    if (
+      account.providerId === 'plex' &&
+      !plexLoginKeys.has(`${account.userId}:${account.accountId}`)
+    ) {
+      continue;
+    }
     const methods = methodsByUser.get(account.userId) ?? new Set<string>();
     methods.add(account.providerId);
     methodsByUser.set(account.userId, methods);

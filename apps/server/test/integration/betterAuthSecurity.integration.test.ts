@@ -193,6 +193,26 @@ describe('better auth security (integration)', () => {
     expect(tokenA).not.toBe(tokenB);
   });
 
+  it('username sign-in and sign-up ignore member rows sharing the username', async () => {
+    // Synced member rows live in the same users table and can carry any
+    // username, including one equal to a login username. They must never
+    // shadow the login-capable account: the owner can still claim the
+    // username at sign-up and always wins the sign-in lookup.
+    const username = `shadow${randomUUID().replace(/-/g, '').slice(0, 10)}`;
+    await db.insert(users).values({ username, role: 'member' });
+
+    const { password, userId } = await signUpOwner(app, { username });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `${API_BASE_PATH}/auth/sign-in/username`,
+      headers: { 'content-type': 'application/json' },
+      payload: { username, password },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.id).toBe(userId);
+  });
+
   it('rate limits repeated failed sign-ins', async () => {
     // Default better-auth special rule for /sign-in* is window 10s, max 3.
     // The account doesn't need to exist - the rate limiter fires purely on

@@ -9,11 +9,12 @@ UPDATE users
   SET username = lower(username)
   WHERE role IN ('owner', 'admin', 'viewer');
 
--- Credential provider rows from existing password hashes.
+-- Credential provider rows from existing password hashes. An empty-string
+-- hash can never verify, so it must not become a credential login method.
 INSERT INTO auth_accounts (id, account_id, provider_id, user_id, password, created_at, updated_at)
 SELECT gen_random_uuid()::text, id::text, 'credential', id, password_hash, now(), now()
 FROM users
-WHERE password_hash IS NOT NULL
+WHERE password_hash IS NOT NULL AND password_hash <> ''
 ON CONFLICT ON CONSTRAINT auth_accounts_provider_account_unique DO NOTHING;
 
 -- Plex provider rows from linked plex accounts. plex_accounts itself stays;

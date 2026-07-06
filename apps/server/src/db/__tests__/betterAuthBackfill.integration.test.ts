@@ -66,4 +66,18 @@ describe('better auth backfill migration', () => {
     expect(row?.username).toBe('connor');
     expect(row?.displayUsername).toBe('Connor');
   });
+
+  it('skips credential rows for empty-string password hashes', async () => {
+    await createTestUser({
+      role: 'viewer',
+      username: 'emptyhash',
+      email: 'emptyhash@example.com',
+      passwordHash: '',
+    });
+
+    await db.execute(sql.raw(backfillSql()));
+
+    const accounts = await db.select().from(authAccounts);
+    expect(accounts).toHaveLength(0);
+  });
 });

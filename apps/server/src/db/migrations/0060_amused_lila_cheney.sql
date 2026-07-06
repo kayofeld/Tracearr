@@ -48,7 +48,4 @@ ALTER TABLE "auth_sessions" ADD CONSTRAINT "auth_sessions_user_id_users_id_fk" F
 CREATE INDEX "auth_accounts_user_idx" ON "auth_accounts" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "auth_sessions_user_idx" ON "auth_sessions" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "auth_verifications_identifier_idx" ON "auth_verifications" USING btree ("identifier");--> statement-breakpoint
-CREATE INDEX "mobile_sessions_ba_session_idx" ON "mobile_sessions" USING btree ("better_auth_session_id");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "users_login_username_unique"
-  ON "users" (lower("username"))
-  WHERE "role" IN ('owner', 'admin', 'viewer');
+CREATE INDEX "mobile_sessions_ba_session_idx" ON "mobile_sessions" USING btree ("better_auth_session_id");

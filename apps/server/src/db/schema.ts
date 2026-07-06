@@ -148,6 +148,11 @@ export const users = pgTable(
   (table) => [
     // Username is display name from media server (not unique across servers)
     index('users_username_idx').on(table.username),
+    // Login usernames must be case-insensitively unique; members keep sharing
+    // usernames freely (distinct humans on different servers can collide).
+    uniqueIndex('users_login_username_unique')
+      .on(sql`lower(${table.username})`)
+      .where(sql`role IN ('owner', 'admin', 'viewer')`),
     uniqueIndex('users_email_unique').on(table.email),
     index('users_plex_account_id_idx').on(table.plexAccountId),
     index('users_role_idx').on(table.role),

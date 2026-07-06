@@ -8,6 +8,7 @@ import {
   users,
   authAccounts,
   authSessions,
+  plexAccounts,
   getRedis,
   getSetting,
   resetPasswordCommand,
@@ -369,6 +370,13 @@ describe('admin cli commands', () => {
         providerId: 'plex',
         userId: owner.id,
       });
+      await db.insert(plexAccounts).values({
+        userId: owner.id,
+        plexAccountId: 'plex-123',
+        plexUsername: 'owner',
+        plexToken: 'tok-abc',
+        allowLogin: true,
+      });
       await createTestUser({ role: 'member', username: 'noaccounts' });
 
       const rows = await listUsersCommand();
@@ -380,6 +388,27 @@ describe('admin cli commands', () => {
 
       const noAccountsRow = rows.find((r) => r.username === 'noaccounts');
       expect(noAccountsRow?.loginMethods).toEqual([]);
+    });
+
+    it('does not report plex as a login method when allow_login is off', async () => {
+      const owner = await createTestUser({ role: 'owner', username: 'owner' });
+      await db.insert(authAccounts).values({
+        id: crypto.randomUUID(),
+        accountId: 'plex-456',
+        providerId: 'plex',
+        userId: owner.id,
+      });
+      await db.insert(plexAccounts).values({
+        userId: owner.id,
+        plexAccountId: 'plex-456',
+        plexUsername: 'owner',
+        plexToken: 'tok-def',
+        allowLogin: false,
+      });
+
+      const rows = await listUsersCommand();
+      const ownerRow = rows.find((r) => r.username === 'owner');
+      expect(ownerRow?.loginMethods).not.toContain('plex');
     });
   });
 

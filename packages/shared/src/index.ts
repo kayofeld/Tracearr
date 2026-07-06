@@ -467,7 +467,7 @@ export {
 } from './constants.js';
 
 // Role helper exports
-export { ROLE_PERMISSIONS, canLogin, hasMinRole, isOwner, isActive } from './types.js';
+export { ROLE_PERMISSIONS, LOGIN_ROLES, canLogin, hasMinRole, isOwner, isActive } from './types.js';
 
 // Session constants
 export { MEDIA_TYPES, DEFAULT_STREAM_DETAILS } from './types.js';
