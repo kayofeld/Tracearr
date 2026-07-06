@@ -49,6 +49,37 @@ const GET_AND_DELETE_SCRIPT = `local value = redis.call('GET', KEYS[1])
 if value then redis.call('DEL', KEYS[1]) end
 return value`;
 
+/**
+ * Per-request trusted origins for Better Auth's CSRF origin check.
+ *
+ * With no baseURL configured, Better Auth trusts only the origin it derives
+ * from the request URL the shim builds (scheme included). Behind an HTTPS
+ * proxy that does not forward x-forwarded-proto that derived origin is
+ * http://host while the browser sends Origin: https://host, and every login
+ * fails 403 INVALID_ORIGIN. Trusting BOTH schemes of the request's OWN host
+ * fixes that without any user-side change. It only relaxes the scheme
+ * distinction on the same host: a cross-site attacker page sends an Origin
+ * with a different host and still fails the exact-match compare. The Origin
+ * header itself must never be added here. Scheme security against an active
+ * downgrade is owned by TLS/HSTS and the cookie Secure flag, not by this
+ * check.
+ *
+ * Better Auth also invokes this at construction time with request ===
+ * undefined (create-context), so the request guard is load-bearing.
+ */
+export function trustedOriginsForRequest(request?: Request): string[] {
+  const origins = process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : [];
+  if (request) {
+    try {
+      const { host } = new URL(request.url);
+      origins.push(`http://${host}`, `https://${host}`);
+    } catch {
+      // unparseable request URL: fall back to the static list
+    }
+  }
+  return origins;
+}
+
 function buildAuth(redis: Redis) {
   const prefix = process.env.REDIS_PREFIX ?? '';
   const rkey = (k: string) => `${prefix}tracearr:ba:${k}`;
@@ -56,7 +87,7 @@ function buildAuth(redis: Redis) {
   return betterAuth({
     basePath: '/api/v1/auth',
     secret: requireBetterAuthSecret(),
-    trustedOrigins: process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : [],
+    trustedOrigins: trustedOriginsForRequest,
     database: drizzleAdapter(db, {
       provider: 'pg',
       schema: {
@@ -67,6 +98,14 @@ function buildAuth(redis: Redis) {
       },
     }),
     advanced: {
+      // Better Auth decides the cookie Secure flag (and the __Secure- name
+      // prefix) once at init from NODE_ENV, so in production every cookie
+      // would be Secure and browsers would drop it on plain-http LAN
+      // deployments. Pin it off; createBetterAuthHandler appends Secure per
+      // request when the derived scheme is https, so HTTPS deployments still
+      // get the flag. http gets a cookie without Secure, same as the legacy
+      // cookie system.
+      useSecureCookies: false,
       ipAddress: {
         ipAddressHeaders: [CLIENT_IP_HEADER],
       },
