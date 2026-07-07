@@ -76,6 +76,8 @@ export const fullRoutes: FastifyPluginAsync = async (app) => {
           updatedAt: serverUsers.updatedAt,
           identityName: users.name,
           role: users.role,
+          identityAggregateTrustScore: users.aggregateTrustScore,
+          identityTotalViolations: users.totalViolations,
         })
         .from(serverUsers)
         .innerJoin(servers, eq(serverUsers.serverId, servers.id))
@@ -92,6 +94,42 @@ export const fullRoutes: FastifyPluginAsync = async (app) => {
       if (!hasServerAccess(authUser, serverUser.serverId)) {
         return { error: 'forbidden' as const };
       }
+
+      // Identity-wide aggregation: every server_user tied to this person's
+      // identity, plus combined session stats across all of them (Task 8)
+      const identityServerUserRows = await tx
+        .select({
+          id: serverUsers.id,
+          serverId: serverUsers.serverId,
+          serverName: servers.name,
+          serverType: servers.type,
+          username: serverUsers.username,
+          thumbUrl: serverUsers.thumbUrl,
+          trustScore: serverUsers.trustScore,
+          sessionCount: serverUsers.sessionCount,
+          removedAt: serverUsers.removedAt,
+        })
+        .from(serverUsers)
+        .innerJoin(servers, eq(serverUsers.serverId, servers.id))
+        .where(eq(serverUsers.userId, serverUser.userId));
+
+      const identityIds = identityServerUserRows.map((su) => su.id);
+      // Same explicit array plus 10-year bound pattern as getUserWithStats in
+      // services/userService.ts (TimescaleDB chunk exclusion needs time bounds)
+      const identityIdArray = sql.raw(
+        `ARRAY[${identityIds.map((id) => `'${id}'::uuid`).join(',')}]`
+      );
+      const tenYearsAgo = new Date(Date.now() - 10 * 365 * 24 * 60 * 60 * 1000);
+      const nowDate = new Date();
+      const identityStatsRows = await tx
+        .select({
+          totalSessions: sql<number>`count(*)::int`,
+          totalWatchTime: sql<number>`coalesce(sum(duration_ms), 0)::bigint`,
+        })
+        .from(sessions).where(sql`${sessions.serverUserId} = ANY(${identityIdArray})
+          AND ${sessions.startedAt} >= ${tenYearsAgo}
+          AND ${sessions.startedAt} <= ${nowDate}`);
+      const identityStats = identityStatsRows[0];
 
       // 2. Get session stats — count unique plays, not raw rows
       const statsResult = await tx
@@ -307,12 +345,25 @@ export const fullRoutes: FastifyPluginAsync = async (app) => {
 
       const terminationsTotal = terminationsCountResult[0]?.count ?? 0;
 
+      const { identityAggregateTrustScore, identityTotalViolations, ...serverUserFields } =
+        serverUser;
+
       return {
         user: {
-          ...serverUser,
+          ...serverUserFields,
           stats: {
             totalSessions: stats?.totalSessions ?? 0,
             totalWatchTime: Number(stats?.totalWatchTime ?? 0),
+          },
+        },
+        identity: {
+          userId: serverUser.userId,
+          aggregateTrustScore: identityAggregateTrustScore,
+          totalViolations: identityTotalViolations,
+          serverUsers: identityServerUserRows,
+          stats: {
+            totalSessions: identityStats?.totalSessions ?? 0,
+            totalWatchTime: Number(identityStats?.totalWatchTime ?? 0),
           },
         },
         sessions: {

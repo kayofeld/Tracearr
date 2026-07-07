@@ -12,6 +12,8 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
+import Fastify from 'fastify';
+import sensible from '@fastify/sensible';
 import {
   createTestUser,
   createTestServer,
@@ -21,6 +23,7 @@ import {
   createTestViolation,
 } from '@tracearr/test-utils/factories';
 import { db } from '../../src/db/client.js';
+import { fullRoutes } from '../../src/routes/users/full.js';
 import {
   users,
   serverUsers,
@@ -425,5 +428,51 @@ describe('splitServerUser', () => {
 
     const [restored] = await db.select().from(users).where(eq(users.id, result.newUserId));
     expect(restored?.email).toBeNull();
+  });
+});
+
+describe('GET /users/:id/full identity aggregation', () => {
+  it('returns the identity server user set and combined stats after a merge', async () => {
+    const admin = await createTestUser({ role: 'owner' });
+    const serverA = await createTestServer({ type: 'plex' });
+    const serverB = await createTestServer({ type: 'jellyfin' });
+    const target = await createTestUser({ role: 'member' });
+    const source = await createTestUser({ role: 'member' });
+    const targetSu = await createTestServerUser({ userId: target.id, serverId: serverA.id });
+    const sourceSu = await createTestServerUser({ userId: source.id, serverId: serverB.id });
+    await createTestSession({
+      serverId: serverA.id,
+      serverUserId: targetSu.id,
+      durationMs: 1000,
+      stoppedAt: new Date(),
+      state: 'stopped',
+    });
+    await createTestSession({
+      serverId: serverB.id,
+      serverUserId: sourceSu.id,
+      durationMs: 2000,
+      stoppedAt: new Date(),
+      state: 'stopped',
+    });
+
+    await mergeUsers(source.id, target.id, admin.id);
+
+    const app = Fastify({ logger: false });
+    await app.register(sensible);
+    app.decorate('authenticate', async (request: any) => {
+      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
+    });
+    await app.register(fullRoutes, { prefix: '/users' });
+
+    const response = await app.inject({ method: 'GET', url: `/users/${targetSu.id}/full` });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.identity.userId).toBe(target.id);
+    const identitySuIds = body.identity.serverUsers.map((su: { id: string }) => su.id).sort();
+    expect(identitySuIds).toEqual([sourceSu.id, targetSu.id].sort());
+    expect(body.identity.stats.totalSessions).toBe(2);
+    expect(body.identity.stats.totalWatchTime).toBe(3000);
   });
 });

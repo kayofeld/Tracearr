@@ -118,6 +118,23 @@ export interface ViolationSummary {
 // This aggregate response reduces 6 API calls to 1 for the UserDetail page
 export interface ServerUserFullDetail {
   user: ServerUserDetail;
+  identity: {
+    userId: string;
+    aggregateTrustScore: number;
+    totalViolations: number;
+    serverUsers: {
+      id: string;
+      serverId: string;
+      serverName: string;
+      serverType: string;
+      username: string;
+      thumbUrl: string | null;
+      trustScore: number;
+      sessionCount: number;
+      removedAt: Date | null;
+    }[];
+    stats: { totalSessions: number; totalWatchTime: number };
+  };
   sessions: {
     data: Session[];
     total: number;
