@@ -827,6 +827,10 @@ export const BANDWIDTH_STATS_CONFIG = {
   DATA_POINTS: 120,
 } as const;
 
+// Sentinel returned by the merge API when combining server users on the same
+// server needs an explicit confirmation flag before proceeding
+export const MERGE_SAME_SERVER_CONFIRMATION_REQUIRED = 'same_server_combine_requires_confirmation';
+
 // Session limits
 export const SESSION_LIMITS = {
   MAX_RECENT_PER_USER: 100,

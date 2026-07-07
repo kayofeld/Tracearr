@@ -146,6 +146,47 @@ export interface AuthUser {
   deviceId?: string; // Device identifier for mobile tokens
 }
 
+export interface UserMergeResult {
+  targetUserId: string;
+  auditId: string;
+  movedServerUserIds: string[];
+  combinedServerUsers: {
+    sourceServerUserId: string;
+    targetServerUserId: string;
+    serverId: string;
+  }[];
+  wasSameServerCombine: boolean;
+}
+
+export interface ServerUserSplitResult {
+  newUserId: string;
+  serverUserId: string;
+}
+
+export interface MergeSuggestionIdentity {
+  userId: string;
+  username: string;
+  name: string | null;
+  email: string | null;
+  role: UserRole;
+  loginCapable: boolean;
+  serverUsers: {
+    id: string;
+    serverId: string;
+    serverName: string;
+    username: string;
+    email: string | null;
+  }[];
+}
+
+export interface MergeSuggestion {
+  matchType: 'email' | 'username';
+  matchValue: string;
+  users: [MergeSuggestionIdentity, MergeSuggestionIdentity];
+  requiredTargetUserId: string | null;
+  wouldCombineSameServer: boolean;
+}
+
 export interface SetupStatus {
   needsSetup: boolean;
   requiresClaimCode: boolean;

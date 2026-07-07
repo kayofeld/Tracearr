@@ -166,6 +166,15 @@ export const userIdParamSchema = z.object({
   id: uuidSchema,
 });
 
+export const mergeUsersBodySchema = z.object({
+  targetUserId: uuidSchema,
+  confirmSameServerCombine: z.boolean().default(false),
+});
+export type MergeUsersBody = z.infer<typeof mergeUsersBodySchema>;
+
+export const mergeUserParamSchema = z.object({ id: uuidSchema });
+export const splitServerUserParamSchema = z.object({ id: uuidSchema });
+
 // ============================================================================
 // Session Schemas
 // ============================================================================
