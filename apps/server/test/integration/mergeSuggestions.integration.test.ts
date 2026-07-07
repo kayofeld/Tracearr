@@ -59,6 +59,7 @@ describe('getMergeSuggestions', () => {
           serverName: serverA.name,
           username: suA.username,
           email: suA.email,
+          removedAt: null,
         },
       ],
     });
@@ -76,6 +77,7 @@ describe('getMergeSuggestions', () => {
           serverName: serverB.name,
           username: suB.username,
           email: suB.email,
+          removedAt: null,
         },
       ],
     });
@@ -236,6 +238,11 @@ describe('getMergeSuggestions', () => {
     const ids = match!.users.map((u) => u.userId).sort();
     expect(ids).toEqual([removedIdentity.id, replacementIdentity.id].sort());
     expect(match!.wouldCombineSameServer).toBe(true);
+
+    const removedSide = match!.users.find((u) => u.userId === removedIdentity.id);
+    const replacementSide = match!.users.find((u) => u.userId === replacementIdentity.id);
+    expect(removedSide?.serverUsers[0]?.removedAt).not.toBeNull();
+    expect(replacementSide?.serverUsers[0]?.removedAt).toBeNull();
   });
 
   it('picks the lexicographically smallest matchValue when a pair shares two usernames', async () => {

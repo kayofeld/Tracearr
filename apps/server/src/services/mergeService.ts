@@ -577,6 +577,7 @@ export async function getMergeSuggestions(): Promise<MergeSuggestion[]> {
       serverName: servers.name,
       username: serverUsers.username,
       email: serverUsers.email,
+      removedAt: serverUsers.removedAt,
     })
     .from(serverUsers)
     .innerJoin(servers, eq(serverUsers.serverId, servers.id))
@@ -626,6 +627,7 @@ export async function getMergeSuggestions(): Promise<MergeSuggestion[]> {
         serverName: su.serverName,
         username: su.username,
         email: su.email,
+        removedAt: su.removedAt ? su.removedAt.toISOString() : null,
       })),
     };
   };

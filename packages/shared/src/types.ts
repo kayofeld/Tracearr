@@ -176,6 +176,7 @@ export interface MergeSuggestionIdentity {
     serverName: string;
     username: string;
     email: string | null;
+    removedAt: string | null;
   }[];
 }
 

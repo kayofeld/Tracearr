@@ -12,6 +12,8 @@
  * - GET /:id/locations - Get user's unique locations
  * - GET /:id/devices - Get user's unique devices
  * - GET /:id/terminations - Get user's termination history
+ * - POST /:id/merge - Merge the source identity :id into another identity
+ * - GET /merge-suggestions - Possible duplicate identities across servers
  */
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -21,6 +23,7 @@ import { sessionsRoutes } from './sessions.js';
 import { locationsRoutes } from './locations.js';
 import { devicesRoutes } from './devices.js';
 import { terminationsRoutes } from './terminations.js';
+import { mergeRoutes } from './merge.js';
 
 export const userRoutes: FastifyPluginAsync = async (app) => {
   // Register all sub-route plugins
@@ -31,4 +34,5 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
   await app.register(locationsRoutes);
   await app.register(devicesRoutes);
   await app.register(terminationsRoutes);
+  await app.register(mergeRoutes);
 };
