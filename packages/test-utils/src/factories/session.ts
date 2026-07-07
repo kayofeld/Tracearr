@@ -26,6 +26,7 @@ export interface SessionData {
   externalSessionId?: string | null;
   startedAt?: Date;
   stoppedAt?: Date | null;
+  lastSeenAt?: Date;
   durationMs?: number | null;
   totalDurationMs?: number | null;
   progressMs?: number | null;
@@ -90,6 +91,7 @@ export function buildSession(overrides: SessionData): Required<SessionData> {
     externalSessionId: overrides.externalSessionId ?? `ext-session-${index}`,
     startedAt: overrides.startedAt ?? now,
     stoppedAt: overrides.stoppedAt ?? null,
+    lastSeenAt: overrides.lastSeenAt ?? overrides.stoppedAt ?? now,
     durationMs: overrides.durationMs ?? null,
     totalDurationMs: overrides.totalDurationMs ?? 7200000, // 2 hours
     progressMs: overrides.progressMs ?? 0,
@@ -127,7 +129,7 @@ export async function createTestSession(data: SessionData): Promise<CreatedSessi
       id, server_id, server_user_id, session_key, state, media_type,
       media_title, grandparent_title, season_number, episode_number,
       year, thumb_path, rating_key, external_session_id,
-      started_at, stopped_at, duration_ms, total_duration_ms, progress_ms,
+      started_at, stopped_at, last_seen_at, duration_ms, total_duration_ms, progress_ms,
       last_paused_at, paused_duration_ms, reference_id, watched,
       ip_address, geo_city, geo_region, geo_country, geo_lat, geo_lon,
       geo_asn_number, geo_asn_organization,
@@ -150,6 +152,7 @@ export async function createTestSession(data: SessionData): Promise<CreatedSessi
       ${fullData.externalSessionId ? `'${fullData.externalSessionId}'` : 'NULL'},
       '${fullData.startedAt.toISOString()}',
       ${fullData.stoppedAt ? `'${fullData.stoppedAt.toISOString()}'` : 'NULL'},
+      '${fullData.lastSeenAt.toISOString()}',
       ${fullData.durationMs ?? 'NULL'},
       ${fullData.totalDurationMs ?? 'NULL'},
       ${fullData.progressMs ?? 'NULL'},

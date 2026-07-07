@@ -17,12 +17,16 @@ export interface ServerUserData {
   isServerAdmin?: boolean;
   trustScore?: number;
   sessionCount?: number;
+  removedAt?: Date | null;
 }
 
-export interface CreatedServerUser extends Required<Omit<ServerUserData, 'email' | 'thumbUrl'>> {
+export interface CreatedServerUser extends Required<
+  Omit<ServerUserData, 'email' | 'thumbUrl' | 'removedAt'>
+> {
   id: string;
   email: string | null;
   thumbUrl: string | null;
+  removedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -45,6 +49,7 @@ export function buildServerUser(overrides: ServerUserData): Required<ServerUserD
     isServerAdmin: overrides.isServerAdmin ?? false,
     trustScore: overrides.trustScore ?? 100,
     sessionCount: overrides.sessionCount ?? 0,
+    removedAt: overrides.removedAt ?? null,
   };
 }
 
@@ -57,7 +62,7 @@ export async function createTestServerUser(data: ServerUserData): Promise<Create
   const result = await executeRawSql(`
     INSERT INTO server_users (
       id, user_id, server_id, external_id, username, email,
-      thumb_url, is_server_admin, trust_score, session_count
+      thumb_url, is_server_admin, trust_score, session_count, removed_at
     ) VALUES (
       '${fullData.id}',
       '${fullData.userId}',
@@ -68,7 +73,8 @@ export async function createTestServerUser(data: ServerUserData): Promise<Create
       ${fullData.thumbUrl ? `'${fullData.thumbUrl}'` : 'NULL'},
       ${fullData.isServerAdmin},
       ${fullData.trustScore},
-      ${fullData.sessionCount}
+      ${fullData.sessionCount},
+      ${fullData.removedAt ? `'${fullData.removedAt.toISOString()}'` : 'NULL'}
     )
     RETURNING *
   `);
@@ -101,6 +107,7 @@ function mapServerUserRow(row: Record<string, unknown>): CreatedServerUser {
     isServerAdmin: row.is_server_admin as boolean,
     trustScore: row.trust_score as number,
     sessionCount: row.session_count as number,
+    removedAt: row.removed_at as Date | null,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
