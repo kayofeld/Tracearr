@@ -465,7 +465,6 @@ describe('GET /users/:id/full identity aggregation', () => {
     await app.register(fullRoutes, { prefix: '/users' });
 
     const response = await app.inject({ method: 'GET', url: `/users/${targetSu.id}/full` });
-    await app.close();
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
@@ -474,5 +473,77 @@ describe('GET /users/:id/full identity aggregation', () => {
     expect(identitySuIds).toEqual([sourceSu.id, targetSu.id].sort());
     expect(body.identity.stats.totalSessions).toBe(2);
     expect(body.identity.stats.totalWatchTime).toBe(3000);
+    // Both accounts default to trustScore 100 with sessionCount 0, so the
+    // weighted aggregate falls back to the neutral default, and no violations
+    // were recorded for either side of the merge.
+    expect(body.identity.aggregateTrustScore).toBe(100);
+    expect(body.identity.totalViolations).toBe(0);
+
+    // Requesting through the other sibling's id returns the same identity block.
+    const responseFromSource = await app.inject({
+      method: 'GET',
+      url: `/users/${sourceSu.id}/full`,
+    });
+    expect(responseFromSource.statusCode).toBe(200);
+    const bodyFromSource = responseFromSource.json();
+    expect(bodyFromSource.identity.userId).toBe(target.id);
+    const identitySuIdsFromSource = bodyFromSource.identity.serverUsers
+      .map((su: { id: string }) => su.id)
+      .sort();
+    expect(identitySuIdsFromSource).toEqual([sourceSu.id, targetSu.id].sort());
+    expect(bodyFromSource.identity.stats.totalSessions).toBe(2);
+    expect(bodyFromSource.identity.stats.totalWatchTime).toBe(3000);
+
+    await app.close();
+  });
+
+  it('scopes the identity block to servers the caller can access', async () => {
+    const admin = await createTestUser({ role: 'owner' });
+    const serverA = await createTestServer({ type: 'plex' });
+    const serverB = await createTestServer({ type: 'jellyfin' });
+    const target = await createTestUser({ role: 'member' });
+    const source = await createTestUser({ role: 'member' });
+    const targetSu = await createTestServerUser({ userId: target.id, serverId: serverA.id });
+    const sourceSu = await createTestServerUser({ userId: source.id, serverId: serverB.id });
+    await createTestSession({
+      serverId: serverA.id,
+      serverUserId: targetSu.id,
+      durationMs: 1000,
+      stoppedAt: new Date(),
+      state: 'stopped',
+    });
+    await createTestSession({
+      serverId: serverB.id,
+      serverUserId: sourceSu.id,
+      durationMs: 2000,
+      stoppedAt: new Date(),
+      state: 'stopped',
+    });
+
+    await mergeUsers(source.id, target.id, admin.id);
+
+    const app = Fastify({ logger: false });
+    await app.register(sensible);
+    // Viewer scoped only to serverA (where targetSu lives), not serverB
+    // (where the merged-in sourceSu lives).
+    app.decorate('authenticate', async (request: any) => {
+      request.user = {
+        userId: randomUUID(),
+        username: 'viewer',
+        role: 'viewer',
+        serverIds: [serverA.id],
+      };
+    });
+    await app.register(fullRoutes, { prefix: '/users' });
+
+    const response = await app.inject({ method: 'GET', url: `/users/${targetSu.id}/full` });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    const identitySuIds = body.identity.serverUsers.map((su: { id: string }) => su.id);
+    expect(identitySuIds).toEqual([targetSu.id]);
+    expect(body.identity.stats.totalSessions).toBe(1);
+    expect(body.identity.stats.totalWatchTime).toBe(1000);
   });
 });

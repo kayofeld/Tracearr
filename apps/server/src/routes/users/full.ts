@@ -16,7 +16,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { userIdParamSchema, type UserLocation } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import {
@@ -28,7 +28,7 @@ import {
   rules,
   terminationLogs,
 } from '../../db/schema.js';
-import { hasServerAccess } from '../../utils/serverFiltering.js';
+import { hasServerAccess, buildServerAccessCondition } from '../../utils/serverFiltering.js';
 import { PLAY_COUNT } from '../../constants/index.js';
 import { queryUserDevices } from './queries.js';
 
@@ -96,7 +96,18 @@ export const fullRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Identity-wide aggregation: every server_user tied to this person's
-      // identity, plus combined session stats across all of them (Task 8)
+      // identity that the caller can see, plus combined session stats over
+      // that same filtered set. Owners see every sibling; everyone else is
+      // scoped to their accessible servers so this can't leak sibling
+      // accounts on servers they have no access to.
+      const identityServerAccessCondition = buildServerAccessCondition(
+        authUser,
+        serverUsers.serverId
+      );
+      const identityWhere = identityServerAccessCondition
+        ? and(eq(serverUsers.userId, serverUser.userId), identityServerAccessCondition)
+        : eq(serverUsers.userId, serverUser.userId);
+
       const identityServerUserRows = await tx
         .select({
           id: serverUsers.id,
@@ -111,25 +122,29 @@ export const fullRoutes: FastifyPluginAsync = async (app) => {
         })
         .from(serverUsers)
         .innerJoin(servers, eq(serverUsers.serverId, servers.id))
-        .where(eq(serverUsers.userId, serverUser.userId));
+        .where(identityWhere);
 
       const identityIds = identityServerUserRows.map((su) => su.id);
-      // Same explicit array plus 10-year bound pattern as getUserWithStats in
-      // services/userService.ts (TimescaleDB chunk exclusion needs time bounds)
-      const identityIdArray = sql.raw(
-        `ARRAY[${identityIds.map((id) => `'${id}'::uuid`).join(',')}]`
-      );
-      const tenYearsAgo = new Date(Date.now() - 10 * 365 * 24 * 60 * 60 * 1000);
-      const nowDate = new Date();
-      const identityStatsRows = await tx
-        .select({
-          totalSessions: sql<number>`count(*)::int`,
-          totalWatchTime: sql<number>`coalesce(sum(duration_ms), 0)::bigint`,
-        })
-        .from(sessions).where(sql`${sessions.serverUserId} = ANY(${identityIdArray})
-          AND ${sessions.startedAt} >= ${tenYearsAgo}
-          AND ${sessions.startedAt} <= ${nowDate}`);
-      const identityStats = identityStatsRows[0];
+
+      let identityStats: { totalSessions: number; totalWatchTime: number } | undefined;
+      if (identityIds.length > 0) {
+        // Explicit array literal plus a 10-year bound so TimescaleDB can
+        // exclude chunks instead of scanning the whole hypertable.
+        const identityIdArray = sql.raw(
+          `ARRAY[${identityIds.map((identityId) => `'${identityId}'::uuid`).join(',')}]`
+        );
+        const tenYearsAgo = new Date(Date.now() - 10 * 365 * 24 * 60 * 60 * 1000);
+        const nowDate = new Date();
+        const identityStatsRows = await tx
+          .select({
+            totalSessions: PLAY_COUNT,
+            totalWatchTime: sql<number>`coalesce(sum(duration_ms), 0)::bigint`,
+          })
+          .from(sessions).where(sql`${sessions.serverUserId} = ANY(${identityIdArray})
+            AND ${sessions.startedAt} >= ${tenYearsAgo}
+            AND ${sessions.startedAt} <= ${nowDate}`);
+        identityStats = identityStatsRows[0];
+      }
 
       // 2. Get session stats — count unique plays, not raw rows
       const statsResult = await tx
