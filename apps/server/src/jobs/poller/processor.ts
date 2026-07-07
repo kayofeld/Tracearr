@@ -28,7 +28,11 @@ import { registerService, unregisterService } from '../../services/serviceTracke
 import { sseManager } from '../../services/sseManager.js';
 
 import { enqueueNotification } from '../notificationQueue.js';
-import { batchGetRecentUserSessions, getActiveRulesV2 } from './database.js';
+import {
+  batchGetIdentityServerUserIds,
+  batchGetRecentUserSessions,
+  getActiveRulesV2,
+} from './database.js';
 import { updatePendingSession } from './pendingConfirmation.js';
 import {
   buildActiveSession,
@@ -428,6 +432,16 @@ async function processServerSessions(
 
     const recentSessionsMap = await batchGetRecentUserSessions([...serverUsersWithNewSessions]);
 
+    // OPTIMIZATION: Batch load sibling server_user ids per identity for cross-server
+    // rule aggregation on merged users. One query per poll tick covers every server
+    // user in this batch, avoiding a per-session/per-tick lookup in the hot path.
+    // Skipped when there are no V2 rules to evaluate.
+    const identityUserIds = [...new Set(Array.from(serverUserById.values()).map((u) => u.userId))];
+    const identityServerUserIdsMap =
+      activeRulesV2.length > 0
+        ? await batchGetIdentityServerUserIds(identityUserIds)
+        : new Map<string, string[]>();
+
     // Process each session
     for (let i = 0; i < processedSessions.length; i++) {
       const processed = processedSessions[i]!;
@@ -451,6 +465,7 @@ async function processServerSessions(
       const userDetail = serverUserFromCache
         ? {
             id: serverUserFromCache.id,
+            userId: serverUserFromCache.userId,
             username: serverUserFromCache.username,
             thumbUrl: serverUserFromCache.thumbUrl,
             identityName: serverUserFromCache.identityName,
@@ -458,9 +473,16 @@ async function processServerSessions(
             sessionCount: serverUserFromCache.sessionCount,
             lastActivityAt: serverUserFromCache.lastActivityAt,
             createdAt: serverUserFromCache.createdAt,
+            identityServerUserIds: identityServerUserIdsMap.get(serverUserFromCache.userId) ?? [
+              serverUserFromCache.id,
+            ],
           }
         : {
             id: serverUserId,
+            // Defensive fallback: the server user was resolved but is missing from
+            // cache. This should be unreachable since every id in
+            // sessionServerUserIds is added to serverUserById above.
+            userId: '',
             username: 'Unknown',
             thumbUrl: null,
             identityName: null,
@@ -468,6 +490,7 @@ async function processServerSessions(
             sessionCount: 0,
             lastActivityAt: null,
             createdAt: new Date(), // Brand new users genuinely have 0-day account age
+            identityServerUserIds: [serverUserId],
           };
 
       // Get GeoIP location (uses Plex API if enabled, falls back to MaxMind)

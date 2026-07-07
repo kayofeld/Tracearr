@@ -409,6 +409,15 @@ export async function getServerUsersByUserId(userId: string): Promise<ServerUser
 }
 
 /**
+ * Get all server_user ids belonging to an identity (for cross-server rule
+ * aggregation on merged users)
+ */
+export async function getIdentityServerUserIds(userId: string): Promise<string[]> {
+  const rows = await getServerUsersByUserId(userId);
+  return rows.map((row) => row.id);
+}
+
+/**
  * Create a server user linked to a user identity
  */
 export async function createServerUser(data: {

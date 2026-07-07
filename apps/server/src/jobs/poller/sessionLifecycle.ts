@@ -741,7 +741,7 @@ export async function createSessionWithRulesAtomic(
 
           const serverUserObj: ServerUser = {
             id: serverUser.id,
-            userId: '', // Not needed for rule evaluation
+            userId: serverUser.userId,
             serverId: server.id,
             externalId: '',
             username: serverUser.username,
@@ -768,6 +768,7 @@ export async function createSessionWithRulesAtomic(
             server: serverObj,
             activeSessions: activeSessionsWithNew,
             recentSessions,
+            identityServerUserIds: serverUser.identityServerUserIds,
           };
 
           // Evaluate V2 rules
@@ -1403,7 +1404,7 @@ export async function reEvaluateRulesOnTranscodeChange(
 
   const serverUserObj: ServerUser = {
     id: serverUser.id,
-    userId: '',
+    userId: serverUser.userId,
     serverId: server.id,
     externalId: '',
     username: serverUser.username,
@@ -1426,6 +1427,7 @@ export async function reEvaluateRulesOnTranscodeChange(
     server: serverObj,
     activeSessions,
     recentSessions,
+    identityServerUserIds: serverUser.identityServerUserIds,
   };
 
   // Evaluate only transcode-related rules
@@ -1624,7 +1626,7 @@ export async function reEvaluateRulesOnPauseState(
 
   const serverUserObj: ServerUser = {
     id: serverUser.id,
-    userId: '',
+    userId: serverUser.userId,
     serverId: server.id,
     externalId: '',
     username: serverUser.username,
@@ -1647,6 +1649,7 @@ export async function reEvaluateRulesOnPauseState(
     server: serverObj,
     activeSessions,
     recentSessions,
+    identityServerUserIds: serverUser.identityServerUserIds,
   };
 
   // Evaluate only pause-related rules

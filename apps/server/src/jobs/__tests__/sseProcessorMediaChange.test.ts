@@ -198,6 +198,7 @@ const mockProcessedSession = {
 
 const mockServerUser = {
   id: 'server-user-1',
+  userId: 'identity-1',
   username: 'testuser',
   thumbUrl: null,
   identityName: 'Test User',
@@ -287,7 +288,12 @@ function setupServerUserQuery() {
   const innerJoinFn = vi.fn().mockReturnValue({ where: whereFn });
   const fromFn = vi.fn().mockReturnValue({ innerJoin: innerJoinFn });
 
-  // Track call count — first call is fetchFullSession (servers), second is handleMediaChange (serverUsers)
+  // getIdentityServerUserIds: db.select({...}).from(serverUsers).where() (no join, no limit)
+  const identityWhereFn = vi.fn().mockResolvedValue([mockServerUser]);
+  const identityFromFn = vi.fn().mockReturnValue({ where: identityWhereFn });
+
+  // Track call count — first call is fetchFullSession (servers), second is
+  // handleMediaChange (serverUsers innerJoin), third is getIdentityServerUserIds
   let callCount = 0;
   const mockGetSessions = vi.fn().mockResolvedValue([mockProcessedSession]);
   mockCreateMediaServerClient.mockReturnValue({ getSessions: mockGetSessions });
@@ -301,8 +307,12 @@ function setupServerUserQuery() {
       const serverFromFn = vi.fn().mockReturnValue({ where: serverWhereFn });
       return { from: serverFromFn };
     }
-    // handleMediaChange: db.select({...}).from(serverUsers).innerJoin().where().limit()
-    return { from: fromFn };
+    if (callCount === 2) {
+      // handleMediaChange: db.select({...}).from(serverUsers).innerJoin().where().limit()
+      return { from: fromFn };
+    }
+    // getIdentityServerUserIds: db.select({...}).from(serverUsers).where()
+    return { from: identityFromFn };
   });
 }
 

@@ -644,6 +644,56 @@ describe('Session Behavior Evaluators', () => {
       expect(browserResult.matched).toBe(true);
       expect(browserResult.actual).toBe(2);
     });
+
+    it('counts sessions from every server user of the identity when identityServerUserIds is provided', () => {
+      const server = createMockServer();
+      const serverUser = createMockServerUser({ serverId: server.id });
+      const session = createMockSession({ serverId: server.id, serverUserId: serverUser.id });
+      const siblingSession = createMockSession({
+        serverId: 'other-server',
+        serverUserId: 'sibling-server-user',
+        deviceId: 'other-device',
+      });
+      const context = createTestContext({
+        session,
+        serverUser,
+        server,
+        activeSessions: [session, siblingSession],
+        identityServerUserIds: [serverUser.id, 'sibling-server-user'],
+      });
+
+      const evaluator = evaluatorRegistry.concurrent_streams;
+      const result = evaluator(
+        context,
+        createCondition({ field: 'concurrent_streams', operator: 'eq', value: 2 })
+      );
+
+      expect(matched(result)).toBe(true);
+    });
+
+    it('falls back to single server user counting when identityServerUserIds is absent', () => {
+      const server = createMockServer();
+      const serverUser = createMockServerUser({ serverId: server.id });
+      const session = createMockSession({ serverId: server.id, serverUserId: serverUser.id });
+      const siblingSession = createMockSession({
+        serverId: 'other-server',
+        serverUserId: 'sibling-server-user',
+      });
+      const context = createTestContext({
+        session,
+        serverUser,
+        server,
+        activeSessions: [session, siblingSession],
+      });
+
+      const evaluator = evaluatorRegistry.concurrent_streams;
+      const result = evaluator(
+        context,
+        createCondition({ field: 'concurrent_streams', operator: 'eq', value: 1 })
+      );
+
+      expect(matched(result)).toBe(true);
+    });
   });
 
   describe('active_session_distance_km', () => {

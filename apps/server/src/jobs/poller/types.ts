@@ -268,6 +268,8 @@ export interface PendingSessionData {
   /** Server user info (matches SessionCreationInput.serverUser) */
   serverUser: {
     id: string;
+    /** Identity (users.id) this server_user belongs to */
+    userId: string;
     username: string;
     thumbUrl: string | null;
     identityName: string | null;
@@ -275,6 +277,8 @@ export interface PendingSessionData {
     sessionCount: number;
     lastActivityAt: Date | null;
     createdAt: Date;
+    /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
+    identityServerUserIds: string[];
   };
   /** GeoIP location data */
   geo: GeoLocation;
@@ -323,6 +327,8 @@ export interface SessionCreationInput {
   /** Server user info */
   serverUser: {
     id: string;
+    /** Identity (users.id) this server_user belongs to */
+    userId: string;
     username: string;
     thumbUrl: string | null;
     identityName: string | null;
@@ -330,6 +336,8 @@ export interface SessionCreationInput {
     sessionCount: number;
     lastActivityAt: Date | null;
     createdAt: Date;
+    /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
+    identityServerUserIds: string[];
   };
   /** GeoIP location data */
   geo: GeoLocation;
@@ -431,6 +439,8 @@ export interface MediaChangeInput {
   /** Server user info */
   serverUser: {
     id: string;
+    /** Identity (users.id) this server_user belongs to */
+    userId: string;
     username: string;
     thumbUrl: string | null;
     identityName: string | null;
@@ -438,6 +448,8 @@ export interface MediaChangeInput {
     sessionCount: number;
     lastActivityAt: Date | null;
     createdAt: Date;
+    /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
+    identityServerUserIds: string[];
   };
   /** GeoIP location data */
   geo: GeoLocation;
@@ -484,6 +496,8 @@ export interface TranscodeReEvalInput {
   /** Server user info */
   serverUser: {
     id: string;
+    /** Identity (users.id) this server_user belongs to */
+    userId: string;
     username: string;
     thumbUrl: string | null;
     identityName: string | null;
@@ -491,6 +505,8 @@ export interface TranscodeReEvalInput {
     sessionCount: number;
     lastActivityAt: Date | null;
     createdAt: Date;
+    /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
+    identityServerUserIds: string[];
   };
   /** Active V2 rules (will be filtered to transcode-related) */
   activeRulesV2: RuleV2[];
@@ -512,6 +528,8 @@ export interface PauseReEvalInput {
   /** Server user info */
   serverUser: {
     id: string;
+    /** Identity (users.id) this server_user belongs to */
+    userId: string;
     username: string;
     thumbUrl: string | null;
     identityName: string | null;
@@ -519,6 +537,8 @@ export interface PauseReEvalInput {
     sessionCount: number;
     lastActivityAt: Date | null;
     createdAt: Date;
+    /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
+    identityServerUserIds: string[];
   };
   /** Active V2 rules (will be filtered to pause-related) */
   activeRulesV2: RuleV2[];

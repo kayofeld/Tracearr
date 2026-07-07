@@ -18,7 +18,7 @@ import {
   type ViolationSeverity,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { sessions, rules } from '../../db/schema.js';
+import { sessions, rules, serverUsers } from '../../db/schema.js';
 import { mapSessionRow } from './sessionMapper.js';
 
 // ============================================================================
@@ -67,6 +67,43 @@ export async function batchGetRecentUserSessions(
       userSessions.push(mapSessionRow(s));
     }
     result.set(s.serverUserId, userSessions);
+  }
+
+  return result;
+}
+
+/**
+ * Batch load the sibling server_user ids for a set of identities in a single
+ * query (eliminates a per-session/per-poll-tick lookup for cross-server rule
+ * aggregation on merged identities).
+ *
+ * @param userIds - Array of identity (users.id) values to resolve
+ * @returns Map of userId -> server_user ids belonging to that identity
+ *
+ * @example
+ * const identityMap = await batchGetIdentityServerUserIds(['u-1', 'u-2']);
+ * const idsForUser1 = identityMap.get('u-1') ?? [];
+ */
+export async function batchGetIdentityServerUserIds(
+  userIds: string[]
+): Promise<Map<string, string[]>> {
+  const result = new Map<string, string[]>();
+  if (userIds.length === 0) return result;
+
+  const uniqueUserIds = [...new Set(userIds)];
+  for (const userId of uniqueUserIds) {
+    result.set(userId, []);
+  }
+
+  const rows = await db
+    .select({ id: serverUsers.id, userId: serverUsers.userId })
+    .from(serverUsers)
+    .where(inArray(serverUsers.userId, uniqueUserIds));
+
+  for (const row of rows) {
+    const ids = result.get(row.userId) ?? [];
+    ids.push(row.id);
+    result.set(row.userId, ids);
   }
 
   return result;

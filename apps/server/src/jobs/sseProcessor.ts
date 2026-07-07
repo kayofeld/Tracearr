@@ -23,6 +23,7 @@ import { extractLiveUuid } from '../services/mediaServer/plex/plexUtils.js';
 import { lookupGeoIP } from '../services/plexGeoip.js';
 import { registerService, unregisterService } from '../services/serviceTracker.js';
 import { sseManager } from '../services/sseManager.js';
+import { getIdentityServerUserIds } from '../services/userService.js';
 import { enqueueNotification } from './notificationQueue.js';
 import { batchGetRecentUserSessions, getActiveRulesV2 } from './poller/database.js';
 import { triggerReconciliationPoll } from './poller/index.js';
@@ -753,6 +754,7 @@ async function createNewSession(
   const serverUserRows = await db
     .select({
       id: serverUsers.id,
+      userId: serverUsers.userId,
       username: serverUsers.username,
       thumbUrl: serverUsers.thumbUrl,
       identityName: users.name,
@@ -774,8 +776,11 @@ async function createNewSession(
     return;
   }
 
+  const identityServerUserIds = await getIdentityServerUserIds(serverUserFromDb.userId);
+
   const userDetail = {
     id: serverUserFromDb.id,
+    userId: serverUserFromDb.userId,
     username: serverUserFromDb.username,
     thumbUrl: serverUserFromDb.thumbUrl,
     identityName: serverUserFromDb.identityName,
@@ -783,6 +788,7 @@ async function createNewSession(
     sessionCount: serverUserFromDb.sessionCount,
     lastActivityAt: serverUserFromDb.lastActivityAt,
     createdAt: serverUserFromDb.createdAt,
+    identityServerUserIds,
   };
 
   // Get GeoIP location (uses Plex API if enabled, falls back to MaxMind)
@@ -879,6 +885,7 @@ async function handleMediaChange(
   const serverUserRows = await db
     .select({
       id: serverUsers.id,
+      userId: serverUsers.userId,
       username: serverUsers.username,
       thumbUrl: serverUsers.thumbUrl,
       identityName: users.name,
@@ -910,12 +917,13 @@ async function handleMediaChange(
   const activeRulesV2 = await getActiveRulesV2();
   const recentSessions = await batchGetRecentUserSessions([serverUser.id]);
   const activeSessions = await cacheService.getAllActiveSessions();
+  const identityServerUserIds = await getIdentityServerUserIds(serverUser.userId);
 
   const result = await handleMediaChangeAtomic({
     existingSession,
     processed,
     server: { id: server.id, name: server.name, type: server.type },
-    serverUser,
+    serverUser: { ...serverUser, identityServerUserIds },
     geo,
     activeRulesV2,
     activeSessions,
@@ -1050,6 +1058,7 @@ async function updateExistingSession(
         const serverUserRows = await db
           .select({
             id: serverUsers.id,
+            userId: serverUsers.userId,
             username: serverUsers.username,
             thumbUrl: serverUsers.thumbUrl,
             identityName: users.name,
@@ -1076,12 +1085,13 @@ async function updateExistingSession(
           if (server) {
             const activeSessions = await cacheService.getAllActiveSessions();
             const recentSessions = await batchGetRecentUserSessions([serverUserDetail.id]);
+            const identityServerUserIds = await getIdentityServerUserIds(serverUserDetail.userId);
 
             const violationResults = await reEvaluateRulesOnTranscodeChange({
               existingSession,
               processed,
               server: { id: server.id, name: server.name, type: server.type },
-              serverUser: serverUserDetail,
+              serverUser: { ...serverUserDetail, identityServerUserIds },
               activeRulesV2,
               activeSessions,
               recentSessions: recentSessions.get(serverUserDetail.id) ?? [],
@@ -1110,6 +1120,7 @@ async function updateExistingSession(
         const serverUserRows = await db
           .select({
             id: serverUsers.id,
+            userId: serverUsers.userId,
             username: serverUsers.username,
             thumbUrl: serverUsers.thumbUrl,
             identityName: users.name,
@@ -1135,6 +1146,7 @@ async function updateExistingSession(
           if (server) {
             const activeSessions = await cacheService.getAllActiveSessions();
             const recentSessions = await batchGetRecentUserSessions([serverUserDetail.id]);
+            const identityServerUserIds = await getIdentityServerUserIds(serverUserDetail.userId);
 
             const violationResults = await reEvaluateRulesOnPauseState({
               existingSession,
@@ -1144,7 +1156,7 @@ async function updateExistingSession(
                 pausedDurationMs: pauseResult.pausedDurationMs,
               },
               server: { id: server.id, name: server.name, type: server.type },
-              serverUser: serverUserDetail,
+              serverUser: { ...serverUserDetail, identityServerUserIds },
               activeRulesV2,
               activeSessions,
               recentSessions: recentSessions.get(serverUserDetail.id) ?? [],

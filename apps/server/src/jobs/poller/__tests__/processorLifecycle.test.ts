@@ -19,6 +19,7 @@ function createPendingSession(overrides: Partial<PendingSessionData> = {}): Pend
     server: { id: 'srv-1', name: 'Test JF', type: 'jellyfin' },
     serverUser: {
       id: 'su-1',
+      userId: 'identity-1',
       username: 'testuser',
       thumbUrl: null,
       identityName: null,
@@ -26,6 +27,7 @@ function createPendingSession(overrides: Partial<PendingSessionData> = {}): Pend
       sessionCount: 0,
       lastActivityAt: null,
       createdAt: new Date(),
+      identityServerUserIds: ['su-1'],
     },
     geo: {} as any,
     currentState: 'playing',
