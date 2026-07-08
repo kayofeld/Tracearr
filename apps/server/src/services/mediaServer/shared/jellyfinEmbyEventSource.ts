@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { SSE_CONFIG, type SSEConnectionState } from '@tracearr/shared';
 import type { EventSourceFetchInit } from 'eventsource';
+import { parseHelloPayload } from '../../../utils/pluginVersion.js';
 
 // Plugin SSE endpoint paths per server type
 export const PLUGIN_SSE_PATH: Record<'jellyfin' | 'emby', string> = {
@@ -72,10 +73,12 @@ export class JellyfinEmbyEventSource extends EventEmitter {
   private connectedAt: Date | null = null;
   private lastEventTime: Date | null = null;
   private lastError: Error | null = null;
+  private pluginVersion: string | null = null;
 
   private openListener: ((e: Event) => void) | null = null;
   private sessionEventListener: ((e: EventSourceMessage) => void) | null = null;
   private pingListener: ((e: EventSourceMessage) => void) | null = null;
+  private helloListener: ((ev: EventSourceMessage) => void) | null = null;
   private errorListener: ((e: Event) => void) | null = null;
 
   constructor(config: {
@@ -105,6 +108,7 @@ export class JellyfinEmbyEventSource extends EventEmitter {
     lastEventAt: Date | null;
     reconnectAttempts: number;
     error: string | null;
+    pluginVersion: string | null;
   } {
     return {
       serverId: this.serverId,
@@ -114,6 +118,7 @@ export class JellyfinEmbyEventSource extends EventEmitter {
       lastEventAt: this.lastEventTime,
       reconnectAttempts: this.reconnectAttempts,
       error: this.lastError?.message ?? null,
+      pluginVersion: this.pluginVersion,
     };
   }
 
@@ -183,6 +188,15 @@ export class JellyfinEmbyEventSource extends EventEmitter {
         this.lastEventTime = new Date();
         this.resetHeartbeatMonitor();
       };
+      this.helloListener = (ev: EventSourceMessage) => {
+        this.lastEventTime = new Date();
+        this.resetHeartbeatMonitor();
+        const hello = ev.data ? parseHelloPayload(ev.data) : null;
+        if (hello) {
+          this.pluginVersion = hello.version;
+          console.log(`[PluginSSE] ${this.serverName} plugin version ${hello.version}`);
+        }
+      };
 
       this.errorListener = (ev: Event) => {
         this.handleError(ev);
@@ -208,6 +222,7 @@ export class JellyfinEmbyEventSource extends EventEmitter {
         this.eventSource.addEventListener(eventName, this.sessionEventListener);
       }
       this.eventSource.addEventListener('ping', this.pingListener);
+      this.eventSource.addEventListener('hello', this.helloListener);
     } catch (error) {
       this.handleError(error as Error);
     }
@@ -243,13 +258,18 @@ export class JellyfinEmbyEventSource extends EventEmitter {
     if (this.pingListener) {
       this.eventSource.removeEventListener('ping', this.pingListener);
     }
+    if (this.helloListener) {
+      this.eventSource.removeEventListener('hello', this.helloListener);
+    }
 
     this.eventSource.close();
     this.eventSource = null;
     this.openListener = null;
     this.sessionEventListener = null;
     this.pingListener = null;
+    this.helloListener = null;
     this.errorListener = null;
+    this.pluginVersion = null;
   }
 
   private handleError(error: unknown): void {
