@@ -143,6 +143,8 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
 
     const data = serverUserList.map((u) => ({
       ...u,
+      // Fallback is unreachable in practice: the row's own server is always part of the
+      // batched scope above. Kept as a safety net, not an expected path.
       identityServers: identityServersByUserId.get(u.userId) ?? [
         { id: u.serverId, name: u.serverName },
       ],
