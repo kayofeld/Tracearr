@@ -14,10 +14,12 @@ import type {
   ViolationContext,
   SessionContext,
   ServerContext,
+  PluginUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
 import { formatViolationMessage } from '../formatters/violation.js';
+import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
 
 export class PushoverAgent extends BaseAgent {
   readonly name = 'pushover';
@@ -89,6 +91,8 @@ export class PushoverAgent extends BaseAgent {
         return this.buildServerDownParams(payload.context);
       case 'server_up':
         return this.buildServerUpParams(payload.context);
+      case 'plugin_update_available':
+        return this.buildPluginUpdateParams(payload.context);
       case 'new_device':
         return this.buildNewDeviceParams(payload.context);
       case 'trust_score_changed':
@@ -164,6 +168,18 @@ export class PushoverAgent extends BaseAgent {
       title: 'Server Online',
       message: `${ctx.serverName} is back online`,
       priority: '1',
+    };
+  }
+
+  private buildPluginUpdateParams(ctx: PluginUpdateContext): {
+    title: string;
+    message: string;
+    priority: string;
+  } {
+    return {
+      title: 'Plugin Update Available',
+      message: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
+      priority: '-1',
     };
   }
 

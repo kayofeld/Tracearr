@@ -30,6 +30,7 @@ const JOB_TYPE_TO_EVENT_TYPE: Record<NotificationJobData['type'], NotificationEv
   session_stopped: 'stream_stopped',
   server_down: 'server_down',
   server_up: 'server_up',
+  plugin_update_available: 'plugin_update_available',
 };
 
 // Job type discriminated union for type-safe job handling
@@ -38,7 +39,18 @@ export type NotificationJobData =
   | { type: 'session_started'; payload: ActiveSession }
   | { type: 'session_stopped'; payload: ActiveSession }
   | { type: 'server_down'; payload: { serverName: string; serverId: string } }
-  | { type: 'server_up'; payload: { serverName: string; serverId: string } };
+  | { type: 'server_up'; payload: { serverName: string; serverId: string } }
+  | {
+      type: 'plugin_update_available';
+      payload: {
+        serverId: string;
+        serverName: string;
+        serverType: string;
+        installedVersion: string | null;
+        latestVersion: string;
+        downloadUrl: string;
+      };
+    };
 
 // Queue name constant
 const QUEUE_NAME = 'notifications';
@@ -373,6 +385,12 @@ export async function processNotificationJob(job: Job<NotificationJobData>): Pro
       }
       break;
 
+    case 'plugin_update_available':
+      if (routing.discordEnabled || routing.webhookEnabled) {
+        await notificationManager.notifyPluginUpdateAvailable(payload, notificationSettings);
+      }
+      break;
+
     default: {
       // TypeScript exhaustiveness check
       const _exhaustive: never = type;
@@ -407,7 +425,8 @@ function getDedupeKey(data: NotificationJobData): string | undefined {
       return `${data.type}-${sessionId}-${timeBucket}`;
     }
     case 'server_down':
-    case 'server_up': {
+    case 'server_up':
+    case 'plugin_update_available': {
       return `${data.type}-${data.payload.serverId}-${timeBucket}`;
     }
     default: {

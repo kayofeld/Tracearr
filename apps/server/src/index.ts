@@ -84,6 +84,7 @@ import {
   stopSSEProcessor,
   cleanupOrphanedPendingSessions,
 } from './jobs/sseProcessor.js';
+import { startPluginUpdateChecker, stopPluginUpdateChecker } from './jobs/pluginUpdateChecker.js';
 import { initializeWebSocket, broadcastToSessions } from './websocket/index.js';
 import {
   initNotificationQueue,
@@ -466,6 +467,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     await sseManager.stop();
     await tailscaleService.shutdown();
     stopSSEProcessor();
+    stopPluginUpdateChecker();
     await shutdownNotificationQueue();
     await shutdownImportQueue();
     await shutdownMaintenanceQueue();
@@ -966,6 +968,7 @@ async function initializePostListen(app: FastifyInstance) {
     // Clean up any orphaned pending sessions from previous server instance
     await cleanupOrphanedPendingSessions();
     startSSEProcessor(); // Subscribe to SSE events
+    startPluginUpdateChecker();
     await sseManager.start(); // Start SSE connections
     app.log.info('Real-time SSE connections started');
   } catch (err) {
@@ -1087,6 +1090,7 @@ async function start() {
         app.log.info('Entering maintenance mode — shutting down services');
         stopPoller();
         stopSSEProcessor();
+        stopPluginUpdateChecker();
         void sseManager.stop();
         void tailscaleService.shutdown();
 

@@ -14,10 +14,12 @@ import type {
   ViolationContext,
   SessionContext,
   ServerContext,
+  PluginUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
 import { formatViolationMessage } from '../formatters/violation.js';
+import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
 
 interface ApprisePayload {
   title: string;
@@ -78,6 +80,8 @@ export class AppriseAgent extends BaseAgent {
         return this.buildServerDownPayload(payload.context);
       case 'server_up':
         return this.buildServerUpPayload(payload.context);
+      case 'plugin_update_available':
+        return this.buildPluginUpdatePayload(payload.context);
       case 'new_device':
         return this.buildNewDevicePayload(payload.context);
       case 'trust_score_changed':
@@ -133,6 +137,14 @@ export class AppriseAgent extends BaseAgent {
       title: 'Server Online',
       body: `${ctx.serverName} is back online`,
       type: 'success',
+    };
+  }
+
+  private buildPluginUpdatePayload(ctx: PluginUpdateContext): ApprisePayload {
+    return {
+      title: 'Plugin Update Available',
+      body: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
+      type: 'warning',
     };
   }
 

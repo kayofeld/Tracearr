@@ -19,7 +19,8 @@ export type NotificationEventType =
   | 'new_device'
   | 'trust_score_changed'
   | 'server_down'
-  | 'server_up';
+  | 'server_up'
+  | 'plugin_update_available';
 
 /**
  * Severity levels for notifications
@@ -52,6 +53,19 @@ export interface ServerContext {
 }
 
 /**
+ * Context provided with plugin update notifications
+ */
+export interface PluginUpdateContext {
+  type: 'plugin_update_available';
+  serverId: string;
+  serverName: string;
+  serverType: string;
+  installedVersion: string | null;
+  latestVersion: string;
+  downloadUrl: string;
+}
+
+/**
  * Context provided with new device notifications
  */
 export interface NewDeviceContext {
@@ -80,6 +94,7 @@ export type NotificationContext =
   | ViolationContext
   | SessionContext
   | ServerContext
+  | PluginUpdateContext
   | NewDeviceContext
   | TrustScoreChangedContext;
 
@@ -238,6 +253,33 @@ export const PayloadBuilders = {
       severity: 'low',
       timestamp: new Date().toISOString(),
       context: { type: 'server_up', serverName, serverType },
+    };
+  },
+
+  fromPluginUpdate(
+    serverId: string,
+    serverName: string,
+    serverType: string,
+    installedVersion: string | null,
+    latestVersion: string,
+    downloadUrl: string
+  ): NotificationPayload {
+    const installed = installedVersion ?? 'pre-0.2.0';
+    return {
+      event: 'plugin_update_available',
+      title: 'Plugin Update Available',
+      message: `${serverName} plugin is outdated (installed ${installed}, latest ${latestVersion})`,
+      severity: 'low',
+      timestamp: new Date().toISOString(),
+      context: {
+        type: 'plugin_update_available',
+        serverId,
+        serverName,
+        serverType,
+        installedVersion,
+        latestVersion,
+        downloadUrl,
+      },
     };
   },
 

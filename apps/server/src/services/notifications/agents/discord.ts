@@ -14,6 +14,7 @@ import type {
   ViolationContext,
   SessionContext,
   ServerContext,
+  PluginUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
@@ -22,6 +23,7 @@ import {
   getSeverityInfo,
   type DiscordField,
 } from '../formatters/violation.js';
+import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
 
 interface DiscordEmbed {
   title: string;
@@ -83,6 +85,8 @@ export class DiscordAgent extends BaseAgent {
         return this.buildServerDownEmbed(payload, payload.context);
       case 'server_up':
         return this.buildServerUpEmbed(payload, payload.context);
+      case 'plugin_update_available':
+        return this.buildPluginUpdateEmbed(payload, payload.context);
       case 'new_device':
         return this.buildNewDeviceEmbed(payload, payload.context);
       case 'trust_score_changed':
@@ -218,6 +222,17 @@ export class DiscordAgent extends BaseAgent {
       title: 'Server Back Online',
       description: `${ctx.serverName} is back online`,
       color: 0x2ecc71, // Green
+    };
+  }
+
+  private buildPluginUpdateEmbed(
+    _payload: NotificationPayload,
+    ctx: PluginUpdateContext
+  ): DiscordEmbed {
+    return {
+      title: 'Plugin Update Available',
+      description: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
+      color: 0xf39c12, // Orange/Warning
     };
   }
 

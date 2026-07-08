@@ -14,10 +14,12 @@ import type {
   ViolationContext,
   SessionContext,
   ServerContext,
+  PluginUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
 import { formatViolationMessage } from '../formatters/violation.js';
+import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
 
 interface GotifyPayload {
   title: string;
@@ -78,6 +80,8 @@ export class GotifyAgent extends BaseAgent {
         return this.buildServerDownPayload(payload.context);
       case 'server_up':
         return this.buildServerUpPayload(payload.context);
+      case 'plugin_update_available':
+        return this.buildPluginUpdatePayload(payload.context);
       case 'new_device':
         return this.buildNewDevicePayload(payload.context);
       case 'trust_score_changed':
@@ -133,6 +137,14 @@ export class GotifyAgent extends BaseAgent {
       title: 'Server Online',
       message: `${ctx.serverName} is back online`,
       priority: 4,
+    };
+  }
+
+  private buildPluginUpdatePayload(ctx: PluginUpdateContext): GotifyPayload {
+    return {
+      title: 'Plugin Update Available',
+      message: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
+      priority: 3,
     };
   }
 

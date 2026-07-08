@@ -29,6 +29,7 @@ export type {
   ViolationContext,
   SessionContext,
   ServerContext,
+  PluginUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
   NotificationContext,
@@ -169,6 +170,31 @@ export class NotificationManager {
   ): Promise<SendResult[]> {
     const payload = PayloadBuilders.fromServerUp(serverName, serverType);
     return this.sendAll(payload, settings);
+  }
+
+  /**
+   * Send a plugin update available notification to all enabled agents
+   */
+  async notifyPluginUpdateAvailable(
+    payload: {
+      serverId: string;
+      serverName: string;
+      serverType: string;
+      installedVersion: string | null;
+      latestVersion: string;
+      downloadUrl: string;
+    },
+    settings: NotificationSettings
+  ): Promise<SendResult[]> {
+    const notificationPayload = PayloadBuilders.fromPluginUpdate(
+      payload.serverId,
+      payload.serverName,
+      payload.serverType,
+      payload.installedVersion,
+      payload.latestVersion,
+      payload.downloadUrl
+    );
+    return this.sendAll(notificationPayload, settings);
   }
 
   /**

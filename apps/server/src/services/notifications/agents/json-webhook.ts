@@ -15,6 +15,7 @@ import type {
   ViolationContext,
   SessionContext,
   ServerContext,
+  PluginUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
@@ -81,6 +82,8 @@ export class JsonWebhookAgent extends BaseAgent {
         return this.buildServerPayload(payload, payload.context);
       case 'server_up':
         return this.buildServerPayload(payload, payload.context);
+      case 'plugin_update_available':
+        return this.buildPluginUpdatePayload(payload, payload.context);
       case 'new_device':
         return this.buildNewDevicePayload(payload, payload.context);
       case 'trust_score_changed':
@@ -190,6 +193,24 @@ export class JsonWebhookAgent extends BaseAgent {
       data: {
         serverName: ctx.serverName,
         serverType: ctx.serverType,
+      },
+    };
+  }
+
+  private buildPluginUpdatePayload(
+    payload: NotificationPayload,
+    ctx: PluginUpdateContext
+  ): JsonWebhookPayload {
+    return {
+      event: NOTIFICATION_EVENTS.PLUGIN_UPDATE_AVAILABLE,
+      timestamp: payload.timestamp,
+      data: {
+        serverId: ctx.serverId,
+        serverName: ctx.serverName,
+        serverType: ctx.serverType,
+        installedVersion: ctx.installedVersion,
+        latestVersion: ctx.latestVersion,
+        downloadUrl: ctx.downloadUrl,
       },
     };
   }

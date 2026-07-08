@@ -14,10 +14,12 @@ import type {
   ViolationContext,
   SessionContext,
   ServerContext,
+  PluginUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
 import { formatViolationMessage } from '../formatters/violation.js';
+import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
 
 interface NtfyPayload {
   topic: string;
@@ -84,6 +86,8 @@ export class NtfyAgent extends BaseAgent {
         return this.buildServerDownPayload(ntfyTopic, payload.context);
       case 'server_up':
         return this.buildServerUpPayload(ntfyTopic, payload.context);
+      case 'plugin_update_available':
+        return this.buildPluginUpdatePayload(ntfyTopic, payload.context);
       case 'new_device':
         return this.buildNewDevicePayload(ntfyTopic, payload.context);
       case 'trust_score_changed':
@@ -148,6 +152,16 @@ export class NtfyAgent extends BaseAgent {
       title: 'Server Online',
       message: `${ctx.serverName} is back online`,
       priority: 4,
+      tags: ['tracearr'],
+    };
+  }
+
+  private buildPluginUpdatePayload(topic: string, ctx: PluginUpdateContext): NtfyPayload {
+    return {
+      topic,
+      title: 'Plugin Update Available',
+      message: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
+      priority: 3,
       tags: ['tracearr'],
     };
   }
