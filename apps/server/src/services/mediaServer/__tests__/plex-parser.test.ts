@@ -278,10 +278,13 @@ describe('Plex Session Parser', () => {
       expect(sessions[1]!.sessionKey).toBe('2');
     });
 
-    it('should return empty array for missing MediaContainer', () => {
-      expect(parseSessionsResponse({})).toEqual([]);
+    it('should return empty array when MediaContainer has no Metadata (no active sessions)', () => {
       expect(parseSessionsResponse({ MediaContainer: {} })).toEqual([]);
-      expect(parseSessionsResponse(null)).toEqual([]);
+    });
+
+    it('should throw for a malformed response missing MediaContainer', () => {
+      expect(() => parseSessionsResponse({})).toThrow();
+      expect(() => parseSessionsResponse(null)).toThrow();
     });
 
     it('should use composite key to resolve correct media version per session (issue #686)', () => {
@@ -872,11 +875,14 @@ describe('Plex Music Track Parser', () => {
 
 describe('Plex Parser Edge Cases', () => {
   it('should handle null/undefined inputs gracefully', () => {
-    expect(parseSessionsResponse(null)).toEqual([]);
-    expect(parseSessionsResponse(undefined)).toEqual([]);
     expect(parseUsersResponse(null)).toEqual([]);
     expect(parseLibrariesResponse(null)).toEqual([]);
     expect(parseWatchHistoryResponse(null)).toEqual([]);
+  });
+
+  it('should throw for malformed session responses', () => {
+    expect(() => parseSessionsResponse(null)).toThrow();
+    expect(() => parseSessionsResponse(undefined)).toThrow();
   });
 
   it('should handle media type conversion', () => {
@@ -1197,10 +1203,7 @@ describe('Plex Original Media Metadata Parser', () => {
             {
               ratingKey: '123',
               TranscodeSession: { videoDecision: 'transcode', audioDecision: 'copy' },
-              Media: [
-                { id: 456, selected: '1' },
-                { id: 789 },
-              ],
+              Media: [{ id: 456, selected: '1' }, { id: 789 }],
             },
             {
               ratingKey: '999',

@@ -630,6 +630,14 @@ function handleFallbackActivated(event: FallbackEvent): void {
 async function handleFallbackDeactivated(event: FallbackEvent): Promise<void> {
   const { serverId, serverName } = event;
 
+  // Re-sync sessions that may have started, stopped, or changed while SSE was
+  // disconnected. JF/Emby have no other catch-up path, so reconcile on reconnect
+  // rather than waiting for the next inbound event. Fire-and-forget so it never
+  // delays the server up/down notification handling below.
+  void Promise.resolve(triggerReconciliationPoll()).catch((error: unknown) =>
+    console.error(`[SSEProcessor] Reconciliation on reconnect failed for ${serverName}:`, error)
+  );
+
   // Check if there's a pending server_down notification to cancel
   const pending = pendingServerDownNotifications.get(serverId);
   if (pending) {

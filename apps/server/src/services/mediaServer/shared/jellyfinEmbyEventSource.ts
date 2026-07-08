@@ -8,8 +8,9 @@ export const PLUGIN_SSE_PATH: Record<'jellyfin' | 'emby', string> = {
   emby: '/emby/sse/events',
 };
 
-// The plugin sends a ping every 30s; allow 45s before assuming the stream died
-const PLUGIN_HEARTBEAT_TIMEOUT_MS = 45_000;
+// The plugin sends a ping every 30s; allow two missed pings before assuming the
+// stream died so a single dropped keep-alive doesn't force a needless reconnect
+const PLUGIN_HEARTBEAT_TIMEOUT_MS = 90_000;
 
 // When the plugin is absent (404), re-probe every 3 minutes so a newly-installed
 // plugin gets picked up without a full server restart
@@ -189,8 +190,21 @@ export class JellyfinEmbyEventSource extends EventEmitter {
 
       this.eventSource.onopen = this.openListener;
       this.eventSource.onerror = this.errorListener;
+      // Reset the heartbeat on any unnamed data line too (not just named events),
+      // so keep-alives sent without an event name still count as liveness.
+      this.eventSource.onmessage = () => {
+        this.lastEventTime = new Date();
+        this.resetHeartbeatMonitor();
+      };
 
-      for (const eventName of ['playing', 'progress', 'paused', 'stopped', 'session.start', 'session.end']) {
+      for (const eventName of [
+        'playing',
+        'progress',
+        'paused',
+        'stopped',
+        'session.start',
+        'session.end',
+      ]) {
         this.eventSource.addEventListener(eventName, this.sessionEventListener);
       }
       this.eventSource.addEventListener('ping', this.pingListener);
@@ -212,9 +226,17 @@ export class JellyfinEmbyEventSource extends EventEmitter {
 
     this.eventSource.onopen = null;
     this.eventSource.onerror = null;
+    this.eventSource.onmessage = null;
 
     if (this.sessionEventListener) {
-      for (const eventName of ['playing', 'progress', 'paused', 'stopped', 'session.start', 'session.end']) {
+      for (const eventName of [
+        'playing',
+        'progress',
+        'paused',
+        'stopped',
+        'session.start',
+        'session.end',
+      ]) {
         this.eventSource.removeEventListener(eventName, this.sessionEventListener);
       }
     }
@@ -329,8 +351,14 @@ export class JellyfinEmbyEventSource extends EventEmitter {
   }
 
   private clearTimers(): void {
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-    if (this.heartbeatTimer) { clearTimeout(this.heartbeatTimer); this.heartbeatTimer = null; }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.heartbeatTimer) {
+      clearTimeout(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     this.clearConnectionTimeout();
   }
 
@@ -344,7 +372,10 @@ export class JellyfinEmbyEventSource extends EventEmitter {
   }
 
   private clearConnectionTimeout(): void {
-    if (this.connectionTimer) { clearTimeout(this.connectionTimer); this.connectionTimer = null; }
+    if (this.connectionTimer) {
+      clearTimeout(this.connectionTimer);
+      this.connectionTimer = null;
+    }
   }
 
   private buildAuthHeaders(): Record<string, string> {

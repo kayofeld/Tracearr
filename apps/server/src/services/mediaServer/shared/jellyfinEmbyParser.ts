@@ -118,7 +118,12 @@ export function parseSessionsResponse(
   sessions: unknown[],
   parseSession: (session: Record<string, unknown>) => MediaSession | null
 ): MediaSession[] {
-  if (!Array.isArray(sessions)) return [];
+  // A valid "no sessions" response is an empty array. A non-array body means the
+  // response is malformed (proxy error page, wrong shape); throw so the caller
+  // treats it as a failed poll rather than "all sessions ended".
+  if (!Array.isArray(sessions)) {
+    throw new Error('Unexpected sessions response: expected an array');
+  }
 
   const results: MediaSession[] = [];
   for (const session of sessions) {

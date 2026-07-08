@@ -524,7 +524,7 @@ function extractStreamDetails(
  */
 export function parseMediaMetadataResponse(
   data: unknown,
-  targetMediaId?: string,
+  targetMediaId?: string
 ): PlexOriginalMedia | null {
   const container = data as { MediaContainer?: { Metadata?: unknown[] } };
   const metadata = container?.MediaContainer?.Metadata;
@@ -854,10 +854,17 @@ export function parseSession(
  */
 export function parseSessionsResponse(
   data: unknown,
-  originalMediaMap?: Map<string, PlexOriginalMedia>,
+  originalMediaMap?: Map<string, PlexOriginalMedia>
 ): MediaSession[] {
   const container = data as { MediaContainer?: { Metadata?: unknown[] } };
-  const metadata = container?.MediaContainer?.Metadata;
+  // A valid "no sessions" response has a MediaContainer with no Metadata array.
+  // A missing/invalid MediaContainer means the body is malformed (proxy error
+  // page, wrong shape); throw so the caller treats it as a failed poll rather
+  // than "all sessions ended".
+  if (container?.MediaContainer == null || typeof container.MediaContainer !== 'object') {
+    throw new Error('Unexpected Plex sessions response: missing MediaContainer');
+  }
+  const metadata = container.MediaContainer.Metadata;
   return parseArray(metadata, (item) => {
     const session = item as Record<string, unknown>;
     const ratingKey = parseString(session.ratingKey);
@@ -884,7 +891,7 @@ export function parseSessionsResponse(
  *   where `sessionMediaId` is the id of the Media element the session is playing
  */
 export function getTranscodingSessionRatingKeys(
-  data: unknown,
+  data: unknown
 ): Array<{ ratingKey: string; sessionMediaId: string | undefined }> {
   const container = data as { MediaContainer?: { Metadata?: unknown[] } };
   const metadata = container?.MediaContainer?.Metadata;

@@ -214,9 +214,15 @@ export function createSessionParsingTests(
         expect(parsed[1]!.sessionKey).toBe('3');
       });
 
-      it('should return empty array for non-array input', () => {
-        expect(parsers.parseSessionsResponse(null as unknown as unknown[])).toEqual([]);
-        expect(parsers.parseSessionsResponse('not an array' as unknown as unknown[])).toEqual([]);
+      it('should throw for non-array (malformed) input', () => {
+        expect(() => parsers.parseSessionsResponse(null as unknown as unknown[])).toThrow();
+        expect(() =>
+          parsers.parseSessionsResponse('not an array' as unknown as unknown[])
+        ).toThrow();
+      });
+
+      it('should return empty array for an empty session list', () => {
+        expect(parsers.parseSessionsResponse([])).toEqual([]);
       });
     });
   });

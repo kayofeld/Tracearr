@@ -125,21 +125,12 @@ async function handleFirstMisses(
       continue;
     }
 
+    // Only start tracking the miss here. The session stays visible in the cache
+    // through the grace period so a single anomalous poll (a momentary empty or
+    // partial session list) does not flush the dashboard. Removal and the
+    // session:stopped broadcast happen in sweepGracePeriod once the miss is
+    // confirmed on the next poll.
     missedPollTracking.set(cachedKey, cachedActiveSession);
-    try {
-      if (cacheService) {
-        await cacheService.removeActiveSession(cachedActiveSession.id);
-        await cacheService.removeUserSession(
-          cachedActiveSession.serverUserId,
-          cachedActiveSession.id
-        );
-      }
-      if (pubSubService) {
-        await pubSubService.publish('session:stopped', cachedActiveSession.id);
-      }
-    } catch (err) {
-      console.error(`[Poller] Failed to remove/broadcast grace period stop for ${cachedKey}:`, err);
-    }
   }
 }
 
@@ -197,6 +188,17 @@ async function sweepGracePeriod(
         }
       } else {
         console.log(`[Poller] Grace period: session for ${key} already stopped by another process`);
+      }
+
+      // Confirmed miss: now remove from cache and broadcast the stop. This was
+      // deferred from handleFirstMisses so a one-off bad poll can't flush the
+      // dashboard before the grace period confirms the session really ended.
+      if (cacheService) {
+        await cacheService.removeActiveSession(snapshot.id);
+        await cacheService.removeUserSession(snapshot.serverUserId, snapshot.id);
+      }
+      if (pubSubService) {
+        await pubSubService.publish('session:stopped', snapshot.id);
       }
     } catch (err) {
       console.error(`[Poller] Grace period sweep failed for ${key}, will retry next poll:`, err);
@@ -1171,9 +1173,7 @@ async function pollServers(): Promise<void> {
     // Filter to only servers that need polling.
     // SSE-connected servers (Plex or JF/Emby with plugin) are handled by SSE events.
     // JF/Emby in unsupported/fallback state are covered by polling as normal.
-    const serversNeedingPoll = allServers.filter((server) =>
-      sseManager.isInFallback(server.id)
-    );
+    const serversNeedingPoll = allServers.filter((server) => sseManager.isInFallback(server.id));
 
     if (serversNeedingPoll.length === 0) {
       // Every server is handled by an active SSE connection, no polling needed
@@ -1562,19 +1562,18 @@ export async function triggerServerPoll(serverId: string): Promise<void> {
  * Reconciliation poll for SSE-connected servers
  *
  * This is a lighter poll that runs periodically to catch any events
- * that might have been missed by SSE. Only polls Plex servers that
- * have active SSE connections (not in fallback mode).
+ * that might have been missed by SSE. Polls all servers (Plex or JF/Emby)
+ * that have active SSE connections (not in fallback mode).
  *
  * Unlike the main poller, this processes results and updates the cache
  * to sync any sessions that SSE may have missed.
  */
 export async function triggerReconciliationPoll(): Promise<void> {
   try {
-    // Get all Plex servers with active SSE connections
+    // Get all servers with an active SSE connection (Plex or JF/Emby plugin).
+    // Servers in fallback are already covered by the main poller.
     const allServers = await db.select().from(servers);
-    const sseServers = allServers.filter(
-      (server) => server.type === 'plex' && !sseManager.isInFallback(server.id)
-    );
+    const sseServers = allServers.filter((server) => !sseManager.isInFallback(server.id));
 
     if (sseServers.length === 0) {
       return;
@@ -1584,9 +1583,26 @@ export async function triggerReconciliationPoll(): Promise<void> {
       `[Poller] Running reconciliation poll for ${sseServers.length} SSE-connected server(s)`
     );
 
-    // Get cached session keys from atomic SET-based cache
+    // Get cached session keys from atomic SET-based cache. Build keys with the
+    // same composite logic the main poller uses so JF/Emby sessions match.
+    const serverTypeMap = new Map(allServers.map((s) => [s.id, s.type]));
     const cachedSessions = cacheService ? await cacheService.getAllActiveSessions() : [];
-    const cachedSessionKeys = new Set(cachedSessions.map((s) => `${s.serverId}:${s.sessionKey}`));
+    const cachedSessionKeys = new Set(
+      cachedSessions.map((s) => {
+        const sType = serverTypeMap.get(s.serverId);
+        if (sType && sType !== 'plex') {
+          return buildCompositeKey({
+            serverType: sType,
+            serverId: s.serverId,
+            externalUserId: s.serverUserId,
+            deviceId: s.deviceId ?? null,
+            ratingKey: s.ratingKey ?? null,
+            sessionKey: s.sessionKey,
+          });
+        }
+        return `${s.serverId}:${s.sessionKey}`;
+      })
+    );
 
     // Get active V2 rules
     const activeRulesV2 = await getActiveRulesV2();
