@@ -1139,11 +1139,13 @@ function SortableServerCard({
                 )}
                 {connectionStatus?.pluginVersion && (
                   <span className="text-muted-foreground ml-2 text-xs">
-                    plugin v{connectionStatus.pluginVersion}
+                    {t('servers.pluginVersion', { version: connectionStatus.pluginVersion })}
                   </span>
                 )}
                 {connectionStatus?.pluginUpdateAvailable && (
-                  <span className="ml-2 text-xs text-amber-500">plugin update available</span>
+                  <span className="ml-2 text-xs text-amber-500">
+                    {t('servers.pluginUpdateAvailable')}
+                  </span>
                 )}
               </div>
             )}

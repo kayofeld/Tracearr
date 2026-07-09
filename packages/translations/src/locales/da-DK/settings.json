@@ -362,6 +362,8 @@
     "plexAccount": "Plex Konto",
     "plexServerPlaceholder": "Min Plex Server",
     "plexServerUrlPlaceholder": "http://192.168.1.100:32400",
+    "pluginUpdateAvailable": "plugin update available",
+    "pluginVersion": "plugin v{{version}}",
     "pollingMode": "Polling",
     "realtimeActive": "Real-time updates active",
     "realtimeDialog": {
