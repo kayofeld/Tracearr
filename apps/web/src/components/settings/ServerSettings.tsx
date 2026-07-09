@@ -972,7 +972,9 @@ function RealtimeSetupDialog({
                 <li>
                   Add a repository named <strong>Tracearr</strong> with the URL below.
                 </li>
-                <li>Open the Catalog tab and install <strong>Tracearr SSE</strong>.</li>
+                <li>
+                  Open the Catalog tab and install <strong>Tracearr SSE</strong>.
+                </li>
                 <li>Restart Jellyfin — Tracearr will detect it automatically.</li>
               </ol>
               <div className="space-y-1">
@@ -1134,6 +1136,14 @@ function SortableServerCard({
                       {t('servers.setupRealtime')}
                     </button>
                   </span>
+                )}
+                {connectionStatus?.pluginVersion && (
+                  <span className="text-muted-foreground ml-2 text-xs">
+                    plugin v{connectionStatus.pluginVersion}
+                  </span>
+                )}
+                {connectionStatus?.pluginUpdateAvailable && (
+                  <span className="ml-2 text-xs text-amber-500">plugin update available</span>
                 )}
               </div>
             )}
