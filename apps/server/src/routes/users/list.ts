@@ -19,6 +19,8 @@ import {
   paginationSchema,
   serverIdFilterSchema,
   booleanStringSchema,
+  userSortFieldSchema,
+  type UserSortField,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { serverUsers, sessions, servers, users } from '../../db/schema.js';
@@ -32,6 +34,36 @@ import {
 import { updateUser, recalculateAggregateTrustScore } from '../../services/userService.js';
 import { representativeAccountOrderSql } from '../../utils/representativeAccount.js';
 import { PLAY_COUNT } from '../../constants/index.js';
+
+// Sensible default direction per sort field: names read A-Z, everything else
+// leads with the "most interesting" end (highest trust, most recent).
+const USER_ORDER_DEFAULT_DIR: Record<UserSortField, 'asc' | 'desc'> = {
+  username: 'asc',
+  trustScore: 'desc',
+  joinedAt: 'desc',
+  lastActivityAt: 'desc',
+};
+
+/**
+ * Build the ORDER BY SQL clause for the roster based on the requested sort
+ * field. Always ends in serverUsers.id so pagination stays deterministic
+ * across pages, matching the representative-account tiebreak used elsewhere.
+ */
+function getUserOrderBy(orderBy: UserSortField, orderDir: 'asc' | 'desc') {
+  const dir = orderDir === 'asc' ? sql`ASC` : sql`DESC`;
+
+  switch (orderBy) {
+    case 'trustScore':
+      return sql`${users.aggregateTrustScore} ${dir}, ${serverUsers.id} ASC`;
+    case 'joinedAt':
+      return sql`${serverUsers.joinedAt} ${dir} NULLS LAST, ${serverUsers.id} ASC`;
+    case 'lastActivityAt':
+      return sql`${serverUsers.lastActivityAt} ${dir} NULLS LAST, ${serverUsers.id} ASC`;
+    case 'username':
+    default:
+      return sql`${serverUsers.username} ${dir}, ${serverUsers.id} ASC`;
+  }
+}
 
 const bulkResetTrustBodySchema = z.object({
   ids: z.array(z.uuid()).max(1000).optional(),
@@ -50,6 +82,8 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
   const userListQuerySchema = paginationSchema.extend(serverIdFilterSchema.shape).extend({
     includeRemoved: booleanStringSchema.default(false),
     search: z.string().trim().min(1).max(100).optional(),
+    orderBy: userSortFieldSchema.default('username'),
+    orderDir: z.enum(['asc', 'desc']).optional(),
   });
 
   /**
@@ -61,9 +95,11 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { page, pageSize, serverId, serverIds, includeRemoved, search } = query.data;
+    const { page, pageSize, serverId, serverIds, includeRemoved, search, orderBy, orderDir } =
+      query.data;
     const authUser = request.user;
     const offset = (page - 1) * pageSize;
+    const effectiveOrderDir = orderDir ?? USER_ORDER_DEFAULT_DIR[orderBy];
 
     const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
 
@@ -135,7 +171,7 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
       .innerJoin(servers, eq(serverUsers.serverId, servers.id))
       .innerJoin(users, eq(serverUsers.userId, users.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(serverUsers.username, serverUsers.id)
+      .orderBy(getUserOrderBy(orderBy, effectiveOrderDir))
       .limit(pageSize)
       .offset(offset);
 

@@ -80,6 +80,7 @@ import type {
   UserMergeResult,
   MergeSuggestion,
   ServerUserSplitResult,
+  UserSortField,
 } from '@tracearr/shared';
 
 // Re-export shared types needed by frontend components
@@ -525,6 +526,8 @@ class ApiClient {
       serverIds?: string[];
       includeRemoved?: boolean;
       search?: string;
+      orderBy?: UserSortField;
+      orderDir?: 'asc' | 'desc';
     }) => {
       const searchParams = new URLSearchParams();
       if (params?.page) searchParams.set('page', String(params.page));
@@ -537,6 +540,8 @@ class ApiClient {
       }
       if (params?.includeRemoved) searchParams.set('includeRemoved', 'true');
       if (params?.search) searchParams.set('search', params.search);
+      if (params?.orderBy) searchParams.set('orderBy', params.orderBy);
+      if (params?.orderDir) searchParams.set('orderDir', params.orderDir);
       return this.request<PaginatedResponse<ServerUserWithIdentity>>(
         `/users?${searchParams.toString()}`
       );

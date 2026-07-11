@@ -296,6 +296,7 @@ export {
   mergeUsersBodySchema,
   mergeUserParamSchema,
   splitServerUserParamSchema,
+  userSortFieldSchema,
   // Session
   sessionQuerySchema,
   historyQuerySchema,
@@ -392,6 +393,7 @@ export type {
   BulkMigrateRulesInput,
   ViolationQueryInput,
   ViolationSortField,
+  UserSortField,
   ServerIdFilterInput,
   DashboardQueryInput,
   StatsQueryInput,

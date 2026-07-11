@@ -44,6 +44,7 @@ describe('Users', () => {
     vi.clearAllMocks();
     mockUseServer.mockReturnValue({
       selectedServerIds: [],
+      selectedServers: [],
     } as unknown as ReturnType<typeof useServer>);
     mockUseAuth.mockReturnValue({
       user: { role: 'viewer' },
@@ -82,5 +83,41 @@ describe('Users', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /try again/i }));
     expect(refetch).toHaveBeenCalled();
+  });
+
+  it('wires a trust score header click into orderBy on the query, not a client-only sort', async () => {
+    mockUseUsers.mockReturnValue({
+      data: {
+        data: [
+          {
+            id: 'su-1',
+            userId: 'u-1',
+            serverId: 'server-1',
+            serverName: 'Server One',
+            username: 'alice',
+            identityName: 'Alice',
+            identityTrustScore: 80,
+            trustScore: 80,
+            role: 'member',
+            identityServers: [],
+          },
+        ],
+        total: 1,
+        totalPages: 1,
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useUsers>);
+
+    renderUsers();
+
+    await userEvent.click(screen.getByText('common:labels.trustScore'));
+
+    const calls = mockUseUsers.mock.calls;
+    const lastCall = calls[calls.length - 1]?.[0];
+    expect(lastCall).toMatchObject({ orderBy: 'trustScore' });
+    expect(['asc', 'desc']).toContain(lastCall?.orderDir);
   });
 });

@@ -1711,3 +1711,132 @@ describe('POST /users/bulk/reset-trust', () => {
     expect(unrelatedAfter?.aggregateTrustScore).toBe(30);
   });
 });
+
+describe('GET /users orderBy', () => {
+  it('orders by trustScore across pages, not just within the loaded page', async () => {
+    const admin = await createTestUser({ role: 'owner' });
+    const server = await createTestServer({ type: 'plex' });
+    const high = await createTestUser({ role: 'member', aggregateTrustScore: 90 });
+    const mid = await createTestUser({ role: 'member', aggregateTrustScore: 50 });
+    const low = await createTestUser({ role: 'member', aggregateTrustScore: 10 });
+    const highSu = await createTestServerUser({ userId: high.id, serverId: server.id });
+    const midSu = await createTestServerUser({ userId: mid.id, serverId: server.id });
+    const lowSu = await createTestServerUser({ userId: low.id, serverId: server.id });
+
+    const app = Fastify({ logger: false });
+    await app.register(sensible);
+    app.decorate('authenticate', async (request: any) => {
+      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
+    });
+    await app.register(listRoutes, { prefix: '/users' });
+
+    const page1 = await app.inject({
+      method: 'GET',
+      url: '/users?pageSize=2&page=1&orderBy=trustScore&orderDir=desc',
+    });
+    const page2 = await app.inject({
+      method: 'GET',
+      url: '/users?pageSize=2&page=2&orderBy=trustScore&orderDir=desc',
+    });
+    await app.close();
+
+    expect(page1.statusCode).toBe(200);
+    expect(page2.statusCode).toBe(200);
+    // Highest two scores land on page 1, the lowest on page 2 - a sort that
+    // only reordered the current page would instead just echo insertion order.
+    expect((page1.json().data as { id: string }[]).map((r) => r.id)).toEqual([highSu.id, midSu.id]);
+    expect((page2.json().data as { id: string }[]).map((r) => r.id)).toEqual([lowSu.id]);
+  });
+
+  it('rejects an invalid orderBy value', async () => {
+    const admin = await createTestUser({ role: 'owner' });
+
+    const app = Fastify({ logger: false });
+    await app.register(sensible);
+    app.decorate('authenticate', async (request: any) => {
+      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
+    });
+    await app.register(listRoutes, { prefix: '/users' });
+
+    const response = await app.inject({ method: 'GET', url: '/users?orderBy=notAField' });
+    await app.close();
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('defaults to username ascending when no sort params are given, matching prior behavior', async () => {
+    const admin = await createTestUser({ role: 'owner' });
+    const server = await createTestServer({ type: 'plex' });
+    const identityA = await createTestUser({ role: 'member' });
+    const identityB = await createTestUser({ role: 'member' });
+    const suZebra = await createTestServerUser({
+      userId: identityA.id,
+      serverId: server.id,
+      username: 'zebra',
+    });
+    const suAardvark = await createTestServerUser({
+      userId: identityB.id,
+      serverId: server.id,
+      username: 'aardvark',
+    });
+
+    const app = Fastify({ logger: false });
+    await app.register(sensible);
+    app.decorate('authenticate', async (request: any) => {
+      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
+    });
+    await app.register(listRoutes, { prefix: '/users' });
+
+    const response = await app.inject({ method: 'GET', url: '/users?pageSize=100' });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    const rows = response.json().data as { id: string }[];
+    const relevantIds = rows
+      .map((r) => r.id)
+      .filter((id) => id === suZebra.id || id === suAardvark.id);
+    expect(relevantIds).toEqual([suAardvark.id, suZebra.id]);
+  });
+
+  it('sorts lastActivityAt with unset accounts last, regardless of direction', async () => {
+    const admin = await createTestUser({ role: 'owner' });
+    const server = await createTestServer({ type: 'plex' });
+    const active = await createTestUser({ role: 'member' });
+    const neverActive = await createTestUser({ role: 'member' });
+    const activeSu = await createTestServerUser({ userId: active.id, serverId: server.id });
+    const neverActiveSu = await createTestServerUser({
+      userId: neverActive.id,
+      serverId: server.id,
+    });
+
+    await db
+      .update(serverUsers)
+      .set({ lastActivityAt: new Date('2026-01-01T00:00:00Z') })
+      .where(eq(serverUsers.id, activeSu.id));
+
+    const app = Fastify({ logger: false });
+    await app.register(sensible);
+    app.decorate('authenticate', async (request: any) => {
+      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
+    });
+    await app.register(listRoutes, { prefix: '/users' });
+
+    const descResponse = await app.inject({
+      method: 'GET',
+      url: '/users?pageSize=100&orderBy=lastActivityAt&orderDir=desc',
+    });
+    const ascResponse = await app.inject({
+      method: 'GET',
+      url: '/users?pageSize=100&orderBy=lastActivityAt&orderDir=asc',
+    });
+    await app.close();
+
+    const relevantIds = (rows: { id: string }[]) =>
+      rows.map((r) => r.id).filter((id) => id === activeSu.id || id === neverActiveSu.id);
+
+    // The account with no recorded activity sorts last either way - never
+    // first just because DESC otherwise treats nulls as the "greatest" value.
+    expect(relevantIds(descResponse.json().data)).toEqual([activeSu.id, neverActiveSu.id]);
+    expect(relevantIds(ascResponse.json().data)).toEqual([activeSu.id, neverActiveSu.id]);
+  });
+});

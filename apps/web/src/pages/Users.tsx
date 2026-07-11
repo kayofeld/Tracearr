@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
-import { DataTable } from '@/components/ui/data-table';
+import { DataTable, type SortingState } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -27,12 +27,20 @@ import { ErrorState } from '@/components/library/ErrorState';
 import { User as UserIcon, Crown, Clock, Search, RotateCcw, Merge } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import type { ColumnDef } from '@tanstack/react-table';
-import type { ServerUserWithIdentity, MergeSuggestion } from '@tracearr/shared';
+import type { ServerUserWithIdentity, MergeSuggestion, UserSortField } from '@tracearr/shared';
 import { MERGE_SAME_SERVER_CONFIRMATION_REQUIRED, canLogin } from '@tracearr/shared';
 import { useUsers, useBulkResetTrust, useMergeUsers } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useAuth } from '@/hooks/useAuth';
 import { useRowSelection } from '@/hooks/useRowSelection';
+
+// Map DataTable column IDs to API sort field names
+const columnToSortField: Record<string, UserSortField> = {
+  username: 'username',
+  identityTrustScore: 'trustScore',
+  joinedAt: 'joinedAt',
+  lastActivityAt: 'lastActivityAt',
+};
 
 export function Users() {
   const { t } = useTranslation(['pages', 'common']);
@@ -41,6 +49,7 @@ export function Users() {
   const { selectedServerIds } = useServer();
   const [searchFilter, setSearchFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'username', desc: false }]);
   const [showRemoved, setShowRemoved] = useState(false);
   const [resetTrustConfirmOpen, setResetTrustConfirmOpen] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
@@ -54,11 +63,17 @@ export function Users() {
   const { user: authUser } = useAuth();
   const isOwner = authUser?.role === 'owner';
 
+  // Convert sorting state to API params
+  const orderBy = sorting[0]?.id ? columnToSortField[sorting[0].id] : undefined;
+  const orderDir = sorting[0] ? (sorting[0].desc ? 'desc' : 'asc') : undefined;
+
   const { data, isLoading, isError, error, refetch } = useUsers({
     page,
     pageSize,
     serverIds: selectedServerIds.length ? selectedServerIds : undefined,
     includeRemoved: showRemoved,
+    orderBy,
+    orderDir,
   });
   const bulkResetTrust = useBulkResetTrust();
   const mergeUsersMutation = useMergeUsers();
@@ -193,6 +208,15 @@ export function Users() {
     clearSelection();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to the global selector, not local setters
   }, [selectedServerIds.join(',')]);
+
+  const handleSortingChange = useCallback(
+    (newSorting: SortingState) => {
+      setSorting(newSorting);
+      setPage(1);
+      clearSelection();
+    },
+    [clearSelection]
+  );
 
   const handleBulkResetTrust = () => {
     const params = selectAllMode
@@ -413,6 +437,8 @@ export function Users() {
               pageCount={totalPages}
               page={page}
               onPageChange={setPage}
+              sorting={sorting}
+              onSortingChange={handleSortingChange}
               filterColumn="username"
               filterValue={searchFilter}
               onRowClick={(user) => {

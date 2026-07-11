@@ -191,6 +191,9 @@ export type MergeUsersBody = z.infer<typeof mergeUsersBodySchema>;
 export const mergeUserParamSchema = z.object({ id: uuidSchema });
 export const splitServerUserParamSchema = z.object({ id: uuidSchema });
 
+export const userSortFieldSchema = z.enum(['username', 'trustScore', 'joinedAt', 'lastActivityAt']);
+export type UserSortField = z.infer<typeof userSortFieldSchema>;
+
 // ============================================================================
 // Session Schemas
 // ============================================================================
