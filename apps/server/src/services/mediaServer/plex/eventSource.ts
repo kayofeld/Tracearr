@@ -22,6 +22,9 @@ import {
 } from '@tracearr/shared';
 import { plexHeaders } from '../../../utils/http.js';
 
+// Re-probe cadence once the reconnect budget is spent; polling covers data meanwhile
+const FALLBACK_RETRY_MS = 3 * 60 * 1000;
+
 // EventSource types for Node.js (using eventsource package)
 interface EventSourceMessage {
   data: string;
@@ -216,6 +219,14 @@ export class PlexEventSource extends EventEmitter {
     this.connectedAt = null;
   }
 
+  retryFromFallback(): void {
+    if (this.state !== 'fallback') return;
+    console.log(`[SSE] Poll reached ${this.serverName}, retrying SSE from fallback`);
+    this.clearTimers();
+    this.reconnectAttempts = 0;
+    void this.connect();
+  }
+
   /**
    * Clean up EventSource instance and all listeners
    */
@@ -353,9 +364,16 @@ export class PlexEventSource extends EventEmitter {
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= SSE_CONFIG.MAX_RETRIES) {
       console.error(
-        `[SSE] Max retries (${SSE_CONFIG.MAX_RETRIES}) reached for ${this.serverName}, falling back to polling`
+        `[SSE] Max retries (${SSE_CONFIG.MAX_RETRIES}) reached for ${this.serverName}, falling back to polling, retrying in ${FALLBACK_RETRY_MS / 1000}s`
       );
       this.setState('fallback');
+      this.reconnectTimer = setTimeout(() => {
+        if (this.state !== 'disconnected') {
+          console.log(`[SSE] Retrying SSE for ${this.serverName} from fallback`);
+          this.reconnectAttempts = 0;
+          void this.connect();
+        }
+      }, FALLBACK_RETRY_MS);
       return;
     }
 

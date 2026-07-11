@@ -15,13 +15,25 @@ function createEventSourceStub() {
       listeners.get(type)!.push(fn);
     }),
     removeEventListener: vi.fn(),
-    get onopen() { return _onopen; },
-    set onopen(fn) { _onopen = fn; },
-    get onerror() { return _onerror; },
-    set onerror(fn) { _onerror = fn; },
+    get onopen() {
+      return _onopen;
+    },
+    set onopen(fn) {
+      _onopen = fn;
+    },
+    get onerror() {
+      return _onerror;
+    },
+    set onerror(fn) {
+      _onerror = fn;
+    },
     // Test helpers
-    _triggerOpen() { _onopen?.(new Event('open')); },
-    _triggerError(obj: unknown) { _onerror?.(obj as Event); },
+    _triggerOpen() {
+      _onopen?.(new Event('open'));
+    },
+    _triggerError(obj: unknown) {
+      _onerror?.(obj as Event);
+    },
     _emit(type: string, data: string) {
       for (const fn of listeners.get(type) ?? []) fn({ data });
     },
@@ -30,7 +42,9 @@ function createEventSourceStub() {
 
 vi.mock('eventsource', () => ({
   // Must be a regular function (not arrow) so it can be called with `new`
-  EventSource: vi.fn(function () { return {}; }),
+  EventSource: vi.fn(function () {
+    return {};
+  }),
 }));
 
 describe('JellyfinEmbyEventSource detection', () => {
@@ -114,7 +128,9 @@ describe('JellyfinEmbyEventSource detection', () => {
       callCount++;
       const s = createEventSourceStub();
       // Delay the error so the source finishes its setup first
-      setTimeout(() => { s._triggerError({ message: 'Non-200 status code (500)', code: 500 }); }, 0);
+      setTimeout(() => {
+        s._triggerError({ message: 'Non-200 status code (500)', code: 500 });
+      }, 0);
       return s as unknown as InstanceType<typeof EventSource>;
     });
 
@@ -129,13 +145,20 @@ describe('JellyfinEmbyEventSource detection', () => {
     src.on('connection:state', (s: SSEConnectionState) => states.push(s));
     await src.connect();
 
-    // Advance through all reconnect delays
+    // Advance through all reconnect delays (bounded: fallback keeps a retry
+    // timer armed, so runAllTimers would never settle)
     for (let i = 0; i < 15; i++) {
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(31_000);
     }
 
     expect(states).toContain('fallback');
     expect(callCount).toBeGreaterThan(1);
+
+    // Fallback is not terminal: the retry timer redials after the cooldown
+    const callsAtFallback = callCount;
+    await vi.advanceTimersByTimeAsync(3 * 60 * 1000 + 1000);
+    expect(callCount).toBeGreaterThan(callsAtFallback);
+
     vi.useRealTimers();
     src.disconnect();
   });
@@ -170,7 +193,9 @@ describe('JellyfinEmbyEventSource detection', () => {
   describe('auth header injection', () => {
     it('injects Authorization header for jellyfin and preserves Accept', async () => {
       const { EventSource } = await import('eventsource');
-      let capturedFetch: ((input: string | URL, init: { headers: Record<string, string> }) => Promise<Response>) | undefined;
+      let capturedFetch:
+        | ((input: string | URL, init: { headers: Record<string, string> }) => Promise<Response>)
+        | undefined;
       const localStub = createEventSourceStub();
       vi.mocked(EventSource).mockImplementation(function (_url, init) {
         capturedFetch = init?.fetch as typeof capturedFetch;
@@ -190,7 +215,10 @@ describe('JellyfinEmbyEventSource detection', () => {
       let capturedHeaders: Headers | undefined;
       const originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn((_input, init) => {
-        capturedHeaders = init?.headers instanceof Headers ? init.headers : new Headers(init?.headers as Record<string, string>);
+        capturedHeaders =
+          init?.headers instanceof Headers
+            ? init.headers
+            : new Headers(init?.headers as Record<string, string>);
         return Promise.resolve(new Response(null, { status: 200 }));
       }) as typeof fetch;
 
@@ -208,7 +236,9 @@ describe('JellyfinEmbyEventSource detection', () => {
 
     it('injects X-Emby-Token header for emby and preserves Accept', async () => {
       const { EventSource } = await import('eventsource');
-      let capturedFetch: ((input: string | URL, init: { headers: Record<string, string> }) => Promise<Response>) | undefined;
+      let capturedFetch:
+        | ((input: string | URL, init: { headers: Record<string, string> }) => Promise<Response>)
+        | undefined;
       const localStub = createEventSourceStub();
       vi.mocked(EventSource).mockImplementation(function (_url, init) {
         capturedFetch = init?.fetch as typeof capturedFetch;
@@ -228,7 +258,10 @@ describe('JellyfinEmbyEventSource detection', () => {
       let capturedHeaders: Headers | undefined;
       const originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn((_input, init) => {
-        capturedHeaders = init?.headers instanceof Headers ? init.headers : new Headers(init?.headers as Record<string, string>);
+        capturedHeaders =
+          init?.headers instanceof Headers
+            ? init.headers
+            : new Headers(init?.headers as Record<string, string>);
         return Promise.resolve(new Response(null, { status: 200 }));
       }) as typeof fetch;
 

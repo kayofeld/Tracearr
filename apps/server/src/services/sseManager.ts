@@ -61,6 +61,8 @@ interface ServerConnection {
 // Per-server debounce timers to coalesce rapid plugin events before polling
 const pendingServerPolls = new Map<string, NodeJS.Timeout>();
 
+const NUDGE_MIN_INTERVAL_MS = 60 * 1000;
+
 function scheduleServerPoll(serverId: string, serverName: string): void {
   const existing = pendingServerPolls.get(serverId);
   if (existing) clearTimeout(existing);
@@ -97,6 +99,7 @@ export class SSEManager extends EventEmitter {
   private initialized = false;
   private pendingOperations = new Set<string>();
   private latestPluginVersion: string | null = null;
+  private lastNudgeAt = new Map<string, number>();
 
   /**
    * Initialize the SSE manager with cache services
@@ -325,6 +328,21 @@ export class SSEManager extends EventEmitter {
     if (!connection?.eventSource) return null;
     const status = connection.eventSource.getStatus() as { pluginVersion?: string | null };
     return status.pluginVersion ?? null;
+  }
+
+  /**
+   * Retry a fallback server's SSE now instead of waiting for the re-probe timer
+   */
+  nudgeReconnect(serverId: string): void {
+    const connection = this.connections.get(serverId);
+    if (!connection?.eventSource || connection.state !== 'fallback') return;
+
+    const now = Date.now();
+    const last = this.lastNudgeAt.get(serverId) ?? 0;
+    if (now - last < NUDGE_MIN_INTERVAL_MS) return;
+    this.lastNudgeAt.set(serverId, now);
+
+    connection.eventSource.retryFromFallback();
   }
 
   /**

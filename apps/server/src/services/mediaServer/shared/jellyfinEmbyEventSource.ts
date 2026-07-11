@@ -17,6 +17,9 @@ const PLUGIN_HEARTBEAT_TIMEOUT_MS = 90_000;
 // plugin gets picked up without a full server restart
 const UNSUPPORTED_REPROBE_MS = 3 * 60 * 1000;
 
+// Re-probe cadence once the reconnect budget is spent; polling covers data meanwhile
+const FALLBACK_RETRY_MS = 3 * 60 * 1000;
+
 interface EventSourceMessage {
   data: string;
   lastEventId?: string;
@@ -236,6 +239,14 @@ export class JellyfinEmbyEventSource extends EventEmitter {
     this.connectedAt = null;
   }
 
+  retryFromFallback(): void {
+    if (this.state !== 'fallback') return;
+    console.log(`[PluginSSE] Poll reached ${this.serverName}, retrying SSE from fallback`);
+    this.clearTimers();
+    this.reconnectAttempts = 0;
+    void this.connect();
+  }
+
   private cleanupEventSource(): void {
     if (!this.eventSource) return;
 
@@ -331,9 +342,16 @@ export class JellyfinEmbyEventSource extends EventEmitter {
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= SSE_CONFIG.MAX_RETRIES) {
       console.error(
-        `[PluginSSE] Max retries reached for ${this.serverName}, falling back to polling`
+        `[PluginSSE] Max retries reached for ${this.serverName}, falling back to polling, retrying in ${FALLBACK_RETRY_MS / 1000}s`
       );
       this.setState('fallback');
+      this.reconnectTimer = setTimeout(() => {
+        if (this.state !== 'disconnected') {
+          console.log(`[PluginSSE] Retrying SSE for ${this.serverName} from fallback`);
+          this.reconnectAttempts = 0;
+          void this.connect();
+        }
+      }, FALLBACK_RETRY_MS);
       return;
     }
 

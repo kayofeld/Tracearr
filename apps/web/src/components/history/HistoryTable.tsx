@@ -335,7 +335,7 @@ export const HistoryTableRow = memo(
 
           {/* Server - only rendered in multi-server mode */}
           {isMultiServer && columnVisibility.server && (
-            <TableCell className="w-[140px]">
+            <TableCell className="w-[140px] max-w-[140px]">
               <ServerColumnCell server={session.server} />
             </TableCell>
           )}

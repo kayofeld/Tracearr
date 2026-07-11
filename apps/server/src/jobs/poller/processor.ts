@@ -254,6 +254,8 @@ async function processServerSessions(
       token: server.token,
     });
     const mediaSessions = await client.getSessions();
+    sseManager.nudgeReconnect(server.id);
+
     const processedSessions = mediaSessions.map((s) => mapMediaSession(s, server.type));
 
     // OPTIMIZATION: Early return if no active sessions from media server

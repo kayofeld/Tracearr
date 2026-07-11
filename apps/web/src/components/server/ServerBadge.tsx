@@ -9,7 +9,8 @@ interface ServerBadgeProps {
   className?: string;
 }
 
-const baseContainer = 'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs';
+const baseContainer =
+  'inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-xs';
 
 export function ServerBadge({ server, variant = 'default', className }: ServerBadgeProps) {
   const dotStyle = server.color ? { backgroundColor: server.color } : undefined;
