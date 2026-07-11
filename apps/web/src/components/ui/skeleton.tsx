@@ -55,6 +55,24 @@ export function ChartSkeleton({ height = 200 }: { height?: number }) {
   );
 }
 
+// Now Playing card - poster placeholder plus stacked info lines
+export function NowPlayingCardSkeleton() {
+  return (
+    <div className="bg-card flex gap-4 rounded-xl border p-4">
+      <Skeleton className="h-28 w-20 flex-shrink-0 rounded-lg" />
+      <div className="flex min-w-0 flex-1 flex-col justify-between">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-7 w-7 rounded-full" />
+          <Skeleton className="h-4 w-24" />
+        </div>
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+        <Skeleton className="h-2 w-full rounded-full" />
+      </div>
+    </div>
+  );
+}
+
 // Library stats overview - 4 KPI cards in grid
 export function LibraryStatsSkeleton() {
   return (

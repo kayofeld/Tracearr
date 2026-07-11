@@ -15,6 +15,7 @@ import {
 import { HistoryTable, type SortableColumn } from '@/components/history/HistoryTable';
 import { HistoryAggregates } from '@/components/history/HistoryAggregates';
 import { SessionDetailSheet } from '@/components/history/SessionDetailSheet';
+import { ErrorState, InlineErrorState } from '@/components/library/ErrorState';
 import {
   useHistorySessions,
   useHistoryAggregates,
@@ -207,13 +208,27 @@ export function History() {
   }, [searchParams, selectedServerIds]);
 
   // Query hooks
-  const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } =
-    useHistorySessions(filters);
+  const {
+    data,
+    isLoading,
+    isError: sessionsIsError,
+    error: sessionsError,
+    refetch: refetchSessions,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+  } = useHistorySessions(filters);
 
   // Separate aggregates query - uses data filters only (excludes sorting)
   // This prevents aggregates from reloading when sorting changes
   const { orderBy: _orderBy, orderDir: _orderDir, ...dataFilters } = filters;
-  const { data: aggregatesData, isLoading: aggregatesLoading } = useHistoryAggregates(dataFilters);
+  const {
+    data: aggregatesData,
+    isLoading: aggregatesLoading,
+    isError: aggregatesIsError,
+    error: aggregatesError,
+    refetch: refetchAggregates,
+  } = useHistoryAggregates(dataFilters);
 
   const { data: filterOptions, isLoading: filterOptionsLoading } = useFilterOptions({
     serverIds: filters.serverIds,
@@ -279,7 +294,14 @@ export function History() {
       </div>
 
       {/* Aggregates Summary */}
-      <HistoryAggregates aggregates={aggregates} total={total} isLoading={aggregatesLoading} />
+      {aggregatesIsError ? (
+        <InlineErrorState
+          message={aggregatesError?.message ?? t('common:errors.unexpectedError')}
+          onRetry={() => void refetchAggregates()}
+        />
+      ) : (
+        <HistoryAggregates aggregates={aggregates} total={total} isLoading={aggregatesLoading} />
+      )}
 
       {/* Filters */}
       <Card>
@@ -298,20 +320,28 @@ export function History() {
 
       {/* Sessions Table */}
       <Card>
-        <CardContent className="p-0">
-          <HistoryTable
-            sessions={sessions}
-            isLoading={isLoading}
-            isFetchingNextPage={isFetchingNextPage}
-            hasNextPage={hasNextPage}
-            onLoadMore={() => void fetchNextPage()}
-            onSessionClick={handleSessionClick}
-            columnVisibility={columnVisibility}
-            sortBy={filters.orderBy ?? 'startedAt'}
-            sortDir={filters.orderDir ?? 'desc'}
-            onSortChange={handleSortChange}
-            isMultiServer={isMultiServer}
-          />
+        <CardContent className={sessionsIsError ? undefined : 'p-0'}>
+          {sessionsIsError ? (
+            <ErrorState
+              title={t('common:errors.somethingWentWrong')}
+              message={sessionsError?.message ?? t('common:errors.unexpectedError')}
+              onRetry={() => void refetchSessions()}
+            />
+          ) : (
+            <HistoryTable
+              sessions={sessions}
+              isLoading={isLoading}
+              isFetchingNextPage={isFetchingNextPage}
+              hasNextPage={hasNextPage}
+              onLoadMore={() => void fetchNextPage()}
+              onSessionClick={handleSessionClick}
+              columnVisibility={columnVisibility}
+              sortBy={filters.orderBy ?? 'startedAt'}
+              sortDir={filters.orderDir ?? 'desc'}
+              onSortChange={handleSortChange}
+              isMultiServer={isMultiServer}
+            />
+          )}
         </CardContent>
       </Card>
 

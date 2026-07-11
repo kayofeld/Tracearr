@@ -18,6 +18,7 @@ import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { Skeleton, ChartSkeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { InlineErrorState } from '@/components/library/ErrorState';
 import { useBandwidthDaily, useBandwidthTopUsers, useBandwidthSummary } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useServerColorMap } from '@/hooks/useServerColorMap';
@@ -352,41 +353,48 @@ export function StatsBandwidth() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-        <StatCard
-          icon={Activity}
-          label={t('common:labels.totalSessions')}
-          value={summaryData?.totalSessions.toLocaleString() ?? 0}
-          isLoading={summary.isLoading}
+      {summary.isError ? (
+        <InlineErrorState
+          message={summary.error?.message ?? t('common:errors.unexpectedError')}
+          onRetry={() => void summary.refetch()}
         />
-        <StatCard
-          icon={HardDrive}
-          label={t('statsBandwidth.dataTransferred')}
-          value={formatBytes(summaryData?.totalBytes ?? 0)}
-          isLoading={summary.isLoading}
-        />
-        <StatCard
-          icon={Gauge}
-          label={t('statsBandwidth.avgBitrate')}
-          value={`${summaryData?.avgBitrateMbps.toFixed(1) ?? 0} Mbps`}
-          subValue={t('statsBandwidth.peakBitrate', {
-            value: summaryData?.peakBitrateMbps.toFixed(1) ?? 0,
-          })}
-          isLoading={summary.isLoading}
-        />
-        <StatCard
-          icon={Clock}
-          label={t('statsBandwidth.totalWatchTime')}
-          value={formatWatchTime(summaryData?.totalDurationMs ?? 0)}
-          isLoading={summary.isLoading}
-        />
-        <StatCard
-          icon={Users}
-          label={t('statsBandwidth.uniqueUsers')}
-          value={summaryData?.uniqueUsers ?? 0}
-          isLoading={summary.isLoading}
-        />
-      </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <StatCard
+            icon={Activity}
+            label={t('common:labels.totalSessions')}
+            value={summaryData?.totalSessions.toLocaleString() ?? 0}
+            isLoading={summary.isLoading}
+          />
+          <StatCard
+            icon={HardDrive}
+            label={t('statsBandwidth.dataTransferred')}
+            value={formatBytes(summaryData?.totalBytes ?? 0)}
+            isLoading={summary.isLoading}
+          />
+          <StatCard
+            icon={Gauge}
+            label={t('statsBandwidth.avgBitrate')}
+            value={`${summaryData?.avgBitrateMbps.toFixed(1) ?? 0} Mbps`}
+            subValue={t('statsBandwidth.peakBitrate', {
+              value: summaryData?.peakBitrateMbps.toFixed(1) ?? 0,
+            })}
+            isLoading={summary.isLoading}
+          />
+          <StatCard
+            icon={Clock}
+            label={t('statsBandwidth.totalWatchTime')}
+            value={formatWatchTime(summaryData?.totalDurationMs ?? 0)}
+            isLoading={summary.isLoading}
+          />
+          <StatCard
+            icon={Users}
+            label={t('statsBandwidth.uniqueUsers')}
+            value={summaryData?.uniqueUsers ?? 0}
+            isLoading={summary.isLoading}
+          />
+        </div>
+      )}
 
       {/* Bandwidth Chart */}
       <Card>
@@ -395,14 +403,21 @@ export function StatsBandwidth() {
           <CardDescription>{t('statsBandwidth.dailyUsageDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-          <BandwidthChart
-            data={daily.data?.data}
-            isLoading={daily.isLoading}
-            height={300}
-            period={timeRange.period}
-            isMultiServer={isMultiServer}
-            selectedServers={selectedServers}
-          />
+          {daily.isError ? (
+            <InlineErrorState
+              message={daily.error?.message ?? t('common:errors.unexpectedError')}
+              onRetry={() => void daily.refetch()}
+            />
+          ) : (
+            <BandwidthChart
+              data={daily.data?.data}
+              isLoading={daily.isLoading}
+              height={300}
+              period={timeRange.period}
+              isMultiServer={isMultiServer}
+              selectedServers={selectedServers}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -413,7 +428,12 @@ export function StatsBandwidth() {
           <CardDescription>{t('statsBandwidth.topUsersDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-          {topUsers.isLoading ? (
+          {topUsers.isError ? (
+            <InlineErrorState
+              message={topUsers.error?.message ?? t('common:errors.unexpectedError')}
+              onRetry={() => void topUsers.refetch()}
+            />
+          ) : topUsers.isLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />

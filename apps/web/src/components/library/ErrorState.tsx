@@ -20,3 +20,25 @@ export function ErrorState({ title = 'Something went wrong', message, onRetry }:
     </div>
   );
 }
+
+interface InlineErrorStateProps {
+  message: string;
+  onRetry: () => void;
+}
+
+/**
+ * Compact error state for a single card/section within a page that otherwise
+ * loaded successfully - used where a full-page ErrorState would be too heavy.
+ */
+export function InlineErrorState({ message, onRetry }: InlineErrorStateProps) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-8 text-center">
+      <AlertCircle className="text-destructive h-8 w-8" />
+      <p className="text-muted-foreground text-sm">{message}</p>
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        <RefreshCw className="mr-2 h-3.5 w-3.5" />
+        Try again
+      </Button>
+    </div>
+  );
+}

@@ -11,6 +11,7 @@ import {
   EngagementBreakdownChart,
   PlaysVsSessionsChart,
 } from '@/components/charts';
+import { InlineErrorState } from '@/components/library/ErrorState';
 import {
   usePlaysStats,
   usePlaysByDayOfWeek,
@@ -24,7 +25,7 @@ import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
 
 export function StatsActivity() {
-  const { t } = useTranslation('pages');
+  const { t } = useTranslation(['pages', 'common']);
   const { value: timeRange, setValue: setTimeRange, apiParams } = useTimeRange();
   const { selectedServerIds, selectedServers, isMultiServer } = useServer();
 
@@ -54,7 +55,6 @@ export function StatsActivity() {
         <TimeRangePicker value={timeRange} onChange={setTimeRange} />
       </div>
 
-      {/* Charts grid */}
       <div className="grid gap-6 md:grid-cols-2">
         {/* Plays Over Time */}
         <Card>
@@ -62,14 +62,21 @@ export function StatsActivity() {
             <CardTitle className="text-base font-medium">{t('activity.playsOverTime')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <PlaysChart
-              data={plays.data}
-              isLoading={plays.isLoading}
-              height={250}
-              period={timeRange.period}
-              isMultiServer={isMultiServer}
-              servers={selectedServers}
-            />
+            {plays.isError ? (
+              <InlineErrorState
+                message={plays.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void plays.refetch()}
+              />
+            ) : (
+              <PlaysChart
+                data={plays.data}
+                isLoading={plays.isLoading}
+                height={250}
+                period={timeRange.period}
+                isMultiServer={isMultiServer}
+                servers={selectedServers}
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -81,12 +88,19 @@ export function StatsActivity() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ConcurrentChart
-              data={concurrent.data}
-              isLoading={concurrent.isLoading}
-              height={250}
-              period={timeRange.period}
-            />
+            {concurrent.isError ? (
+              <InlineErrorState
+                message={concurrent.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void concurrent.refetch()}
+              />
+            ) : (
+              <ConcurrentChart
+                data={concurrent.data}
+                isLoading={concurrent.isLoading}
+                height={250}
+                period={timeRange.period}
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -99,11 +113,18 @@ export function StatsActivity() {
             <CardDescription>{t('activity.howUsersEngage')}</CardDescription>
           </CardHeader>
           <CardContent>
-            <EngagementBreakdownChart
-              data={engagement.data?.engagementBreakdown}
-              isLoading={engagement.isLoading}
-              height={250}
-            />
+            {engagement.isError ? (
+              <InlineErrorState
+                message={engagement.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void engagement.refetch()}
+              />
+            ) : (
+              <EngagementBreakdownChart
+                data={engagement.data?.engagementBreakdown}
+                isLoading={engagement.isLoading}
+                height={250}
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -114,12 +135,19 @@ export function StatsActivity() {
             <CardDescription>{t('activity.playsVsSessionsDesc')}</CardDescription>
           </CardHeader>
           <CardContent>
-            <PlaysVsSessionsChart
-              plays={engagement.data?.summary.totalPlays ?? 0}
-              sessions={engagement.data?.summary.totalAllSessions ?? 0}
-              isLoading={engagement.isLoading}
-              height={200}
-            />
+            {engagement.isError ? (
+              <InlineErrorState
+                message={engagement.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void engagement.refetch()}
+              />
+            ) : (
+              <PlaysVsSessionsChart
+                plays={engagement.data?.summary.totalPlays ?? 0}
+                sessions={engagement.data?.summary.totalAllSessions ?? 0}
+                isLoading={engagement.isLoading}
+                height={200}
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -131,7 +159,14 @@ export function StatsActivity() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <DayOfWeekChart data={dayOfWeek.data} isLoading={dayOfWeek.isLoading} height={250} />
+            {dayOfWeek.isError ? (
+              <InlineErrorState
+                message={dayOfWeek.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void dayOfWeek.refetch()}
+              />
+            ) : (
+              <DayOfWeekChart data={dayOfWeek.data} isLoading={dayOfWeek.isLoading} height={250} />
+            )}
           </CardContent>
         </Card>
 
@@ -143,7 +178,14 @@ export function StatsActivity() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <HourOfDayChart data={hourOfDay.data} isLoading={hourOfDay.isLoading} height={250} />
+            {hourOfDay.isError ? (
+              <InlineErrorState
+                message={hourOfDay.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void hourOfDay.refetch()}
+              />
+            ) : (
+              <HourOfDayChart data={hourOfDay.data} isLoading={hourOfDay.isLoading} height={250} />
+            )}
           </CardContent>
         </Card>
 
@@ -153,7 +195,14 @@ export function StatsActivity() {
             <CardTitle className="text-base font-medium">{t('activity.platforms')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <PlatformChart data={platformData} isLoading={platforms.isLoading} height={250} />
+            {platforms.isError ? (
+              <InlineErrorState
+                message={platforms.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void platforms.refetch()}
+              />
+            ) : (
+              <PlatformChart data={platformData} isLoading={platforms.isLoading} height={250} />
+            )}
           </CardContent>
         </Card>
 
@@ -163,7 +212,14 @@ export function StatsActivity() {
             <CardTitle className="text-base font-medium">{t('activity.streamQuality')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <QualityChart data={quality.data} isLoading={quality.isLoading} height={250} />
+            {quality.isError ? (
+              <InlineErrorState
+                message={quality.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void quality.refetch()}
+              />
+            ) : (
+              <QualityChart data={quality.data} isLoading={quality.isLoading} height={250} />
+            )}
           </CardContent>
         </Card>
       </div>

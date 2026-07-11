@@ -8,6 +8,8 @@ import { StreamCard } from '@/components/map';
 import { SessionDetailSheet } from '@/components/history/SessionDetailSheet';
 import { ServerResourceCharts } from '@/components/charts/ServerResourceCharts';
 import { ServerBandwidthChart } from '@/components/charts/BandwidthChart';
+import { ErrorState } from '@/components/library/ErrorState';
+import { NowPlayingCardSkeleton } from '@/components/ui/skeleton';
 import { useDashboardStats, useActiveSessions } from '@/hooks/queries';
 import { useServerStatistics, useServerBandwidth } from '@/hooks/queries/useServers';
 import { useServer } from '@/hooks/useServer';
@@ -17,8 +19,19 @@ import type { ActiveSession } from '@tracearr/shared';
 export function Dashboard() {
   const { t } = useTranslation(['pages', 'common']);
   const { selectedServerIds, selectedServers, isMultiServer, selectedServerId } = useServer();
-  const { data: stats, isLoading: statsLoading } = useDashboardStats(selectedServerIds);
-  const { data: sessions } = useActiveSessions(selectedServerIds);
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    isError: statsError,
+    error: statsErrorObj,
+    refetch: refetchStats,
+  } = useDashboardStats(selectedServerIds);
+  const {
+    data: sessions,
+    isError: sessionsError,
+    error: sessionsErrorObj,
+    refetch: refetchSessions,
+  } = useActiveSessions(selectedServerIds);
 
   // Session detail sheet state
   const [selectedSession, setSelectedSession] = useState<ActiveSession | null>(null);
@@ -54,6 +67,21 @@ export function Dashboard() {
 
   const activeCount = sessions?.length ?? 0;
   const hasActiveStreams = activeCount > 0;
+
+  if (statsError || sessionsError) {
+    return (
+      <ErrorState
+        title={t('common:errors.somethingWentWrong')}
+        message={
+          statsErrorObj?.message ?? sessionsErrorObj?.message ?? t('common:errors.unexpectedError')
+        }
+        onRetry={() => {
+          void refetchStats();
+          void refetchSessions();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -112,7 +140,13 @@ export function Dashboard() {
           )}
         </div>
 
-        {!sortedSessions || sortedSessions.length === 0 ? (
+        {!sortedSessions ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <NowPlayingCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : sortedSessions.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-12">
               <div className="bg-muted rounded-full p-4">

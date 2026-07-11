@@ -14,6 +14,7 @@ import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { Button } from '@/components/ui/button';
 import { X, Flame, CircleDot } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ErrorState } from '@/components/library/ErrorState';
 import { useLocationStats } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useServerColorMap } from '@/hooks/useServerColorMap';
@@ -67,7 +68,13 @@ export function Map() {
   const filterKey = useMemo(() => JSON.stringify(apiParams), [apiParams]);
 
   // Fetch data - includes available filter options based on current filters
-  const { data: locationData, isLoading: locationsLoading } = useLocationStats(apiParams);
+  const {
+    data: locationData,
+    isLoading: locationsLoading,
+    isError: locationsError,
+    error: locationsErrorObj,
+    refetch: refetchLocations,
+  } = useLocationStats(apiParams);
 
   const locations = locationData?.data ?? [];
   const summary = locationData?.summary;
@@ -238,17 +245,27 @@ export function Map() {
 
       {/* Map */}
       <div className="relative flex-1">
-        <StreamMap
-          locations={locations}
-          isLoading={locationsLoading}
-          viewMode={filters.viewMode}
-          filterKey={filterKey}
-          serverColorMap={serverColorMap}
-          serverNameMap={serverNameMap}
-          isMultiServer={isMultiServer}
-        />
-        {isMultiServer && hasData && filters.viewMode === 'circles' && (
-          <ServerLegend variant="floating" servers={selectedServers} />
+        {locationsError ? (
+          <ErrorState
+            title={t('common:errors.somethingWentWrong')}
+            message={locationsErrorObj?.message ?? t('common:errors.unexpectedError')}
+            onRetry={() => void refetchLocations()}
+          />
+        ) : (
+          <>
+            <StreamMap
+              locations={locations}
+              isLoading={locationsLoading}
+              viewMode={filters.viewMode}
+              filterKey={filterKey}
+              serverColorMap={serverColorMap}
+              serverNameMap={serverNameMap}
+              isMultiServer={isMultiServer}
+            />
+            {isMultiServer && hasData && filters.viewMode === 'circles' && (
+              <ServerLegend variant="floating" servers={selectedServers} />
+            )}
+          </>
         )}
       </div>
     </div>

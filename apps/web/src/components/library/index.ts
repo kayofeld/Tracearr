@@ -1,4 +1,4 @@
-export { ErrorState } from './ErrorState';
+export { ErrorState, InlineErrorState } from './ErrorState';
 export { EmptyState } from './EmptyState';
 export { LibraryEmptyState } from './LibraryEmptyState';
 export { CodecBreakdown } from './CodecBreakdown';

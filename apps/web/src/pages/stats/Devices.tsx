@@ -17,6 +17,8 @@ import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { InlineErrorState } from '@/components/library/ErrorState';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   useDeviceCompatibility,
   useDeviceCompatibilityMatrix,
@@ -60,9 +62,11 @@ function getProgressTextColor(pct: number): string {
 interface MatrixViewProps {
   data: DeviceCompatibilityMatrix | undefined;
   isLoading: boolean;
+  error?: Error | null;
+  onRetry?: () => void;
 }
 
-function MatrixView({ data, isLoading }: MatrixViewProps) {
+function MatrixView({ data, isLoading, error, onRetry }: MatrixViewProps) {
   const { t } = useTranslation(['pages', 'common']);
 
   const sortedMatrixDevices = data?.devices
@@ -76,6 +80,15 @@ function MatrixView({ data, isLoading }: MatrixViewProps) {
   const activeCodecs =
     data?.codecs.filter((codec) => sortedMatrixDevices.some((device) => device.codecs[codec])) ??
     [];
+
+  if (error) {
+    return (
+      <InlineErrorState
+        message={error.message ?? t('common:errors.unexpectedError')}
+        onRetry={() => onRetry?.()}
+      />
+    );
+  }
 
   if (isLoading) {
     return (
@@ -207,33 +220,47 @@ export function StatsDevices() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
-        <StatCard
-          icon={Smartphone}
-          label={t('common:labels.totalSessions')}
-          value={summary?.totalSessions.toLocaleString() ?? 0}
-          isLoading={compatibility.isLoading}
+      {compatibility.isError ? (
+        <InlineErrorState
+          message={compatibility.error?.message ?? t('common:errors.unexpectedError')}
+          onRetry={() => void compatibility.refetch()}
         />
-        <StatCard
-          icon={CheckCircle2}
-          label={t('devices.directPlayRate')}
-          value={`${summary?.directPlayPct ?? 0}%`}
-          subValue={t('devices.videoAndAudio')}
-          isLoading={compatibility.isLoading}
-        />
-        <StatCard
-          icon={Monitor}
-          label={t('devices.uniqueDevices')}
-          value={summary?.uniqueDevices ?? 0}
-          isLoading={compatibility.isLoading}
-        />
-        <StatCard
-          icon={ArrowRightLeft}
-          label={t('devices.uniqueCodecs')}
-          value={summary?.uniqueCodecs ?? 0}
-          isLoading={compatibility.isLoading}
-        />
-      </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-4">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div tabIndex={0} className="cursor-help">
+                <StatCard
+                  icon={Smartphone}
+                  label={t('devices.analyzedSessions')}
+                  value={summary?.totalSessions.toLocaleString() ?? 0}
+                  isLoading={compatibility.isLoading}
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>{t('devices.analyzedSessionsTooltip', { count: 5 })}</TooltipContent>
+          </Tooltip>
+          <StatCard
+            icon={CheckCircle2}
+            label={t('devices.directPlayRate')}
+            value={`${summary?.directPlayPct ?? 0}%`}
+            subValue={t('devices.videoAndAudio')}
+            isLoading={compatibility.isLoading}
+          />
+          <StatCard
+            icon={Monitor}
+            label={t('devices.uniqueDevices')}
+            value={summary?.uniqueDevices ?? 0}
+            isLoading={compatibility.isLoading}
+          />
+          <StatCard
+            icon={ArrowRightLeft}
+            label={t('devices.uniqueCodecs')}
+            value={summary?.uniqueCodecs ?? 0}
+            isLoading={compatibility.isLoading}
+          />
+        </div>
+      )}
 
       {/* Device Health + Transcode Hotspots */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -244,7 +271,12 @@ export function StatsDevices() {
             <CardDescription>{t('devices.deviceHealthDesc')}</CardDescription>
           </CardHeader>
           <CardContent>
-            {deviceHealth.isLoading ? (
+            {deviceHealth.isError ? (
+              <InlineErrorState
+                message={deviceHealth.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void deviceHealth.refetch()}
+              />
+            ) : deviceHealth.isLoading ? (
               <div className="space-y-4">
                 {Array.from({ length: 5 }).map((_, i) => (
                   <Skeleton key={i} className="h-8 w-full" />
@@ -312,7 +344,12 @@ export function StatsDevices() {
             <CardDescription>{t('devices.transcodeHotspotsDesc')}</CardDescription>
           </CardHeader>
           <CardContent>
-            {hotspots.isLoading ? (
+            {hotspots.isError ? (
+              <InlineErrorState
+                message={hotspots.error?.message ?? t('common:errors.unexpectedError')}
+                onRetry={() => void hotspots.refetch()}
+              />
+            ) : hotspots.isLoading ? (
               <div className="space-y-2">
                 {Array.from({ length: 5 }).map((_, i) => (
                   <Skeleton key={i} className="h-12 w-full" />
@@ -389,6 +426,8 @@ export function StatsDevices() {
                   <MatrixView
                     data={result?.data}
                     isLoading={result?.isLoading ?? matrixResult.isLoading}
+                    error={result?.error}
+                    onRetry={() => void result?.refetch()}
                   />
                 );
               }}
@@ -397,6 +436,8 @@ export function StatsDevices() {
             <MatrixView
               data={matrixResult.byServer.get(selectedServerIds[0] ?? '')?.data}
               isLoading={matrixResult.isLoading}
+              error={matrixResult.byServer.get(selectedServerIds[0] ?? '')?.error}
+              onRetry={() => void matrixResult.byServer.get(selectedServerIds[0] ?? '')?.refetch()}
             />
           )}
         </CardContent>
@@ -409,7 +450,12 @@ export function StatsDevices() {
           <CardDescription>{t('devices.topTranscodingUsersDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-          {topTranscodingUsers.isLoading ? (
+          {topTranscodingUsers.isError ? (
+            <InlineErrorState
+              message={topTranscodingUsers.error?.message ?? t('common:errors.unexpectedError')}
+              onRetry={() => void topTranscodingUsers.refetch()}
+            />
+          ) : topTranscodingUsers.isLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
