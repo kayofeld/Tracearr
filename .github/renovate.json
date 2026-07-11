@@ -63,7 +63,7 @@
 
     // Postgres/TimescaleDB majors require a schema migration.
     {
-      "matchManagers": ["dockerfile", "docker-compose", "helm-values", "helmv3"],
+      "matchManagers": ["dockerfile", "docker-compose", "helm-values", "helmv3", "github-actions"],
       "matchPackageNames": ["postgres", "timescale/timescaledb", "timescale/timescaledb-ha"],
       "matchUpdateTypes": ["major"],
       "enabled": false,
@@ -425,13 +425,14 @@
       "labels": ["dep-docker"]
     },
 
-    // Postgres/Timescale tag bumps carry PG version and extension changes, so they
+    // Postgres/Timescale bumps carry PG version and extension changes, so they
     // get their own group and wait for dashboard approval before a PR opens.
-    // Digest-only rebuilds keep the same tag, so they stay in the generic group above.
+    // Digest-only rebuilds are gated too: these images never move without sign-off.
+    // github-actions is matched so CI service containers don't slip into other groups.
     {
-      "matchManagers": ["dockerfile", "docker-compose", "helm-values", "helmv3"],
+      "matchManagers": ["dockerfile", "docker-compose", "helm-values", "helmv3", "github-actions"],
       "matchPackageNames": ["postgres", "timescale/timescaledb", "timescale/timescaledb-ha"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
       "dependencyDashboardApproval": true,
       "groupName": "Postgres and TimescaleDB images",
       "labels": ["dep-docker", "dep-database"]
