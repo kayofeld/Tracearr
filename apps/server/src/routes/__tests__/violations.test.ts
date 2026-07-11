@@ -25,11 +25,13 @@ vi.mock('../../db/client.js', () => ({
   },
 }));
 
-const { mockGetServerUserDisplayNames } = vi.hoisted(() => ({
+const { mockGetServerUserDisplayNames, mockRecalculateAggregateTrustScore } = vi.hoisted(() => ({
   mockGetServerUserDisplayNames: vi.fn(),
+  mockRecalculateAggregateTrustScore: vi.fn(),
 }));
 vi.mock('../../services/userService.js', () => ({
   getServerUserDisplayNames: mockGetServerUserDisplayNames,
+  recalculateAggregateTrustScore: mockRecalculateAggregateTrustScore,
 }));
 
 // Import the mocked db and the routes
@@ -843,6 +845,7 @@ describe('Violation Routes', () => {
 
       const violationId = randomUUID();
       const serverUserId = randomUUID();
+      const userId = randomUUID();
       const ruleId = randomUUID();
       const serverId = ownerUser.serverIds[0];
 
@@ -858,6 +861,7 @@ describe('Violation Routes', () => {
               ruleId,
               serverUserId,
               serverId,
+              userId,
             },
           ]);
         } else {
@@ -886,14 +890,14 @@ describe('Violation Routes', () => {
           where: vi.fn().mockResolvedValue(undefined),
         }),
       });
+      const txMock = {
+        delete: deleteMock,
+        update: updateMock,
+      };
 
       mockDb.transaction = vi
         .fn()
         .mockImplementation(async (callback: (tx: unknown) => Promise<void>) => {
-          const txMock = {
-            delete: deleteMock,
-            update: updateMock,
-          };
           return callback(txMock);
         });
 
@@ -909,6 +913,8 @@ describe('Violation Routes', () => {
       expect(deleteMock).toHaveBeenCalled();
       // Verify update was called (trust score reversal: -(-20) = +20)
       expect(updateMock).toHaveBeenCalled();
+      // Verify the identity's overall trust rollup was recomputed for the reversal
+      expect(mockRecalculateAggregateTrustScore).toHaveBeenCalledWith(userId, txMock);
     });
 
     it('should reject delete for non-owner', async () => {

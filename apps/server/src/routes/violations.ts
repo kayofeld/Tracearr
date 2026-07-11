@@ -3,6 +3,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
+import { z } from 'zod';
 import { eq, and, desc, gte, lte, isNull, isNotNull, sql, inArray } from 'drizzle-orm';
 import {
   violationQuerySchema,
@@ -26,7 +27,44 @@ import {
   resolveServerIds,
   buildMultiServerCondition,
 } from '../utils/serverFiltering.js';
-import { getServerUserDisplayNames } from '../services/userService.js';
+import {
+  getServerUserDisplayNames,
+  recalculateAggregateTrustScore,
+} from '../services/userService.js';
+import { resolveAccessibleServerUserIdsForIdentities } from './users/queries.js';
+import { uuidArraySql } from '../utils/sqlArrays.js';
+
+/**
+ * Merge the legacy singular `userId` identity filter with the new `userIds`
+ * multi-select form into one deduplicated list. Both can be sent together
+ * (e.g. a stale client alongside a new one), so this is additive, not either/or.
+ */
+function collectIdentityUserIds(userId: string | undefined, userIds: string[] | undefined) {
+  return Array.from(new Set([...(userIds ?? []), ...(userId ? [userId] : [])]));
+}
+
+/**
+ * Body shape for the bulk acknowledge/dismiss endpoints. Defined locally
+ * (not in shared schemas) since these two selectAll-capable endpoints are
+ * violations-only and this keeps the shared schemas file uncontested.
+ */
+const violationBulkFiltersSchema = z.object({
+  serverId: z.uuid().optional(),
+  serverIds: z.array(z.uuid()).optional(),
+  severity: z.enum(['low', 'warning', 'high']).optional(),
+  acknowledged: z.boolean().optional(),
+  // Identity-level filter, matching GET /violations - every account under
+  // any of these people the caller can access. userIds is the multi-select
+  // form; userId stays supported for back-compat.
+  userId: z.uuid().optional(),
+  userIds: z.array(z.uuid()).optional(),
+});
+
+const violationBulkBodySchema = z.object({
+  ids: z.array(z.uuid()).max(1000).optional(),
+  selectAll: z.boolean().optional(),
+  filters: violationBulkFiltersSchema.optional(),
+});
 
 /**
  * Build ORDER BY SQL clause for violations based on sort field and direction.
@@ -62,6 +100,7 @@ interface ViolationRow {
   username: string;
   userThumb: string | null;
   identityName: string | null;
+  identityUserId: string;
   serverId: string;
   serverName: string;
   sessionId: string | null;
@@ -527,6 +566,7 @@ async function enrichViolations(violationData: ViolationRow[]) {
         thumbUrl: v.userThumb,
         serverId: v.serverId,
         identityName: v.identityName,
+        userId: v.identityUserId,
       },
       server: {
         id: v.serverId,
@@ -599,6 +639,8 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
       serverId,
       serverIds,
       serverUserId,
+      userId,
+      userIds,
       ruleId,
       severity,
       acknowledged,
@@ -628,6 +670,25 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
 
     if (serverUserId) {
       conditions.push(eq(violations.serverUserId, serverUserId));
+    }
+
+    // Identity-level filter: every account under any of these people that the
+    // caller can access, resolved in one batched query. Scoped the same way
+    // as everything else here - an identity with no accessible account
+    // contributes nothing, and if the whole set resolves to nothing that's
+    // an empty result, not a 403 (matches the non-strict server filtering above).
+    const identityUserIds = collectIdentityUserIds(userId, userIds);
+    let identityServerUserIds: string[] | undefined;
+    if (identityUserIds.length > 0) {
+      identityServerUserIds = await resolveAccessibleServerUserIdsForIdentities(
+        db,
+        authUser,
+        identityUserIds
+      );
+      if (identityServerUserIds.length === 0) {
+        return { data: [], page, pageSize, total: 0, totalPages: 0 };
+      }
+      conditions.push(inArray(violations.serverUserId, identityServerUserIds));
     }
 
     if (ruleId) {
@@ -663,6 +724,7 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
         username: serverUsers.username,
         userThumb: serverUsers.thumbUrl,
         identityName: users.name,
+        identityUserId: serverUsers.userId,
         serverId: serverUsers.serverId,
         serverName: servers.name,
         sessionId: violations.sessionId,
@@ -720,6 +782,10 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
 
     if (serverUserId) {
       countConditions.push(sql`v.server_user_id = ${serverUserId}`);
+    }
+
+    if (identityServerUserIds) {
+      countConditions.push(sql`v.server_user_id = ANY(${uuidArraySql(identityServerUserIds)})`);
     }
 
     if (ruleId) {
@@ -790,6 +856,7 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
         username: serverUsers.username,
         userThumb: serverUsers.thumbUrl,
         identityName: users.name,
+        identityUserId: serverUsers.userId,
         serverId: serverUsers.serverId,
         serverName: servers.name,
         sessionId: violations.sessionId,
@@ -966,6 +1033,7 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
         ruleId: violations.ruleId,
         serverUserId: violations.serverUserId,
         serverId: serverUsers.serverId,
+        userId: serverUsers.userId,
       })
       .from(violations)
       .innerJoin(serverUsers, eq(violations.serverUserId, serverUsers.id))
@@ -1016,6 +1084,10 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
             updatedAt: new Date(),
           })
           .where(eq(serverUsers.id, violation.serverUserId));
+
+        // Keep the person's overall trust rollup current in the same
+        // transaction as the reversal.
+        await recalculateAggregateTrustScore(violation.userId, tx);
       }
     });
 
@@ -1034,16 +1106,11 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
       return reply.forbidden('Only server owners can acknowledge violations');
     }
 
-    const body = request.body as {
-      ids?: string[];
-      selectAll?: boolean;
-      filters?: {
-        serverId?: string;
-        serverIds?: string[];
-        severity?: string;
-        acknowledged?: boolean;
-      };
-    };
+    const parsedBody = violationBulkBodySchema.safeParse(request.body);
+    if (!parsedBody.success) {
+      return reply.badRequest('Invalid request body');
+    }
+    const body = parsedBody.data;
 
     if (!body.ids && !body.selectAll) {
       return reply.badRequest('Either ids or selectAll must be provided');
@@ -1071,10 +1138,21 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
         conditions.push(bulkServerCondition);
       }
 
-      if (body.filters.severity) {
-        conditions.push(
-          eq(violations.severity, body.filters.severity as 'low' | 'warning' | 'high')
+      const bulkIdentityUserIds = collectIdentityUserIds(body.filters.userId, body.filters.userIds);
+      if (bulkIdentityUserIds.length > 0) {
+        const identityServerUserIds = await resolveAccessibleServerUserIdsForIdentities(
+          db,
+          authUser,
+          bulkIdentityUserIds
         );
+        if (identityServerUserIds.length === 0) {
+          return { success: true, acknowledged: 0 };
+        }
+        conditions.push(inArray(violations.serverUserId, identityServerUserIds));
+      }
+
+      if (body.filters.severity) {
+        conditions.push(eq(violations.severity, body.filters.severity));
       }
 
       if (body.filters.acknowledged === false) {
@@ -1136,16 +1214,11 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
       return reply.forbidden('Only server owners can dismiss violations');
     }
 
-    const body = request.body as {
-      ids?: string[];
-      selectAll?: boolean;
-      filters?: {
-        serverId?: string;
-        serverIds?: string[];
-        severity?: string;
-        acknowledged?: boolean;
-      };
-    };
+    const parsedBody = violationBulkBodySchema.safeParse(request.body);
+    if (!parsedBody.success) {
+      return reply.badRequest('Invalid request body');
+    }
+    const body = parsedBody.data;
 
     if (!body.ids && !body.selectAll) {
       return reply.badRequest('Either ids or selectAll must be provided');
@@ -1173,10 +1246,21 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
         conditions.push(bulkServerCondition);
       }
 
-      if (body.filters.severity) {
-        conditions.push(
-          eq(violations.severity, body.filters.severity as 'low' | 'warning' | 'high')
+      const bulkIdentityUserIds = collectIdentityUserIds(body.filters.userId, body.filters.userIds);
+      if (bulkIdentityUserIds.length > 0) {
+        const identityServerUserIds = await resolveAccessibleServerUserIdsForIdentities(
+          db,
+          authUser,
+          bulkIdentityUserIds
         );
+        if (identityServerUserIds.length === 0) {
+          return { success: true, dismissed: 0 };
+        }
+        conditions.push(inArray(violations.serverUserId, identityServerUserIds));
+      }
+
+      if (body.filters.severity) {
+        conditions.push(eq(violations.severity, body.filters.severity));
       }
 
       if (body.filters.acknowledged === false) {
@@ -1207,6 +1291,7 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
         ruleId: violations.ruleId,
         serverUserId: violations.serverUserId,
         serverId: serverUsers.serverId,
+        userId: serverUsers.userId,
       })
       .from(violations)
       .innerJoin(serverUsers, eq(violations.serverUserId, serverUsers.id))
@@ -1243,9 +1328,12 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
       ruleAdjustments.set(rule.id, adjustment);
     }
 
-    // Calculate trust adjustments to reverse per user
+    // Calculate trust adjustments to reverse per server account, and track
+    // which identity each server account belongs to for the rollup recompute
     const trustReverseByUser = new Map<string, number>();
+    const identityByServerUser = new Map<string, string>();
     for (const v of accessibleViolations) {
+      identityByServerUser.set(v.serverUserId, v.userId);
       const adjustment = ruleAdjustments.get(v.ruleId) ?? 0;
       if (adjustment !== 0) {
         trustReverseByUser.set(
@@ -1263,6 +1351,7 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
       await tx.delete(violations).where(inArray(violations.id, accessibleIds));
 
       // Reverse trust scores for each affected user
+      const affectedIdentityIds = new Set<string>();
       for (const [serverUserId, totalAdjustment] of trustReverseByUser) {
         // Reverse by applying the opposite adjustment
         await tx
@@ -1272,6 +1361,18 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
             updatedAt: new Date(),
           })
           .where(eq(serverUsers.id, serverUserId));
+
+        const identityId = identityByServerUser.get(serverUserId);
+        if (identityId) {
+          affectedIdentityIds.add(identityId);
+        }
+      }
+
+      // Keep every affected identity's overall trust rollup current in the
+      // same transaction as the reversals (once per identity, since a merged
+      // person can have more than one affected account here).
+      for (const identityId of affectedIdentityIds) {
+        await recalculateAggregateTrustScore(identityId, tx);
       }
     });
 
