@@ -153,6 +153,7 @@ function createMockRule(overrides: Partial<RuleV2> = {}): RuleV2 {
     name: 'Test Rule',
     description: null,
     serverId: null,
+    serverUserId: null,
     userId: null,
     enforceAcrossServers: false,
     isActive: true,

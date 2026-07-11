@@ -367,6 +367,119 @@ describe('identity-scoped rules', () => {
   });
 });
 
+describe('account-scoped rules', () => {
+  it('applies only to the specific account it is scoped to, not a sibling account, via the real create route', async () => {
+    const admin = await createTestUser({ role: 'owner' });
+    const server = await createTestServer({ type: 'plex' });
+
+    const targetUser = await createTestUser({ role: 'member' });
+    const otherUser = await createTestUser({ role: 'member' });
+    const targetSu = await createTestServerUser({ userId: targetUser.id, serverId: server.id });
+    const otherSu = await createTestServerUser({ userId: otherUser.id, serverId: server.id });
+
+    const app = Fastify({ logger: false });
+    await app.register(sensible);
+    app.decorate('authenticate', async (request: any) => {
+      request.user = {
+        userId: admin.id,
+        username: 'admin',
+        role: 'owner',
+        serverIds: [server.id],
+      };
+    });
+    await app.register(ruleRoutes, { prefix: '/rules' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/rules/v2',
+      payload: {
+        name: 'Account rule',
+        serverUserId: targetSu.id,
+        conditions: ALWAYS_MATCH_CONDITIONS,
+        actions: { actions: [] },
+      },
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(201);
+    const rule = response.json();
+    expect(rule.serverUserId).toBe(targetSu.id);
+
+    const activeRulesV2 = await getActiveRulesV2();
+    const scopedRule = activeRulesV2.find((r) => r.id === rule.id);
+    expect(scopedRule?.serverUserId).toBe(targetSu.id);
+
+    const serverObj = mockServer({ id: server.id, type: 'plex' });
+
+    // The scoped account matches and gets a violation created.
+    const targetSessionRow = await createTestSession({
+      serverId: server.id,
+      serverUserId: targetSu.id,
+    });
+    const targetSession = toEvaluationSession(targetSessionRow);
+    const targetServerUserObj = mockServerUser({
+      id: targetSu.id,
+      serverId: server.id,
+      userId: targetUser.id,
+    });
+
+    const targetResults = await evaluateRulesAsync(
+      {
+        session: targetSession,
+        serverUser: targetServerUserObj,
+        server: serverObj,
+        activeSessions: [targetSession],
+        recentSessions: [targetSession],
+      },
+      activeRulesV2
+    );
+    expect(targetResults.some((r) => r.ruleId === rule.id)).toBe(true);
+
+    const [insertedViolation] = await db
+      .insert(violations)
+      .values({
+        ruleId: rule.id,
+        serverUserId: targetSu.id,
+        sessionId: targetSession.id,
+        severity: 'warning',
+        ruleType: null,
+        data: {},
+      })
+      .returning();
+    expect(insertedViolation?.serverUserId).toBe(targetSu.id);
+
+    // A different account on the same server never matches the account-scoped rule.
+    const otherSessionRow = await createTestSession({
+      serverId: server.id,
+      serverUserId: otherSu.id,
+    });
+    const otherSession = toEvaluationSession(otherSessionRow);
+    const otherServerUserObj = mockServerUser({
+      id: otherSu.id,
+      serverId: server.id,
+      userId: otherUser.id,
+    });
+
+    const otherResults = await evaluateRulesAsync(
+      {
+        session: otherSession,
+        serverUser: otherServerUserObj,
+        server: serverObj,
+        activeSessions: [otherSession],
+        recentSessions: [otherSession],
+      },
+      activeRulesV2
+    );
+    expect(otherResults.some((r) => r.ruleId === rule.id)).toBe(false);
+
+    const otherViolations = await db
+      .select()
+      .from(violations)
+      .where(eq(violations.serverUserId, otherSu.id));
+    expect(otherViolations).toHaveLength(0);
+  });
+});
+
 describe('rule scope validation', () => {
   it('rejects a rule with more than one scope set', () => {
     const result = createRuleV2Schema.safeParse({

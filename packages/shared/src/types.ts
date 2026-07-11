@@ -738,6 +738,8 @@ export interface RuleV2 {
   name: string;
   description: string | null;
   serverId: string | null;
+  // Account scope - applies only to this specific server_user.
+  serverUserId: string | null;
   // Identity (person) scope - applies to every server_user of this identity.
   userId: string | null;
   // Opt-in cross-server enforcement; see the field of the same name on Rule.
