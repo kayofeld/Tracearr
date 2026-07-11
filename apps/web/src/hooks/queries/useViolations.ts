@@ -12,19 +12,31 @@ import { api } from '@/lib/api';
 interface ViolationsParams {
   page?: number;
   pageSize?: number;
+  serverUserId?: string;
   userId?: string;
+  userIds?: string[];
   severity?: ViolationSeverity;
   acknowledged?: boolean;
   serverIds?: string[];
   orderBy?: ViolationSortField;
   orderDir?: 'asc' | 'desc';
+  // Defer the fetch until a dependency (e.g. an identity id resolved from
+  // another query) is ready. Defaults to enabled.
+  enabled?: boolean;
 }
 
 export function useViolations(params: ViolationsParams = {}) {
+  const { enabled = true, ...listParams } = params;
   const serverIdsKey = params.serverIds?.length ? [...params.serverIds].sort().join(',') : 'all';
+  const userIdsKey = params.userIds?.length ? [...params.userIds].sort().join(',') : 'none';
   return useQuery({
-    queryKey: ['violations', 'list', { ...params, serverIds: serverIdsKey }],
-    queryFn: () => api.violations.list(params),
+    queryKey: [
+      'violations',
+      'list',
+      { ...listParams, serverIds: serverIdsKey, userIds: userIdsKey },
+    ],
+    queryFn: () => api.violations.list(listParams),
+    enabled,
     staleTime: 1000 * 30, // 30 seconds
   });
 }
@@ -111,6 +123,8 @@ export interface BulkViolationParams {
     serverIds?: string[];
     severity?: string;
     acknowledged?: boolean;
+    userId?: string;
+    userIds?: string[];
   };
 }
 
