@@ -2,6 +2,8 @@ import { Link } from 'react-router';
 import { User, Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAvatarUrl, getTrustScoreColor, getTrustScoreBg, MEDALS } from './utils';
+import { getMergedIdentityServers, type IdentityServerMembership } from './identityServerPills';
+import { ServerColumnCell } from '@/components/server';
 
 interface UserCardProps {
   userId: string;
@@ -14,6 +16,7 @@ interface UserCardProps {
   watchTimeHours: number;
   topMediaType?: string | null;
   topContent?: string | null;
+  identityServers?: IdentityServerMembership[];
   rank: 1 | 2 | 3;
   className?: string;
   style?: React.CSSProperties;
@@ -29,6 +32,7 @@ export function UserCard({
   playCount,
   watchTimeHours,
   topContent,
+  identityServers,
   rank,
   className,
   style,
@@ -36,6 +40,7 @@ export function UserCard({
   const displayName = identityName ?? username;
   const avatarUrl = getAvatarUrl(serverId, thumbUrl);
   const medal = MEDALS[rank];
+  const mergedServers = getMergedIdentityServers(identityServers);
 
   return (
     <Link
@@ -89,6 +94,15 @@ export function UserCard({
       <h3 className="relative z-10 mt-4 line-clamp-2 w-full px-2 text-center text-base font-semibold break-words">
         {displayName}
       </h3>
+
+      {/* Server pills, merged identities only */}
+      {mergedServers.length > 0 && (
+        <div className="relative z-10 mt-1 flex flex-wrap items-center justify-center gap-1">
+          {mergedServers.map((server) => (
+            <ServerColumnCell key={server.id} server={server} />
+          ))}
+        </div>
+      )}
 
       {/* Stats */}
       <div className="relative z-10 mt-2 flex items-center gap-4 text-sm">

@@ -31,8 +31,7 @@ const mockMerge = vi.mocked(api.users.merge);
 const mockToastSuccess = vi.mocked(toast.success);
 const mockToastError = vi.mocked(toast.error);
 
-function wrapper() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function wrapper(client: QueryClient) {
   function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   }
@@ -47,7 +46,8 @@ describe('useMergeUsers', () => {
   it('shows no error toast when the merge fails with the same-server sentinel, so the dialog can escalate instead', async () => {
     mockMerge.mockRejectedValueOnce(new Error(MERGE_SAME_SERVER_CONFIRMATION_REQUIRED));
 
-    const { result } = renderHook(() => useMergeUsers(), { wrapper: wrapper() });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useMergeUsers(), { wrapper: wrapper(client) });
 
     result.current.mutate({ sourceUserId: 'user-a', targetUserId: 'user-b' });
 
@@ -60,7 +60,8 @@ describe('useMergeUsers', () => {
   it('shows an error toast when the merge fails for any other reason', async () => {
     mockMerge.mockRejectedValueOnce(new Error('server exploded'));
 
-    const { result } = renderHook(() => useMergeUsers(), { wrapper: wrapper() });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useMergeUsers(), { wrapper: wrapper(client) });
 
     result.current.mutate({ sourceUserId: 'user-a', targetUserId: 'user-b' });
 
@@ -69,5 +70,29 @@ describe('useMergeUsers', () => {
     expect(mockToastError).toHaveBeenCalledWith('toast.error.userMergeFailed', {
       description: 'server exploded',
     });
+  });
+
+  it('invalidates users, stats, sessions, and violations caches on success, so identity-shaped aggregates refresh', async () => {
+    mockMerge.mockResolvedValueOnce({
+      targetUserId: 'user-b',
+      movedServerUserIds: ['su-1'],
+      wasSameServerCombine: false,
+      combinedServerUsers: [],
+      auditId: 'audit-1',
+      droppedRuleNames: [],
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useMergeUsers(), { wrapper: wrapper(client) });
+
+    result.current.mutate({ sourceUserId: 'user-a', targetUserId: 'user-b' });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((call) => call[0]?.queryKey);
+    expect(invalidatedKeys).toEqual(
+      expect.arrayContaining([['users'], ['stats'], ['sessions'], ['violations']])
+    );
   });
 });

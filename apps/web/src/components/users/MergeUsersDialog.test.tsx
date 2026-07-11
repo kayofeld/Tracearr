@@ -11,6 +11,10 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
+vi.mock('@/hooks/useServerColorMap', () => ({
+  useServerColorMap: () => new Map(),
+}));
+
 const candidates: [MergeCandidate, MergeCandidate] = [
   {
     userId: 'user-a',
@@ -155,7 +159,12 @@ describe('MergeUsersDialog', () => {
         {
           ...candidates[0],
           serverUsers: [
-            { id: 'su-1', serverName: 'Living Room Plex', removedAt: '2026-01-01T00:00:00.000Z' },
+            {
+              id: 'su-1',
+              serverId: 'srv-1',
+              serverName: 'Living Room Plex',
+              removedAt: '2026-01-01T00:00:00.000Z',
+            },
           ],
         },
         candidates[1],

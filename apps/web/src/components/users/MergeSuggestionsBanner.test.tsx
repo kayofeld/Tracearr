@@ -12,6 +12,10 @@ vi.mock('@/hooks/queries', () => ({
   useMergeSuggestions: vi.fn(),
 }));
 
+vi.mock('@/hooks/useServerColorMap', () => ({
+  useServerColorMap: () => new Map(),
+}));
+
 import { useMergeSuggestions } from '@/hooks/queries';
 
 const mockUseMergeSuggestions = vi.mocked(useMergeSuggestions);

@@ -2,6 +2,8 @@ import { Link } from 'react-router';
 import { User, Trophy, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAvatarUrl, getTrustScoreColor } from './utils';
+import { getMergedIdentityServers, type IdentityServerMembership } from './identityServerPills';
+import { ServerColumnCell } from '@/components/server';
 
 interface UserRowProps {
   userId: string;
@@ -13,6 +15,7 @@ interface UserRowProps {
   playCount: number;
   watchTimeHours: number;
   topContent?: string | null;
+  identityServers?: IdentityServerMembership[];
   rank: number;
   className?: string;
   style?: React.CSSProperties;
@@ -28,12 +31,14 @@ export function UserRow({
   playCount,
   watchTimeHours,
   topContent,
+  identityServers,
   rank,
   className,
   style,
 }: UserRowProps) {
   const displayName = identityName ?? username;
   const avatarUrl = getAvatarUrl(serverId, thumbUrl, 40);
+  const mergedServers = getMergedIdentityServers(identityServers);
 
   return (
     <Link
@@ -65,7 +70,12 @@ export function UserRow({
 
       {/* Name & Top Content */}
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{displayName}</p>
+        <div className="flex items-center gap-2">
+          <p className="truncate font-medium">{displayName}</p>
+          {mergedServers.map((server) => (
+            <ServerColumnCell key={server.id} server={server} />
+          ))}
+        </div>
         {topContent && (
           <p className="text-muted-foreground truncate text-xs">
             Loves: <span className="font-medium">{topContent}</span>

@@ -1,8 +1,15 @@
-import { useState, useMemo, useCallback } from 'react';
-import { useParams, Link } from 'react-router';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useParams, useSearchParams, Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { TrustScoreBadge } from '@/components/users/TrustScoreBadge';
 import { UserLocationsCard } from '@/components/users/UserLocationsCard';
 import { UserDevicesCard } from '@/components/users/UserDevicesCard';
@@ -14,6 +21,7 @@ import type { ColumnVisibility } from '@/components/history/HistoryFilters';
 import { SeverityBadge } from '@/components/violations/SeverityBadge';
 import { getAvatarUrl } from '@/components/users/utils';
 import { getMergedIdentityServers } from '@/components/users/identityServerPills';
+import { getUserDetailScope, applyUserDetailScope } from '@/components/users/userDetailScope';
 import { ServerColumnCell } from '@/components/server';
 import { getMediaDisplay } from '@/lib/utils';
 import { api } from '@/lib/api';
@@ -55,38 +63,59 @@ import { useAuth } from '@/hooks/useAuth';
 // Union type for violations - aggregate returns ViolationSummary, paginated returns ViolationWithDetails
 type ViolationRow = ViolationSummary | ViolationWithDetails;
 
+// ViolationSummary carries flat serverId/serverName; ViolationWithDetails
+// nests it under `server`. Normalize so a single column can render either.
+function getViolationServer(violation: ViolationRow): { id: string; name: string } | null {
+  if ('serverId' in violation) {
+    return { id: violation.serverId, name: violation.serverName };
+  }
+  return violation.server ? { id: violation.server.id, name: violation.server.name } : null;
+}
+
 export function UserDetail() {
   const { t } = useTranslation(['pages', 'common']);
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [sessionsPage, setSessionsPage] = useState(1);
   const [violationsPage, setViolationsPage] = useState(1);
   const [terminationsPage, setTerminationsPage] = useState(1);
   const [isEditNameOpen, setIsEditNameOpen] = useState(false);
-  const [isEditTrustOpen, setIsEditTrustOpen] = useState(false);
+  const [trustEditTarget, setTrustEditTarget] = useState<{
+    id: string;
+    username: string;
+    score: number;
+  } | null>(null);
   const [selectedSession, setSelectedSession] = useState<SessionWithDetails | null>(null);
   const [splitTarget, setSplitTarget] = useState<{ id: string; username: string } | null>(null);
   const pageSize = 10;
-  const { selectedServerId, servers } = useServer();
+  const { servers } = useServer();
   const { user: authUser } = useAuth();
   const isOwner = authUser?.role === 'owner';
   const splitMutation = useSplitServerUser();
 
-  // Column visibility for the sessions HistoryTable (hide user since we're scoped to one)
-  const sessionColumnVisibility: ColumnVisibility = useMemo(
-    () => ({
-      date: true,
-      user: false,
-      content: true,
-      server: false,
-      platform: true,
-      location: true,
-      ip: false,
-      quality: true,
-      duration: true,
-      progress: true,
-    }),
-    []
+  // scope=<serverUserId> narrows the whole page to that one account, like a
+  // normal (unmerged) detail view. Absent or scope=all shows the whole
+  // person's combined data across every account the caller can access.
+  const scopeParam = searchParams.get('scope');
+  const { effectiveId, identityScope, isSpecificServerScope, isAllScope } = getUserDetailScope(
+    id,
+    scopeParam
   );
+
+  const handleScopeChange = useCallback(
+    (value: string) => {
+      setSearchParams(applyUserDetailScope(searchParams, value), { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
+  // Reset paginated panels to page 1 whenever the scope changes so a stale
+  // page number from a larger result set doesn't land past the new total.
+  useEffect(() => {
+    setSessionsPage(1);
+    setViolationsPage(1);
+    setTerminationsPage(1);
+  }, [scopeParam]);
 
   const handleSessionClick = useCallback(async (session: SessionWithDetails) => {
     try {
@@ -97,8 +126,68 @@ export function UserDetail() {
     }
   }, []);
 
-  const violationColumns: ColumnDef<ViolationRow>[] = useMemo(
-    () => [
+  // Use the aggregate endpoint for initial load (1 request instead of 6).
+  // Anchored on effectiveId: the URL's representative account by default, or
+  // the specific sibling account the picker selected.
+  const { data: fullData, isLoading } = useUserFull(effectiveId!, { scope: identityScope });
+
+  // Only fetch paginated data when user navigates beyond first page
+  const { data: paginatedSessions, isLoading: paginatedSessionsLoading } = useUserSessions(
+    effectiveId!,
+    { page: sessionsPage, pageSize, scope: identityScope }
+    // Only enable when on page > 1 (first page data comes from aggregate)
+  );
+  const needsPaginatedSessions = sessionsPage > 1;
+
+  const identityUserId = fullData?.identity.userId;
+  const { data: paginatedViolations, isLoading: paginatedViolationsLoading } = useViolations(
+    isSpecificServerScope
+      ? { serverUserId: effectiveId, page: violationsPage, pageSize }
+      : {
+          userId: identityUserId,
+          page: violationsPage,
+          pageSize,
+          enabled: !!identityUserId,
+        }
+  );
+  const needsPaginatedViolations = violationsPage > 1;
+
+  const { data: paginatedTerminations, isLoading: paginatedTerminationsLoading } =
+    useUserTerminations(effectiveId!, { page: terminationsPage, pageSize, scope: identityScope });
+  const needsPaginatedTerminations = terminationsPage > 1;
+
+  // Extract data from aggregate or paginated sources
+  const user = fullData?.user;
+  const identity = fullData?.identity;
+  const locations = fullData?.locations ?? [];
+  const devices = fullData?.devices ?? [];
+  const isMergedIdentity = (identity?.serverUsers.length ?? 0) > 1;
+  // The server column/badges only earn their place once the view actually
+  // spans more than one server - never for an unmerged person.
+  const showServerColumns = isAllScope && isMergedIdentity;
+  const headerMergedServers = getMergedIdentityServers(
+    identity?.serverUsers.map((account) => ({ id: account.serverId, name: account.serverName }))
+  );
+
+  // Column visibility for the sessions HistoryTable.
+  const sessionColumnVisibility: ColumnVisibility = useMemo(
+    () => ({
+      date: true,
+      user: false,
+      content: true,
+      server: showServerColumns,
+      platform: true,
+      location: true,
+      ip: false,
+      quality: true,
+      duration: true,
+      progress: true,
+    }),
+    [showServerColumns]
+  );
+
+  const violationColumns: ColumnDef<ViolationRow>[] = useMemo(() => {
+    const columns: ColumnDef<ViolationRow>[] = [
       {
         accessorKey: 'rule.name',
         header: t('common:labels.rule'),
@@ -111,6 +200,18 @@ export function UserDetail() {
           </div>
         ),
       },
+    ];
+    if (showServerColumns) {
+      columns.push({
+        id: 'server',
+        header: t('common:labels.server'),
+        cell: ({ row }) => {
+          const server = getViolationServer(row.original);
+          return server ? <ServerColumnCell server={server} /> : null;
+        },
+      });
+    }
+    columns.push(
       {
         accessorKey: 'severity',
         header: t('common:labels.severity'),
@@ -141,13 +242,13 @@ export function UserDetail() {
               : t('common:states.pending')}
           </span>
         ),
-      },
-    ],
-    [t]
-  );
+      }
+    );
+    return columns;
+  }, [t, showServerColumns]);
 
-  const terminationColumns: ColumnDef<TerminationLogWithDetails>[] = useMemo(
-    () => [
+  const terminationColumns: ColumnDef<TerminationLogWithDetails>[] = useMemo(() => {
+    const columns: ColumnDef<TerminationLogWithDetails>[] = [
       {
         accessorKey: 'trigger',
         header: t('common:labels.type'),
@@ -186,6 +287,20 @@ export function UserDetail() {
           );
         },
       },
+    ];
+    if (showServerColumns) {
+      columns.push({
+        id: 'server',
+        header: t('common:labels.server'),
+        cell: ({ row }) =>
+          row.original.serverName ? (
+            <ServerColumnCell
+              server={{ id: row.original.serverId, name: row.original.serverName }}
+            />
+          ) : null,
+      });
+    }
+    columns.push(
       {
         accessorKey: 'createdAt',
         header: t('common:labels.when'),
@@ -231,66 +346,38 @@ export function UserDetail() {
             {row.original.success ? t('common:states.success') : t('common:states.failed')}
           </span>
         ),
-      },
-    ],
-    [t]
-  );
-
-  // Use the aggregate endpoint for initial load (1 request instead of 6)
-  const { data: fullData, isLoading } = useUserFull(id!);
-
-  // Only fetch paginated data when user navigates beyond first page
-  const { data: paginatedSessions, isLoading: paginatedSessionsLoading } = useUserSessions(
-    id!,
-    { page: sessionsPage, pageSize }
-    // Only enable when on page > 1 (first page data comes from aggregate)
-  );
-  const needsPaginatedSessions = sessionsPage > 1;
-
-  const { data: paginatedViolations, isLoading: paginatedViolationsLoading } = useViolations({
-    userId: id,
-    page: violationsPage,
-    pageSize,
-    serverIds: selectedServerId ? [selectedServerId] : undefined,
-  });
-  const needsPaginatedViolations = violationsPage > 1;
-
-  const { data: paginatedTerminations, isLoading: paginatedTerminationsLoading } =
-    useUserTerminations(id!, { page: terminationsPage, pageSize });
-  const needsPaginatedTerminations = terminationsPage > 1;
-
-  // Extract data from aggregate or paginated sources
-  const user = fullData?.user;
-  const identity = fullData?.identity;
-  const locations = fullData?.locations ?? [];
-  const devices = fullData?.devices ?? [];
-  const headerMergedServers = getMergedIdentityServers(
-    identity?.serverUsers.map((account) => ({ id: account.serverId, name: account.serverName }))
-  );
+      }
+    );
+    return columns;
+  }, [t, showServerColumns]);
 
   // Sessions: use paginated data if on page > 1, otherwise use aggregate
   const rawSessions = needsPaginatedSessions
     ? (paginatedSessions?.data ?? [])
     : (fullData?.sessions.data ?? []);
 
-  // Map Session -> SessionWithDetails for HistoryTable compatibility
+  // Map Session -> SessionWithDetails for HistoryTable compatibility. Each
+  // session row already carries its own server, since an identity-scoped
+  // view can mix sessions from more than one server.
   const sessions: SessionWithDetails[] = useMemo(() => {
     if (!user) return [];
-    const server = servers.find((s) => s.id === user.serverId);
-    return rawSessions.map((s) => ({
-      ...s,
-      user: {
-        id: user.id,
-        username: user.username,
-        thumbUrl: user.thumbUrl,
-        identityName: user.identityName ?? null,
-      },
-      server: {
-        id: user.serverId,
-        name: user.serverName ?? '',
-        type: server?.type ?? 'plex',
-      },
-    }));
+    return rawSessions.map((s) => {
+      const server = servers.find((sv) => sv.id === s.serverId);
+      return {
+        ...s,
+        user: {
+          id: user.id,
+          username: user.username,
+          thumbUrl: user.thumbUrl,
+          identityName: user.identityName ?? null,
+        },
+        server: {
+          id: s.serverId,
+          name: s.serverName ?? server?.name ?? '',
+          type: server?.type ?? 'plex',
+        },
+      };
+    });
   }, [rawSessions, user, servers]);
 
   const sessionsTotal = needsPaginatedSessions
@@ -369,7 +456,7 @@ export function UserDetail() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <Link to="/users">
           <Button variant="ghost" size="sm">
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -377,9 +464,31 @@ export function UserDetail() {
           </Button>
         </Link>
         <h1 className="text-3xl font-bold">{user.identityName ?? user.username}</h1>
-        {headerMergedServers.map((server) => (
-          <ServerColumnCell key={server.id} server={server} />
-        ))}
+        {isSpecificServerScope ? (
+          <ServerColumnCell server={{ id: user.serverId, name: user.serverName }} />
+        ) : (
+          headerMergedServers.map((server) => <ServerColumnCell key={server.id} server={server} />)
+        )}
+        {isMergedIdentity && (
+          <div className="ml-auto flex items-center gap-2">
+            <label htmlFor="user-scope" className="text-muted-foreground text-sm">
+              {t('pages:userDetail.serverScope')}
+            </label>
+            <Select value={scopeParam ?? 'all'} onValueChange={handleScopeChange}>
+              <SelectTrigger id="user-scope" className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('pages:userDetail.allServers')}</SelectItem>
+                {identity?.serverUsers.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.serverName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -427,14 +536,32 @@ export function UserDetail() {
                   <p className="text-muted-foreground text-sm">@{user.username}</p>
                   {user.email && <p className="text-muted-foreground text-sm">{user.email}</p>}
                   <div className="flex items-center gap-4 pt-2">
-                    <TrustScoreBadge score={user.trustScore} showLabel />
+                    <TrustScoreBadge
+                      score={
+                        isAllScope && isMergedIdentity
+                          ? (identity?.aggregateTrustScore ?? user.trustScore)
+                          : user.trustScore
+                      }
+                      showLabel
+                    />
+                    {isAllScope && isMergedIdentity && (
+                      <span className="text-muted-foreground text-xs">
+                        {t('pages:userDetail.overallTrust')}
+                      </span>
+                    )}
                   </div>
-                  {isOwner && (
+                  {isOwner && (!isMergedIdentity || !isAllScope) && (
                     <Button
                       variant="outline"
                       size="sm"
                       className="mt-3 w-fit"
-                      onClick={() => setIsEditTrustOpen(true)}
+                      onClick={() =>
+                        setTrustEditTarget({
+                          id: user.id,
+                          username: user.username,
+                          score: user.trustScore,
+                        })
+                      }
                     >
                       <Pencil className="mr-2 h-3.5 w-3.5" />
                       {t('userDetail.adjustTrustScore')}
@@ -500,8 +627,23 @@ export function UserDetail() {
                   <span className="text-muted-foreground text-sm">/ 100</span>
                 </div>
               </div>
+              {isMergedIdentity && (
+                <div className="rounded-lg border p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-sm">
+                      {t('pages:userDetail.overallTrust')}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="text-2xl font-bold">
+                      {identity?.aggregateTrustScore ?? user.trustScore}
+                    </span>
+                    <span className="text-muted-foreground text-sm">/ 100</span>
+                  </div>
+                </div>
+              )}
             </div>
-            {identity && identity.serverUsers.length > 1 && (
+            {isSpecificServerScope && isMergedIdentity && identity && (
               <p className="text-muted-foreground mt-3 text-xs">
                 {t('pages:userDetail.acrossAllServers')}{' '}
                 {t('common:count.session', { count: identity.stats.totalSessions })} ·{' '}
@@ -513,7 +655,7 @@ export function UserDetail() {
       </div>
 
       {/* Linked Accounts */}
-      {identity && identity.serverUsers.length > 1 && (
+      {identity && isMergedIdentity && (
         <Card>
           <CardHeader>
             <CardTitle>{t('pages:userDetail.linkedAccounts')}</CardTitle>
@@ -533,6 +675,22 @@ export function UserDetail() {
                     {t('common:count.session', { count: account.sessionCount })}
                   </span>
                   <TrustScoreBadge score={account.trustScore} />
+                  {isOwner && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setTrustEditTarget({
+                          id: account.id,
+                          username: account.username,
+                          score: account.trustScore,
+                        })
+                      }
+                    >
+                      <Pencil className="mr-2 h-4 w-4" />
+                      {t('userDetail.adjustTrustScore')}
+                    </Button>
+                  )}
                   {isOwner && account.id !== user.id && (
                     <Button
                       size="sm"
@@ -651,13 +809,17 @@ export function UserDetail() {
         username={user.username}
       />
 
-      {/* Edit Trust Score Dialog */}
+      {/* Edit Trust Score Dialog - target carries explicit account context,
+          set from either the header (single-account view) or a specific
+          Linked Accounts row, never ambiguous at the person level */}
       <EditTrustScoreDialog
-        open={isEditTrustOpen}
-        onOpenChange={setIsEditTrustOpen}
-        userId={id!}
-        currentScore={user.trustScore}
-        username={user.username}
+        open={trustEditTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setTrustEditTarget(null);
+        }}
+        userId={trustEditTarget?.id ?? ''}
+        currentScore={trustEditTarget?.score ?? 0}
+        username={trustEditTarget?.username ?? ''}
       />
 
       {/* Session Detail Sheet */}

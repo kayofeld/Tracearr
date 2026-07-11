@@ -23,10 +23,13 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { ServerColumnCell } from '@/components/server';
+import { RemovedBadge } from './RemovedBadge';
 import { cn } from '@/lib/utils';
 
 export interface MergeCandidateServerAccount {
   id: string;
+  serverId: string;
   serverName: string;
   removedAt: string | null;
 }
@@ -93,50 +96,58 @@ export function MergeUsersDialog(props: MergeUsersDialogProps) {
       aria-label={t('pages:users.mergePickPrimary')}
     >
       <legend className="text-sm font-medium">{t('pages:users.mergePickPrimary')}</legend>
-      {candidates.map((candidate) => {
-        const forced = requiredTargetUserId !== null;
-        const disabled = (forced && candidate.userId !== requiredTargetUserId) || isLoading;
-        return (
-          <label
-            key={candidate.userId}
-            className="flex cursor-pointer items-start gap-3 rounded-md border p-3 has-disabled:cursor-not-allowed has-disabled:opacity-60"
-          >
-            <input
-              type="radio"
-              name="merge-primary"
-              value={candidate.userId}
-              checked={targetUserId === candidate.userId}
-              disabled={disabled}
-              onChange={() => setTargetUserId(candidate.userId)}
-              aria-label={candidate.displayName}
-              className="mt-1"
-            />
-            <span className="flex flex-col gap-1">
-              <span className="font-medium">{candidate.displayName}</span>
-              <span className="text-muted-foreground text-xs">@{candidate.username}</span>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {candidates.map((candidate) => {
+          const forced = requiredTargetUserId !== null;
+          const disabled = (forced && candidate.userId !== requiredTargetUserId) || isLoading;
+          const isTarget = targetUserId === candidate.userId;
+          return (
+            <label
+              key={candidate.userId}
+              className={cn(
+                'flex cursor-pointer flex-col gap-2 rounded-md border p-3 transition-colors has-disabled:cursor-not-allowed has-disabled:opacity-60',
+                isTarget ? 'border-primary bg-primary/5' : 'border-border'
+              )}
+            >
+              <span className="flex items-start justify-between gap-2">
+                <span className="flex items-start gap-3">
+                  <input
+                    type="radio"
+                    name="merge-primary"
+                    value={candidate.userId}
+                    checked={isTarget}
+                    disabled={disabled}
+                    onChange={() => setTargetUserId(candidate.userId)}
+                    aria-label={candidate.displayName}
+                    className="mt-1"
+                  />
+                  <span className="flex flex-col gap-1">
+                    <span className="font-medium">{candidate.displayName}</span>
+                    <span className="text-muted-foreground text-xs">@{candidate.username}</span>
+                  </span>
+                </span>
+                {isTarget && (
+                  <Badge variant="outline" className="shrink-0 text-xs font-normal">
+                    {t('pages:users.mergePrimaryBadge')}
+                  </Badge>
+                )}
+              </span>
               {candidate.serverUsers.length > 0 && (
-                <span className="flex flex-wrap gap-1 pt-1">
+                <span className="flex flex-wrap items-center gap-1 pl-7">
                   {candidate.serverUsers.map((serverUser) => (
-                    <Badge
-                      key={serverUser.id}
-                      variant="secondary"
-                      className={cn(
-                        'gap-1 font-normal',
-                        serverUser.removedAt && 'text-muted-foreground'
-                      )}
-                    >
-                      {serverUser.serverName}
-                      {serverUser.removedAt && (
-                        <span>{t('pages:users.mergeServerAccountRemoved')}</span>
-                      )}
-                    </Badge>
+                    <span key={serverUser.id} className="flex items-center gap-1">
+                      <ServerColumnCell
+                        server={{ id: serverUser.serverId, name: serverUser.serverName }}
+                      />
+                      {serverUser.removedAt && <RemovedBadge removedAt={serverUser.removedAt} />}
+                    </span>
                   ))}
                 </span>
               )}
-            </span>
-          </label>
-        );
-      })}
+            </label>
+          );
+        })}
+      </div>
       {requiredTargetUserId !== null && (
         <p className="text-muted-foreground text-xs">{t('pages:users.mergePrimaryForced')}</p>
       )}

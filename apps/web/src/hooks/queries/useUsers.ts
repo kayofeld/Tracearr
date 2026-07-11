@@ -4,11 +4,23 @@ import { toast } from 'sonner';
 import { MERGE_SAME_SERVER_CONFIRMATION_REQUIRED } from '@tracearr/shared';
 import { api } from '@/lib/api';
 
-export function useUsers(params: { page?: number; pageSize?: number; serverId?: string } = {}) {
+export function useUsers(
+  params: {
+    page?: number;
+    pageSize?: number;
+    serverId?: string;
+    serverIds?: string[];
+    includeRemoved?: boolean;
+    search?: string;
+  } = {}
+) {
+  const serverIdsKey = params.serverIds?.length ? [...params.serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['users', 'list', params],
+    queryKey: ['users', 'list', { ...params, serverIds: serverIdsKey }],
     queryFn: () => api.users.list(params),
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    // A search query changes often as the user types (debounced upstream) and
+    // shouldn't linger stale as long as the default roster listing does.
+    staleTime: params.search ? 1000 * 10 : 1000 * 60 * 5,
   });
 }
 
@@ -26,16 +38,19 @@ export function useUser(id: string) {
  * Use this for the UserDetail page instead of multiple separate queries.
  * Reduces 6 API calls to 1, significantly improving load time.
  */
-export function useUserFull(id: string) {
+export function useUserFull(id: string, params: { scope?: 'identity' } = {}) {
   return useQuery({
-    queryKey: ['users', 'full', id],
-    queryFn: () => api.users.getFull(id),
+    queryKey: ['users', 'full', id, params.scope ?? null],
+    queryFn: () => api.users.getFull(id, params),
     enabled: !!id,
     staleTime: 1000 * 60, // 1 minute
   });
 }
 
-export function useUserSessions(id: string, params: { page?: number; pageSize?: number } = {}) {
+export function useUserSessions(
+  id: string,
+  params: { page?: number; pageSize?: number; scope?: 'identity' } = {}
+) {
   return useQuery({
     queryKey: ['users', 'sessions', id, params],
     queryFn: () => api.users.sessions(id, params),
@@ -53,9 +68,11 @@ export function useUpdateUser() {
     onSuccess: (data, variables) => {
       // Update user in cache
       queryClient.setQueryData(['users', 'detail', variables.id], data);
-      // Invalidate users list and full user detail
+      // Invalidate users list and every cached full-detail view - a trust
+      // edit on one account can also change a merged identity's aggregate
+      // shown from a sibling account's "all servers" view.
       void queryClient.invalidateQueries({ queryKey: ['users', 'list'] });
-      void queryClient.invalidateQueries({ queryKey: ['users', 'full', variables.id] });
+      void queryClient.invalidateQueries({ queryKey: ['users', 'full'] });
     },
   });
 }
@@ -67,8 +84,10 @@ export function useUpdateUserIdentity() {
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string | null }) =>
       api.users.updateIdentity(id, { name }),
-    onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: ['users', 'full', variables.id] });
+    onSuccess: () => {
+      // A display name is shared across the whole identity, so every cached
+      // full-detail view (any account anchor, any scope) needs a refetch.
+      void queryClient.invalidateQueries({ queryKey: ['users', 'full'] });
       void queryClient.invalidateQueries({ queryKey: ['users', 'list'] });
       toast.success(t('toast.success.displayNameUpdated.title'));
     },
@@ -78,25 +97,28 @@ export function useUpdateUserIdentity() {
   });
 }
 
-export function useUserLocations(id: string) {
+export function useUserLocations(id: string, params: { scope?: 'identity' } = {}) {
   return useQuery({
-    queryKey: ['users', 'locations', id],
-    queryFn: () => api.users.locations(id),
+    queryKey: ['users', 'locations', id, params.scope ?? null],
+    queryFn: () => api.users.locations(id, params),
     enabled: !!id,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
 
-export function useUserDevices(id: string) {
+export function useUserDevices(id: string, params: { scope?: 'identity' } = {}) {
   return useQuery({
-    queryKey: ['users', 'devices', id],
-    queryFn: () => api.users.devices(id),
+    queryKey: ['users', 'devices', id, params.scope ?? null],
+    queryFn: () => api.users.devices(id, params),
     enabled: !!id,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
 
-export function useUserTerminations(id: string, params: { page?: number; pageSize?: number } = {}) {
+export function useUserTerminations(
+  id: string,
+  params: { page?: number; pageSize?: number; scope?: 'identity' } = {}
+) {
   return useQuery({
     queryKey: ['users', 'terminations', id, params],
     queryFn: () => api.users.terminations(id, params),
@@ -105,14 +127,22 @@ export function useUserTerminations(id: string, params: { page?: number; pageSiz
   });
 }
 
+export interface BulkResetTrustParams {
+  ids?: string[];
+  selectAll?: boolean;
+  filters?: { serverId?: string; serverIds?: string[]; includeRemoved?: boolean };
+}
+
 export function useBulkResetTrust() {
   const { t } = useTranslation('notifications');
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (ids: string[]) => api.users.bulkResetTrust(ids),
+    mutationFn: (params: BulkResetTrustParams) => api.users.bulkResetTrust(params),
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ['users'] });
+      // Identity trust shows on the stats leaderboard too
+      void queryClient.invalidateQueries({ queryKey: ['stats'] });
       toast.success(t('toast.success.trustScoresReset.title'), {
         description: t('toast.success.trustScoresReset.message', { count: data.updated }),
       });
@@ -146,9 +176,21 @@ export function useMergeUsers() {
         targetUserId: input.targetUserId,
         confirmSameServerCombine: input.confirmSameServerCombine,
       }),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Leaderboards/dashboard/history aggregate by identity, so a merge has to
+      // drop their cached pre-merge data too, not just the roster.
       void queryClient.invalidateQueries({ queryKey: ['users'] });
-      toast.success(t('toast.success.usersMerged.title'));
+      void queryClient.invalidateQueries({ queryKey: ['stats'] });
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      void queryClient.invalidateQueries({ queryKey: ['violations'] });
+      toast.success(t('toast.success.usersMerged.title'), {
+        description:
+          data.droppedRuleNames.length > 0
+            ? t('toast.success.usersMerged.rulesKept', {
+                names: data.droppedRuleNames.join(', '),
+              })
+            : undefined,
+      });
     },
     onError: (error: Error) => {
       // The same-server sentinel isn't a failure - callers surface the destructive
@@ -168,7 +210,11 @@ export function useSplitServerUser() {
   return useMutation({
     mutationFn: (input: { serverUserId: string }) => api.serverUsers.split(input.serverUserId),
     onSuccess: () => {
+      // Same reasoning as merge: splitting reshapes identity-level aggregates too.
       void queryClient.invalidateQueries({ queryKey: ['users'] });
+      void queryClient.invalidateQueries({ queryKey: ['stats'] });
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      void queryClient.invalidateQueries({ queryKey: ['violations'] });
       toast.success(t('toast.success.serverUserSplit.title'));
     },
     onError: (error: Error) => {

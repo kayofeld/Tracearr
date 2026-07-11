@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { TrustScoreBadge } from '@/components/users/TrustScoreBadge';
 import { getAvatarUrl } from '@/components/users/utils';
 import { cn } from '@/lib/utils';
@@ -18,9 +20,11 @@ import {
   deriveMergeActionState,
   findOverlappingServerName,
 } from '@/components/users/mergeSelection';
-import { getMergedIdentityServers } from '@/components/users/identityServerPills';
+import { getIdentityServers } from '@/components/users/identityServerPills';
+import { RemovedBadge } from '@/components/users/RemovedBadge';
 import { ServerColumnCell } from '@/components/server';
-import { User as UserIcon, Crown, Clock, Search, RotateCcw, UserX, Merge } from 'lucide-react';
+import { ErrorState } from '@/components/library/ErrorState';
+import { User as UserIcon, Crown, Clock, Search, RotateCcw, Merge } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { ServerUserWithIdentity, MergeSuggestion } from '@tracearr/shared';
@@ -34,8 +38,10 @@ export function Users() {
   const { t } = useTranslation(['pages', 'common']);
   // Using common namespace for shared labels
   const navigate = useNavigate();
+  const { selectedServerIds } = useServer();
   const [searchFilter, setSearchFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [showRemoved, setShowRemoved] = useState(false);
   const [resetTrustConfirmOpen, setResetTrustConfirmOpen] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [mergeCandidates, setMergeCandidates] = useState<[MergeCandidate, MergeCandidate] | null>(
@@ -45,11 +51,15 @@ export function Users() {
   const [mergeSameServerWarning, setMergeSameServerWarning] = useState(false);
   const [mergeSameServerName, setMergeSameServerName] = useState<string | null>(null);
   const pageSize = 100;
-  const { selectedServerId } = useServer();
   const { user: authUser } = useAuth();
   const isOwner = authUser?.role === 'owner';
 
-  const { data, isLoading } = useUsers({ page, pageSize, serverId: selectedServerId ?? undefined });
+  const { data, isLoading, isError, error, refetch } = useUsers({
+    page,
+    pageSize,
+    serverIds: selectedServerIds.length ? selectedServerIds : undefined,
+    includeRemoved: showRemoved,
+  });
   const bulkResetTrust = useBulkResetTrust();
   const mergeUsersMutation = useMergeUsers();
 
@@ -66,10 +76,9 @@ export function Users() {
         cell: ({ row }) => {
           const user = row.original;
           const avatarUrl = getAvatarUrl(user.serverId, user.thumbUrl, 40);
-          const mergedServers = getMergedIdentityServers(user.identityServers);
           return (
             <div className="flex items-center gap-3">
-              <div className="bg-muted flex h-10 w-10 items-center justify-center rounded-full">
+              <div className="bg-muted flex h-10 w-10 shrink-0 items-center justify-center rounded-full">
                 {avatarUrl ? (
                   <img
                     src={avatarUrl}
@@ -80,8 +89,8 @@ export function Users() {
                   <UserIcon className="text-muted-foreground h-5 w-5" />
                 )}
               </div>
-              <div>
-                <div className="flex items-center gap-2">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
                   <span
                     className={cn(
                       'font-medium',
@@ -95,29 +104,45 @@ export function Users() {
                       <Crown className="h-4 w-4 text-yellow-500" />
                     </span>
                   )}
-                  {user.removedAt && (
-                    <span
-                      className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-500"
-                      title={`Removed ${formatDistanceToNow(new Date(user.removedAt), { addSuffix: true })}`}
-                    >
-                      <UserX className="h-3 w-3" />
-                      Removed
-                    </span>
-                  )}
-                  {mergedServers.map((server) => (
-                    <ServerColumnCell key={server.id} server={server} />
-                  ))}
+                  {user.removedAt && <RemovedBadge removedAt={user.removedAt} />}
                 </div>
-                <p className="text-muted-foreground text-xs">@{user.username}</p>
+                <p className="text-muted-foreground truncate text-xs">@{user.username}</p>
               </div>
             </div>
           );
         },
       },
       {
-        accessorKey: 'trustScore',
+        id: 'servers',
+        header: t('pages:users.serversColumn'),
+        meta: {
+          headerClassName: 'hidden md:table-cell',
+          cellClassName: 'hidden md:table-cell',
+        },
+        cell: ({ row }) => {
+          const user = row.original;
+          const memberServers = getIdentityServers(user.identityServers, {
+            id: user.serverId,
+            name: user.serverName,
+          });
+          return (
+            <div className="flex flex-wrap items-center gap-1">
+              {memberServers.map((server) => (
+                <ServerColumnCell key={server.id} server={server} />
+              ))}
+            </div>
+          );
+        },
+      },
+      {
+        accessorKey: 'identityTrustScore',
         header: t('common:labels.trustScore'),
-        cell: ({ row }) => <TrustScoreBadge score={row.original.trustScore} showLabel />,
+        cell: ({ row }) => (
+          <TrustScoreBadge
+            score={row.original.identityTrustScore ?? row.original.trustScore}
+            showLabel
+          />
+        ),
       },
       {
         accessorKey: 'joinedAt',
@@ -163,10 +188,24 @@ export function Users() {
     totalCount: total,
   });
 
+  useEffect(() => {
+    setPage(1);
+    clearSelection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to the global selector, not local setters
+  }, [selectedServerIds.join(',')]);
+
   const handleBulkResetTrust = () => {
-    // For users, we only support selecting specific IDs (not selectAll with filters)
-    // since users don't have the same filter complexity as violations
-    bulkResetTrust.mutate(Array.from(selectedIds), {
+    const params = selectAllMode
+      ? {
+          selectAll: true,
+          filters: {
+            serverIds: selectedServerIds.length ? selectedServerIds : undefined,
+            includeRemoved: showRemoved,
+          },
+        }
+      : { ids: Array.from(selectedIds) };
+
+    bulkResetTrust.mutate(params, {
       onSuccess: () => {
         clearSelection();
         setResetTrustConfirmOpen(false);
@@ -179,7 +218,19 @@ export function Users() {
     displayName: `${row.identityName ?? row.username} (${row.serverName})`,
     username: row.username,
     loginCapable: canLogin(row.role),
-    serverUsers: [],
+    serverUsers: getIdentityServers(row.identityServers, {
+      id: row.serverId,
+      name: row.serverName,
+      serverUserId: row.id,
+      removedAt: row.removedAt ? row.removedAt.toISOString() : null,
+    }).map((server) => ({
+      id: server.serverUserId ?? (server.id === row.serverId ? row.id : server.id),
+      serverId: server.id,
+      serverName: server.name,
+      removedAt:
+        server.removedAt ??
+        (server.id === row.serverId && row.removedAt ? row.removedAt.toISOString() : null),
+    })),
   });
 
   // Merge requires exactly two specific rows, not the selectAll-matching-filters mode.
@@ -223,6 +274,7 @@ export function Users() {
       loginCapable: identity.loginCapable,
       serverUsers: identity.serverUsers.map((su) => ({
         id: su.id,
+        serverId: su.serverId,
         serverName: su.serverName,
         removedAt: su.removedAt,
       })),
@@ -238,15 +290,21 @@ export function Users() {
     setMergeDialogOpen(true);
   };
 
+  const canResetTrust = authUser?.role === 'owner' || authUser?.role === 'admin';
+
   const bulkActions: BulkAction[] = [
-    {
-      key: 'reset-trust',
-      label: t('pages:users.resetTrustScore'),
-      icon: <RotateCcw className="h-4 w-4" />,
-      variant: 'default',
-      onClick: () => setResetTrustConfirmOpen(true),
-      isLoading: bulkResetTrust.isPending,
-    },
+    ...(canResetTrust
+      ? [
+          {
+            key: 'reset-trust',
+            label: t('pages:users.resetTrustScore'),
+            icon: <RotateCcw className="h-4 w-4" />,
+            variant: 'default' as const,
+            onClick: () => setResetTrustConfirmOpen(true),
+            isLoading: bulkResetTrust.isPending,
+          },
+        ]
+      : []),
     ...(isOwner
       ? [
           {
@@ -288,7 +346,7 @@ export function Users() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">{t('pages:users.title')}</h1>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <div className="relative w-64">
             <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
             <Input
@@ -297,6 +355,20 @@ export function Users() {
               onChange={(e) => setSearchFilter(e.target.value)}
               className="pl-9"
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="user-show-removed"
+              checked={showRemoved}
+              onCheckedChange={(checked) => {
+                setShowRemoved(checked);
+                setPage(1);
+                clearSelection();
+              }}
+            />
+            <Label htmlFor="user-show-removed" className="font-normal">
+              {t('pages:users.showRemoved')}
+            </Label>
           </div>
           <p className="text-muted-foreground text-sm">
             {t('common:count.user', { count: total })}
@@ -307,15 +379,14 @@ export function Users() {
       {isOwner && <MergeSuggestionsBanner onReview={handleReviewSuggestion} />}
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>{t('pages:users.allUsers')}</CardTitle>
+        <CardContent className="pt-6">
           {selectedCount > 0 && !selectAllMode && total > selectedCount && (
-            <Button variant="link" size="sm" onClick={selectAll} className="text-sm">
-              {t('pages:users.selectAllUsers', { count: total })}
-            </Button>
+            <div className="mb-4 flex justify-end">
+              <Button variant="link" size="sm" onClick={selectAll} className="text-sm">
+                {t('pages:users.selectAllUsers', { count: total })}
+              </Button>
+            </div>
           )}
-        </CardHeader>
-        <CardContent>
           {isLoading ? (
             <div className="space-y-4">
               {[...Array(5)].map((_, i) => (
@@ -328,6 +399,12 @@ export function Users() {
                 </div>
               ))}
             </div>
+          ) : isError ? (
+            <ErrorState
+              title={t('common:errors.somethingWentWrong')}
+              message={error?.message ?? t('common:errors.unexpectedError')}
+              onRetry={() => void refetch()}
+            />
           ) : (
             <DataTable
               columns={userColumns}

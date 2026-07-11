@@ -10,6 +10,7 @@ import {
   type SortingState,
   type PaginationState,
   type FilterFn,
+  type RowData,
 } from '@tanstack/react-table';
 
 export type { SortingState };
@@ -25,6 +26,16 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+
+declare module '@tanstack/react-table' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- names must match the augmented interface
+  interface ColumnMeta<TData extends RowData, TValue> {
+    // Extra classes applied to this column's header/cell, e.g. to collapse it
+    // on narrow viewports ('hidden md:table-cell').
+    headerClassName?: string;
+    cellClassName?: string;
+  }
+}
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -205,7 +216,8 @@ export function DataTable<TData, TValue>({
                     key={header.id}
                     className={cn(
                       compact ? 'px-3 py-2' : 'px-4 py-3',
-                      header.column.id === '_select' && 'w-12'
+                      header.column.id === '_select' && 'w-12',
+                      header.column.columnDef.meta?.headerClassName
                     )}
                   >
                     {header.isPlaceholder ? null : header.column.id === '_select' ? (
@@ -264,7 +276,8 @@ export function DataTable<TData, TValue>({
                         key={cell.id}
                         className={cn(
                           compact ? 'px-3 py-1.5' : 'px-4 py-3',
-                          cell.column.id === '_select' && 'w-12'
+                          cell.column.id === '_select' && 'w-12',
+                          cell.column.columnDef.meta?.cellClassName
                         )}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
