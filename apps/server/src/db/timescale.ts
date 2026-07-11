@@ -28,8 +28,11 @@ import { PRIMARY_MEDIA_TYPES_SQL_LITERAL } from '../constants/mediaTypes.js';
  * - 8: Fixed plays calculation in content_engagement_summary to align with 85% "watched"
  * - 9: Added max_progress_ms to daily_content_engagement for progress-based completion detection.
  *      Duration-based completion undercounted episodes/plays for users who skip intros/credits.
+ * - 10: Fixed top_shows_by_engagement.unique_viewers to count distinct people (server_users.user_id)
+ *       instead of distinct server accounts, so a merged person watching a show from two accounts
+ *       counts once - matching the date-filtered /shows path, which already counted by user_id.
  */
-const AGGREGATE_SCHEMA_VERSION = 9;
+const AGGREGATE_SCHEMA_VERSION = 10;
 
 /** Config for a continuous aggregate view */
 interface AggregateDefinition {
@@ -1688,7 +1691,9 @@ async function ensureEngagementViews(): Promise<void> {
       MAX(ses.year) AS year,
       SUM(ses.unique_episodes_watched) AS total_episode_views,
       SUM(ses.total_watch_hours) AS total_watch_hours,
-      COUNT(DISTINCT ses.server_user_id) AS unique_viewers,
+      -- Count distinct people, not distinct accounts: a merged identity watching
+      -- from two server accounts is one viewer.
+      COUNT(DISTINCT su.user_id) AS unique_viewers,
       SUM(ses.total_valid_sessions) AS total_valid_sessions,
       SUM(ses.total_all_sessions) AS total_all_sessions,
       ROUND(AVG(ses.unique_episodes_watched), 1) AS avg_episodes_per_viewer,
@@ -1718,6 +1723,7 @@ async function ensureEngagementViews(): Promise<void> {
         ),
       1) AS binge_score
     FROM show_engagement_summary ses
+    JOIN server_users su ON su.id = ses.server_user_id
     LEFT JOIN episode_continuity_stats ecs
       ON ses.server_user_id = ecs.server_user_id AND ses.show_title = ecs.show_title
     GROUP BY ses.show_title

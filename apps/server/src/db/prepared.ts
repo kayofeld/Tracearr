@@ -80,16 +80,18 @@ function createStatements() {
       .prepare('violations_count_since'),
 
     /**
-     * Count unique active users since a given date
+     * Count unique active identities (people, not accounts) since a given date
      * Used for: Dashboard "Active Users Today" metric
      * Called: Every dashboard page load
-     * Note: Excludes live TV and music tracks
+     * Note: Excludes live TV and music tracks. A merged person with accounts
+     * on multiple servers counts once.
      */
     uniqueUsersSince: db
       .select({
-        count: sql<number>`count(DISTINCT server_user_id)::int`,
+        count: sql<number>`count(DISTINCT ${serverUsers.userId})::int`,
       })
       .from(sessions)
+      .innerJoin(serverUsers, eq(sessions.serverUserId, serverUsers.id))
       .where(
         and(
           gte(sessions.startedAt, sql.placeholder('since')),

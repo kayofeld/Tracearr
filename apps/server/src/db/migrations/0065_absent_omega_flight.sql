@@ -1,0 +1,1 @@
+ALTER TABLE "user_merge_audits" ADD COLUMN "moved_identity_row_ids" jsonb;

@@ -40,3 +40,25 @@ describe('api client 401 handling', () => {
     expect(authEvents).toBe(1);
   });
 });
+
+describe('api.violations.list query params', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends serverUserId, not userId, so a single account is scoped by the server', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [], page: 1, pageSize: 10, total: 0, totalPages: 0 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+
+    const accountId = 'abc-123';
+    await api.violations.list({ serverUserId: accountId, page: 2, pageSize: 10 });
+
+    const requestedUrl = new URL(fetchSpy.mock.calls[0]?.[0] as string, 'http://localhost');
+    expect(requestedUrl.searchParams.get('serverUserId')).toBe(accountId);
+    expect(requestedUrl.searchParams.has('userId')).toBe(false);
+  });
+});

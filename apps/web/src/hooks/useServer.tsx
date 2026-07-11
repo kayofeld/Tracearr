@@ -32,8 +32,8 @@ interface ServerContextValue {
   /**
    * @deprecated Use `selectedServerIds` and the multi-server query pattern.
    * Returns null when more than one server is selected. Excluded pages
-   * (/users, /stats/users, /settings/*) still consume this; everything
-   * else should migrate to `selectedServerIds`.
+   * (/stats/users, /settings/*) still consume this; everything else
+   * should migrate to `selectedServerIds`.
    */
   selectedServerId: string | null;
   /**

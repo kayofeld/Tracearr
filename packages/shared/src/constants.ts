@@ -44,6 +44,21 @@ export const RULE_DISPLAY_NAMES = {
   account_inactivity: 'Account Inactivity',
 } as const;
 
+// Condition fields whose evaluators are identity-aware (see belongsToIdentity in
+// services/rules/evaluators/index.ts): they aggregate across every server_user id
+// belonging to the same identity when the evaluation context carries
+// identityServerUserIds. The UI (RuleBuilder) offers enforceAcrossServers as soon
+// as ANY condition on the rule uses a field from this set, not only when every
+// field does - one identity-aware condition is enough for cross-server action
+// reach to make sense for the rule as a whole.
+export const IDENTITY_AWARE_CONDITION_FIELDS = [
+  'concurrent_streams',
+  'active_session_distance_km',
+  'travel_speed_kmh',
+  'unique_ips_in_window',
+  'unique_devices_in_window',
+] as const;
+
 // Severity levels
 export const SEVERITY_LEVELS = {
   low: { label: 'Low', priority: 1 },

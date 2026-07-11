@@ -88,9 +88,20 @@ export interface ServerUserWithIdentity extends ServerUser {
   identityName: string | null;
   role: UserRole; // From linked User identity
   // The identity's server memberships, scoped to servers the caller can access.
-  // Length > 1 means this identity is merged across servers.
+  // Length > 1 means this identity is merged across servers. serverUserId/removedAt
+  // describe the identity's account on that server.
   // Only populated by the list endpoint; absent on detail endpoints (/users/:id, /full).
-  identityServers?: { id: string; name: string }[];
+  identityServers?: {
+    id: string;
+    name: string;
+    serverUserId?: string;
+    removedAt?: string | null;
+  }[];
+  // The person's overall trust score across all their server accounts
+  // (users.aggregateTrustScore), distinct from `trustScore` which is just
+  // this representative account's own score.
+  // Only populated by the list endpoint; absent on detail endpoints (/users/:id, /full).
+  identityTrustScore?: number;
 }
 
 // Server User detail with stats - returned by GET /users/:id
@@ -110,6 +121,8 @@ export interface ViolationSummary {
     type: string;
   };
   serverUserId: string;
+  serverId: string;
+  serverName: string;
   sessionId: string | null;
   mediaTitle: string | null;
   severity: string;
@@ -177,6 +190,10 @@ export interface UserMergeResult {
     serverId: string;
   }[];
   wasSameServerCombine: boolean;
+  // Names of source-account rules dropped because the target already had a
+  // rule with the same name on a same-server combine (target's version wins).
+  // Empty when nothing conflicted.
+  droppedRuleNames: string[];
 }
 
 export interface ServerUserSplitResult {
@@ -350,6 +367,9 @@ export const DEFAULT_STREAM_DETAILS: StreamDetailFields = {
 export interface Session extends StreamDetailFields {
   id: string;
   serverId: string;
+  // Only populated by identity/multi-server-aware queries (e.g. the user
+  // detail endpoints); absent elsewhere.
+  serverName?: string;
   serverUserId: string;
   sessionKey: string;
   state: SessionState;
@@ -509,6 +529,15 @@ export interface Rule {
   conditions?: RuleConditions | null;
   actions?: RuleActions | null;
   serverId?: string | null;
+  // Identity (person) scope - applies to every server_user of this identity.
+  // At most one of serverId, serverUserId, userId is ever set.
+  userId?: string | null;
+  // Display name of the identity userId points at, joined in by the API.
+  identityName?: string | null;
+  // Opt-in: when true and the rule fired from an identity-aware evaluation,
+  // actions may target sessions across every server the identity has an
+  // account on instead of just the triggering account. Defaults to false.
+  enforceAcrossServers?: boolean;
   // Common fields
   serverUserId: string | null;
   isActive: boolean;
@@ -709,6 +738,10 @@ export interface RuleV2 {
   name: string;
   description: string | null;
   serverId: string | null;
+  // Identity (person) scope - applies to every server_user of this identity.
+  userId: string | null;
+  // Opt-in cross-server enforcement; see the field of the same name on Rule.
+  enforceAcrossServers: boolean;
   isActive: boolean;
   severity: ViolationSeverity;
   conditions: RuleConditions;
@@ -772,6 +805,10 @@ export interface ViolationWithDetails extends Violation {
   rule: Pick<Rule, 'id' | 'name'> & { type: RuleType | null };
   user: Pick<ServerUser, 'id' | 'username' | 'thumbUrl' | 'serverId'> & {
     identityName: string | null;
+    // The person's identity id (users.id), for identity-level filtering.
+    // Always populated by GET /violations; optional here so websocket
+    // broadcast payloads built without a fresh identity lookup still type-check.
+    userId?: string;
   };
   server?: Pick<Server, 'id' | 'name' | 'type'>;
   session?: ViolationSessionInfo;
@@ -882,16 +919,23 @@ export interface QualityStats {
 }
 
 export interface TopUserStats {
+  /** Identity (person) id - plays/watch time are summed across all their accounts */
+  userId: string;
+  /** Representative account id, used for navigation (routes to /users/:id) */
   serverUserId: string;
   username: string;
   identityName: string | null;
   thumbUrl: string | null;
+  /** Representative account's server, used for avatar proxy */
   serverId: string | null;
+  /** Identity-level aggregate trust score, not the representative account's own score */
   trustScore: number;
   playCount: number;
   watchTimeHours: number;
   topMediaType: string | null; // "movie", "episode", etc.
   topContent: string | null; // Most watched show/movie name
+  /** Every server this identity has an account on, scoped to accessible servers */
+  identityServers?: { id: string; name: string }[];
 }
 
 export interface TopContentStats {
@@ -1615,6 +1659,7 @@ export interface TerminationLogWithDetails {
   id: string;
   sessionId: string;
   serverId: string;
+  serverName: string | null; // Joined from servers table
   serverUserId: string;
   trigger: TerminationTrigger;
   triggeredByUserId: string | null;
@@ -2087,8 +2132,9 @@ export interface BandwidthTopUser {
   identityName: string | null;
   /** Avatar URL from server user */
   thumbUrl: string | null;
+  /** Representative account id, used for navigation (routes to /users/:id) */
   serverUserId: string;
-  /** Server this row belongs to - same human on two servers = two rows */
+  /** Representative account's server - a merged identity is one row, bytes summed across servers */
   serverId: string;
   /** Total data transferred in bytes */
   totalBytes: number;

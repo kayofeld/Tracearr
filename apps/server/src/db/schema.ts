@@ -137,7 +137,8 @@ export const users = pgTable(
     banReason: text('ban_reason'),
     banExpires: timestamp('ban_expires', { withTimezone: true }),
 
-    // Aggregated metrics (cached, updated by triggers)
+    // Aggregated metrics (cached, recomputed in-app by recalculateAggregateTrustScore
+    // after every serverUsers.trustScore write - no database trigger exists)
     aggregateTrustScore: integer('aggregate_trust_score').notNull().default(100),
     totalViolations: integer('total_violations').notNull().default(0),
 
@@ -404,9 +405,16 @@ export const rules = pgTable(
     conditions: jsonb('conditions').$type<RuleConditions>(),
     actions: jsonb('actions').$type<RuleActions>(),
     severity: varchar('severity', { length: 20 }).notNull().default('warning'),
-    // Scope
+    // Scope - at most one of serverId, serverUserId, userId is ever set
+    // (enforced in the Zod schema/route validation, not a DB constraint - this
+    // table has no other CHECK constraints today).
     serverId: uuid('server_id').references(() => servers.id, { onDelete: 'cascade' }),
     serverUserId: uuid('server_user_id').references(() => serverUsers.id, { onDelete: 'cascade' }),
+    // Identity (person) scope: applies to every server_user of this identity.
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    // Opt-in cross-server enforcement for identity-aware rules. Defaults false
+    // so every existing rule keeps today's single-account behavior.
+    enforceAcrossServers: boolean('enforce_across_servers').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -415,6 +423,7 @@ export const rules = pgTable(
     index('rules_active_idx').on(table.isActive),
     index('rules_server_id_idx').on(table.serverId),
     index('rules_server_user_id_idx').on(table.serverUserId),
+    index('rules_user_id_idx').on(table.userId),
   ]
 );
 
@@ -698,6 +707,16 @@ export const userMergeAudits = pgTable(
       email: string | null;
       thumbnail: string | null;
       role: string;
+    }>(),
+    // Which plex_accounts / mobile_sessions / mobile_tokens rows repointIdentityRows
+    // moved off the source identity during this merge, so a later split can move
+    // exactly those rows back onto the restored identity. Null on audit rows written
+    // before this column existed; split treats null the same as "nothing recorded"
+    // and leaves those rows on the target, matching the pre-existing behavior.
+    movedIdentityRowIds: jsonb('moved_identity_row_ids').$type<{
+      plexAccountIds: string[];
+      mobileSessionIds: string[];
+      mobileTokenIds: string[];
     }>(),
     undoneAt: timestamp('undone_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

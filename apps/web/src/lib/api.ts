@@ -518,17 +518,35 @@ class ApiClient {
 
   // Users
   users = {
-    list: (params?: { page?: number; pageSize?: number; serverId?: string }) => {
+    list: (params?: {
+      page?: number;
+      pageSize?: number;
+      serverId?: string;
+      serverIds?: string[];
+      includeRemoved?: boolean;
+      search?: string;
+    }) => {
       const searchParams = new URLSearchParams();
       if (params?.page) searchParams.set('page', String(params.page));
       if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
       if (params?.serverId) searchParams.set('serverId', params.serverId);
+      if (params?.serverIds?.length) {
+        for (const id of params.serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
+      if (params?.includeRemoved) searchParams.set('includeRemoved', 'true');
+      if (params?.search) searchParams.set('search', params.search);
       return this.request<PaginatedResponse<ServerUserWithIdentity>>(
         `/users?${searchParams.toString()}`
       );
     },
     get: (id: string) => this.request<ServerUserDetail>(`/users/${id}`),
-    getFull: (id: string) => this.request<ServerUserFullDetail>(`/users/${id}/full`),
+    getFull: (id: string, params?: { scope?: 'identity' }) => {
+      const query = new URLSearchParams();
+      if (params?.scope) query.set('scope', params.scope);
+      return this.request<ServerUserFullDetail>(`/users/${id}/full?${query.toString()}`);
+    },
     update: (id: string, data: { trustScore?: number }) =>
       this.request<ServerUserWithIdentity>(`/users/${id}`, {
         method: 'PATCH',
@@ -539,28 +557,43 @@ class ApiClient {
         method: 'PATCH',
         body: JSON.stringify(data),
       }),
-    sessions: (id: string, params?: { page?: number; pageSize?: number }) => {
+    sessions: (id: string, params?: { page?: number; pageSize?: number; scope?: 'identity' }) => {
       const query = new URLSearchParams(params as Record<string, string>).toString();
       return this.request<PaginatedResponse<Session>>(`/users/${id}/sessions?${query}`);
     },
-    locations: async (id: string) => {
-      const response = await this.request<{ data: UserLocation[] }>(`/users/${id}/locations`);
+    locations: async (id: string, params?: { scope?: 'identity' }) => {
+      const query = new URLSearchParams();
+      if (params?.scope) query.set('scope', params.scope);
+      const response = await this.request<{ data: UserLocation[] }>(
+        `/users/${id}/locations?${query.toString()}`
+      );
       return response.data;
     },
-    devices: async (id: string) => {
-      const response = await this.request<{ data: UserDevice[] }>(`/users/${id}/devices`);
+    devices: async (id: string, params?: { scope?: 'identity' }) => {
+      const query = new URLSearchParams();
+      if (params?.scope) query.set('scope', params.scope);
+      const response = await this.request<{ data: UserDevice[] }>(
+        `/users/${id}/devices?${query.toString()}`
+      );
       return response.data;
     },
-    terminations: (id: string, params?: { page?: number; pageSize?: number }) => {
+    terminations: (
+      id: string,
+      params?: { page?: number; pageSize?: number; scope?: 'identity' }
+    ) => {
       const query = new URLSearchParams(params as Record<string, string>).toString();
       return this.request<PaginatedResponse<TerminationLogWithDetails>>(
         `/users/${id}/terminations?${query}`
       );
     },
-    bulkResetTrust: (ids: string[]) =>
+    bulkResetTrust: (params: {
+      ids?: string[];
+      selectAll?: boolean;
+      filters?: { serverId?: string; serverIds?: string[]; includeRemoved?: boolean };
+    }) =>
       this.request<{ success: boolean; updated: number }>('/users/bulk/reset-trust', {
         method: 'POST',
-        body: JSON.stringify({ ids }),
+        body: JSON.stringify(params),
       }),
     merge: (
       sourceUserId: string,
@@ -765,7 +798,9 @@ class ApiClient {
     list: (params?: {
       page?: number;
       pageSize?: number;
+      serverUserId?: string;
       userId?: string;
+      userIds?: string[];
       severity?: string;
       acknowledged?: boolean;
       serverIds?: string[];
@@ -775,7 +810,13 @@ class ApiClient {
       const searchParams = new URLSearchParams();
       if (params?.page) searchParams.set('page', String(params.page));
       if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+      if (params?.serverUserId) searchParams.set('serverUserId', params.serverUserId);
       if (params?.userId) searchParams.set('userId', params.userId);
+      if (params?.userIds?.length) {
+        for (const id of params.userIds) {
+          searchParams.append('userIds', id);
+        }
+      }
       if (params?.severity) searchParams.set('severity', params.severity);
       if (params?.acknowledged !== undefined)
         searchParams.set('acknowledged', String(params.acknowledged));
@@ -799,7 +840,13 @@ class ApiClient {
     bulkAcknowledge: (params: {
       ids?: string[];
       selectAll?: boolean;
-      filters?: { serverIds?: string[]; severity?: string; acknowledged?: boolean };
+      filters?: {
+        serverIds?: string[];
+        severity?: string;
+        acknowledged?: boolean;
+        userId?: string;
+        userIds?: string[];
+      };
     }) =>
       this.request<{ success: boolean; acknowledged: number }>('/violations/bulk/acknowledge', {
         method: 'POST',
@@ -808,7 +855,13 @@ class ApiClient {
     bulkDismiss: (params: {
       ids?: string[];
       selectAll?: boolean;
-      filters?: { serverIds?: string[]; severity?: string; acknowledged?: boolean };
+      filters?: {
+        serverIds?: string[];
+        severity?: string;
+        acknowledged?: boolean;
+        userId?: string;
+        userIds?: string[];
+      };
     }) =>
       this.request<{ success: boolean; dismissed: number }>('/violations/bulk', {
         method: 'DELETE',
@@ -923,15 +976,15 @@ class ApiClient {
         transcodePercent: number;
       }>(`/stats/quality?${params.toString()}`);
     },
-    topUsers: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    topUsers: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       const response = await this.request<{ data: TopUserStats[] }>(
         `/stats/top-users?${params.toString()}`
       );
       return response.data;
     },
-    topContent: async (timeRange?: StatsTimeRange, serverId?: string) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+    topContent: async (timeRange?: StatsTimeRange, serverIds?: string[]) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       const response = await this.request<{
         movies: {
           title: string;
@@ -982,13 +1035,13 @@ class ApiClient {
     },
     shows: async (
       timeRange?: StatsTimeRange,
-      serverId?: string,
+      serverIds?: string[],
       options?: {
         limit?: number;
         orderBy?: 'totalEpisodeViews' | 'totalWatchHours' | 'bingeScore' | 'uniqueViewers';
       }
     ) => {
-      const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       if (options?.limit) params.set('limit', String(options.limit));
       if (options?.orderBy) params.set('orderBy', options.orderBy);
       return this.request<ShowStatsResponse>(`/stats/shows?${params.toString()}`);

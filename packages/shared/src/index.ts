@@ -291,6 +291,8 @@ export {
   updateUserSchema,
   updateUserIdentitySchema,
   userIdParamSchema,
+  identityScopeQuerySchema,
+  identityScopedPaginationSchema,
   mergeUsersBodySchema,
   mergeUserParamSchema,
   splitServerUserParamSchema,
@@ -315,6 +317,8 @@ export {
   // Rule V2
   createRuleV2Schema,
   updateRuleV2Schema,
+  hasAtMostOneScope,
+  RULE_SCOPE_ERROR_MESSAGE,
   // Bulk operations
   bulkUpdateRulesSchema,
   bulkDeleteRulesSchema,
@@ -371,6 +375,7 @@ export type {
   UpdateServerInput,
   UpdateUserInput,
   UpdateUserIdentityInput,
+  IdentityScopeQuery,
   MergeUsersBody,
   SessionQueryInput,
   HistoryQueryInput,
@@ -423,6 +428,7 @@ export type {
 export {
   RULE_DEFAULTS,
   RULE_DISPLAY_NAMES,
+  IDENTITY_AWARE_CONDITION_FIELDS,
   SEVERITY_LEVELS,
   getSeverityPriority,
   type SeverityPriority,

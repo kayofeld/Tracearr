@@ -74,6 +74,10 @@ export const uuidSchema = z.uuid();
 export const serverIdsQuerySchema = z
   .union([uuidSchema.transform((id) => [id]), z.array(uuidSchema)])
   .optional();
+// Same shape as serverIdsQuerySchema, used for identity (users.id) filters
+export const userIdsQuerySchema = z
+  .union([uuidSchema.transform((id) => [id]), z.array(uuidSchema)])
+  .optional();
 export const paginationSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
@@ -164,6 +168,18 @@ export type UpdateUserIdentityInput = z.infer<typeof updateUserIdentitySchema>;
 
 export const userIdParamSchema = z.object({
   id: uuidSchema,
+});
+
+// scope=identity expands a per-account query to every account the caller can
+// access under the same person (identity). Absent = today's single-account
+// behavior, unchanged.
+export const identityScopeQuerySchema = z.object({
+  scope: z.enum(['identity']).optional(),
+});
+export type IdentityScopeQuery = z.infer<typeof identityScopeQuerySchema>;
+
+export const identityScopedPaginationSchema = paginationSchema.extend({
+  scope: z.enum(['identity']).optional(),
 });
 
 export const mergeUsersBodySchema = z.object({
@@ -549,29 +565,53 @@ export const ruleActionsSchema = z.object({
 
 export const violationSeveritySchema = z.enum(['low', 'warning', 'high']);
 
+// A rule may be scoped to at most one of server, account, or person.
+export function hasAtMostOneScope(data: {
+  serverId?: string | null;
+  serverUserId?: string | null;
+  userId?: string | null;
+}) {
+  return [data.serverId, data.serverUserId, data.userId].filter((v) => v != null).length <= 1;
+}
+
+export const RULE_SCOPE_ERROR_MESSAGE =
+  'A rule can only be scoped to one of server, account, or person';
+
+const scopeRefinement = {
+  message: RULE_SCOPE_ERROR_MESSAGE,
+} as const;
+
 // Create rule V2 schema
-export const createRuleV2Schema = z.object({
-  name: z.string().min(1).max(100),
-  description: z.string().max(500).nullable().optional(),
-  serverId: uuidSchema.nullable().optional(),
-  serverUserId: uuidSchema.nullable().optional(),
-  isActive: z.boolean().default(true),
-  severity: violationSeveritySchema.default('warning'),
-  conditions: ruleConditionsSchema,
-  actions: ruleActionsSchema,
-});
+export const createRuleV2Schema = z
+  .object({
+    name: z.string().min(1).max(100),
+    description: z.string().max(500).nullable().optional(),
+    serverId: uuidSchema.nullable().optional(),
+    serverUserId: uuidSchema.nullable().optional(),
+    userId: uuidSchema.nullable().optional(),
+    enforceAcrossServers: z.boolean().optional().default(false),
+    isActive: z.boolean().default(true),
+    severity: violationSeveritySchema.default('warning'),
+    conditions: ruleConditionsSchema,
+    actions: ruleActionsSchema,
+  })
+  .refine(hasAtMostOneScope, scopeRefinement);
 
 // Update rule V2 schema
-export const updateRuleV2Schema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  description: z.string().max(500).nullable().optional(),
-  serverId: uuidSchema.nullable().optional(),
-  serverUserId: uuidSchema.nullable().optional(),
-  isActive: z.boolean().optional(),
-  severity: violationSeveritySchema.optional(),
-  conditions: ruleConditionsSchema.optional(),
-  actions: ruleActionsSchema.optional(),
-});
+export const updateRuleV2Schema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    description: z.string().max(500).nullable().optional(),
+    serverId: uuidSchema.nullable().optional(),
+    serverUserId: uuidSchema.nullable().optional(),
+    userId: uuidSchema.nullable().optional(),
+    enforceAcrossServers: z.boolean().optional(),
+    isActive: z.boolean().optional(),
+    severity: violationSeveritySchema.optional(),
+    conditions: ruleConditionsSchema.optional(),
+    actions: ruleActionsSchema.optional(),
+  })
+  .refine(hasAtMostOneScope, scopeRefinement);
 
 // Bulk operations schemas
 export const bulkUpdateRulesSchema = z.object({
@@ -598,6 +638,11 @@ export const violationQuerySchema = paginationSchema.extend({
   serverId: uuidSchema.optional(),
   serverIds: serverIdsQuerySchema,
   serverUserId: uuidSchema.optional(),
+  // Identity-level filter: matches violations from every server account under
+  // this person (users.id), scoped to the caller's accessible servers.
+  // userIds is the multi-select form; userId stays supported for back-compat.
+  userId: uuidSchema.optional(),
+  userIds: userIdsQuerySchema,
   ruleId: uuidSchema.optional(),
   severity: z.enum(['low', 'warning', 'high']).optional(),
   acknowledged: booleanStringSchema.optional(),
@@ -924,6 +969,7 @@ export const showsQuerySchema = z
     startDate: z.iso.datetime().optional(),
     endDate: z.iso.datetime().optional(),
     serverId: uuidSchema.optional(),
+    serverIds: serverIdsQuerySchema,
     timezone: timezoneSchema,
     limit: z.coerce.number().int().positive().max(100).default(20),
     orderBy: z
