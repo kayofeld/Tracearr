@@ -393,8 +393,8 @@ importers:
         specifier: ^4.8.3
         version: 4.8.3
       stream-json:
-        specifier: ^2.1.0
-        version: 2.1.0
+        specifier: ^3.0.0
+        version: 3.5.0
       undici:
         specifier: ^8.2.0
         version: 8.5.0
@@ -8872,14 +8872,16 @@ packages:
     resolution: {integrity: sha512-uyQK/mx5QjHun80FLJTfaWE7JtwfRMKBLkMne6udYOmvH0CawotVa7TfgYHzAnpphn4+TweIx1QKMnRIbipmUg==}
     engines: {node: '>= 0.10.0'}
 
-  stream-chain@3.6.1:
-    resolution: {integrity: sha512-M4BQpNPI71uumkVXjl4y+mIormQXdo4R0pSR23mcLbn6D+kpvu7Kx2g1hf0jRB76Zb1IT1M06OIGghMTAtZdyQ==}
+  stream-chain@4.2.5:
+    resolution: {integrity: sha512-Wtyq3bNE3ggLR0v2vftqvuhltym3WbZAkZpfIrkr5F/6vpeUmWmwTgXa16zD87gpahwJ/Qulq3zVfUlgIc0J2A==}
+    engines: {node: '>=22'}
 
   stream-http@3.2.0:
     resolution: {integrity: sha512-Oq1bLqisTyK3TSCXpPbT4sdeYNdmyZJv1LxpEm2vu1ZhK89kSE5YXwZc3cWk0MagGaKriBh9mCFbVGtO+vY29A==}
 
-  stream-json@2.1.0:
-    resolution: {integrity: sha512-9gV/ywtebMn3DdKnNKYCb9iESvgR1dHbucNV+bRGvdvy+jV4c9FFgYKmENhpKv58jSwvs90Wk80RhfKk1KxHPg==}
+  stream-json@3.5.0:
+    resolution: {integrity: sha512-dobB7zipGW8o11PvdRljQSWuyMxifADLvoHeA4elwNWOTbZo6+BlNa+P6aCq7Y9jRiWTy2Ucu2xSv0Y2/T+/kQ==}
+    engines: {node: '>=22'}
 
   stream-shift@1.0.3:
     resolution: {integrity: sha512-76ORR0DO1o1hlKwTbi/DM3EXWGf3ZJYO8cXX5RJwnul2DEg2oyoZyjLNoQM8WsvZiFKCRfC1O0J7iCvie3RZmQ==}
@@ -18880,7 +18882,7 @@ snapshots:
 
   stream-buffers@2.2.0: {}
 
-  stream-chain@3.6.1: {}
+  stream-chain@4.2.5: {}
 
   stream-http@3.2.0:
     dependencies:
@@ -18889,9 +18891,9 @@ snapshots:
       readable-stream: 3.6.2
       xtend: 4.0.2
 
-  stream-json@2.1.0:
+  stream-json@3.5.0:
     dependencies:
-      stream-chain: 3.6.1
+      stream-chain: 4.2.5
 
   stream-shift@1.0.3: {}
 
