@@ -38,7 +38,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Cache Turborepo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
@@ -87,7 +87,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Cache Turborepo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
@@ -129,7 +129,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Cache Turborepo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
@@ -159,7 +159,7 @@ jobs:
 
     services:
       timescale:
-        image: timescale/timescaledb:2.25.0-pg16@sha256:9e9f50161784dc57d3f547b89ded4af73553f9acb4677345ed05f45af7c7f664
+        image: timescale/timescaledb:2.28.2-pg16@sha256:ba149561ad4ddff5940d6eb0a0df60aefd1355cee1a450928f271267038fc888
         ports:
           - 5433:5432
         env:
@@ -199,7 +199,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Cache Turborepo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
@@ -242,7 +242,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Cache Turborepo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
@@ -270,7 +270,7 @@ jobs:
 
       - name: Report coverage to PR
         if: github.event_name == 'pull_request'
-        uses: davelosert/vitest-coverage-report-action@02f3c2e641286b7fa308cd3e430783103ce6103b # v2
+        uses: davelosert/vitest-coverage-report-action@3c054a2d2e2ca45446417ad5d6d5eb33092af8f1 # v2
         with:
           working-directory: apps/server
           vite-config-path: vitest.config.ts
@@ -288,7 +288,7 @@ jobs:
 
     services:
       timescale:
-        image: timescale/timescaledb:2.25.0-pg16@sha256:9e9f50161784dc57d3f547b89ded4af73553f9acb4677345ed05f45af7c7f664
+        image: timescale/timescaledb:2.28.2-pg16@sha256:ba149561ad4ddff5940d6eb0a0df60aefd1355cee1a450928f271267038fc888
         ports:
           - 5433:5432
         env:
@@ -328,7 +328,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Cache Turborepo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
@@ -394,7 +394,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Cache Turborepo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
