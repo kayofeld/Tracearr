@@ -123,8 +123,43 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
       // Query from library_stats_daily continuous aggregate.
       // GROUP BY (day, server_id) so every row carries a serverId discriminator.
       // The frontend aggregates across servers for the stacked view.
+      //
+      // A server that skips a sync day has no row in daily_by_server for that day.
+      // If we only emitted the rows that exist, summing across servers on the
+      // frontend would dip on days a server didn't report - not because the
+      // library shrank, just because one server's contribution went missing.
+      // `grid` covers every (day, server) combo that's actually in scope - the
+      // union of days any scoped server reported, crossed with the scoped
+      // servers - and `filled` carries each server's last known totals forward
+      // into its own gaps. For a single server this grid is identical to that
+      // server's own days, so single-server output is unchanged.
       const result = await db.execute(sql`
-        WITH daily_by_server AS (
+        WITH day_scope AS (
+          SELECT DISTINCT lsd.day::date AS day
+          FROM library_stats_daily lsd
+          WHERE lsd.day >= ${effectiveStartDate.toISOString()}::date
+            AND lsd.day <= ${endDate.toISOString()}::date
+            ${serverFilter}
+            ${libraryFilter}
+        ),
+        server_bounds AS (
+          -- Bound each server's grid to start at its own first reported day, so a
+          -- server never gets phantom zero rows (then a fake "jump" on its real
+          -- first day) for dates before it ever synced.
+          SELECT lsd.server_id, MIN(lsd.day)::date AS first_day
+          FROM library_stats_daily lsd
+          WHERE lsd.day >= ${effectiveStartDate.toISOString()}::date
+            AND lsd.day <= ${endDate.toISOString()}::date
+            ${serverFilter}
+            ${libraryFilter}
+          GROUP BY lsd.server_id
+        ),
+        grid AS (
+          SELECT ds.day, sb.server_id
+          FROM day_scope ds
+          JOIN server_bounds sb ON ds.day >= sb.first_day
+        ),
+        daily_by_server AS (
           SELECT
             lsd.day::date AS day,
             lsd.server_id,
@@ -137,6 +172,28 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
             ${serverFilter}
             ${libraryFilter}
           GROUP BY lsd.day::date, lsd.server_id
+        ),
+        filled AS (
+          SELECT
+            g.day,
+            g.server_id,
+            COALESCE(dbs.movies, (
+              SELECT d2.movies FROM daily_by_server d2
+              WHERE d2.server_id = g.server_id AND d2.day < g.day
+              ORDER BY d2.day DESC LIMIT 1
+            ), 0)::int AS movies,
+            COALESCE(dbs.episodes, (
+              SELECT d2.episodes FROM daily_by_server d2
+              WHERE d2.server_id = g.server_id AND d2.day < g.day
+              ORDER BY d2.day DESC LIMIT 1
+            ), 0)::int AS episodes,
+            COALESCE(dbs.music, (
+              SELECT d2.music FROM daily_by_server d2
+              WHERE d2.server_id = g.server_id AND d2.day < g.day
+              ORDER BY d2.day DESC LIMIT 1
+            ), 0)::int AS music
+          FROM grid g
+          LEFT JOIN daily_by_server dbs ON dbs.day = g.day AND dbs.server_id = g.server_id
         ),
         with_additions AS (
           SELECT
@@ -154,7 +211,7 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
             GREATEST(0,
               music - COALESCE(LAG(music) OVER (PARTITION BY server_id ORDER BY day), music)
             )::int AS music_adds
-          FROM daily_by_server
+          FROM filled
         )
         SELECT
           day::text,

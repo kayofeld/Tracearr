@@ -100,18 +100,20 @@ export function useQualityStats(timeRange?: StatsTimeRange, serverIds?: string[]
   });
 }
 
-export function useTopUsers(timeRange?: StatsTimeRange, serverId?: string | null) {
+export function useTopUsers(timeRange?: StatsTimeRange, serverIds?: string[]) {
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'top-users', timeRange, serverId],
-    queryFn: () => api.stats.topUsers(timeRange ?? { period: 'month' }, serverId ?? undefined),
+    queryKey: ['stats', 'top-users', timeRange, serverIdsKey],
+    queryFn: () => api.stats.topUsers(timeRange ?? { period: 'month' }, serverIds),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
 
-export function useTopContent(timeRange?: StatsTimeRange, serverId?: string | null) {
+export function useTopContent(timeRange?: StatsTimeRange, serverIds?: string[]) {
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'top-content', timeRange, serverId],
-    queryFn: () => api.stats.topContent(timeRange ?? { period: 'month' }, serverId ?? undefined),
+    queryKey: ['stats', 'top-content', timeRange, serverIdsKey],
+    queryFn: () => api.stats.topContent(timeRange ?? { period: 'month' }, serverIds),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
@@ -150,13 +152,13 @@ export interface ShowStatsOptions {
 
 export function useShowStats(
   timeRange?: StatsTimeRange,
-  serverId?: string | null,
+  serverIds?: string[],
   options?: ShowStatsOptions
 ) {
+  const serverIdsKey = serverIds?.length ? [...serverIds].sort().join(',') : 'all';
   return useQuery({
-    queryKey: ['stats', 'shows', timeRange, serverId, options],
-    queryFn: () =>
-      api.stats.shows(timeRange ?? { period: 'month' }, serverId ?? undefined, options),
+    queryKey: ['stats', 'shows', timeRange, serverIdsKey, options],
+    queryFn: () => api.stats.shows(timeRange ?? { period: 'month' }, serverIds, options),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }

@@ -10,6 +10,7 @@ import { useLibraryStatus } from '@/hooks/queries';
 import { useSocket } from '@/hooks/useSocket';
 import { WS_EVENTS } from '@tracearr/shared';
 import type { MaintenanceJobProgress } from '@tracearr/shared';
+import { ServerBadge } from '@/components/server';
 
 interface LibraryEmptyStateProps {
   /** Called after sync or backfill completes to refetch page data */
@@ -19,26 +20,26 @@ interface LibraryEmptyStateProps {
 /**
  * Unified empty state component for library pages.
  *
- * Automatically detects the current state:
+ * Automatically detects the current state per selected server:
  * 1. Library not synced -> Shows sync button
  * 2. Library synced but needs backfill -> Shows backfill button
  * 3. Backfill running -> Shows progress
  *
- * This replaces LibraryNotSyncedState and LibraryBackfillState.
+ * With a single server selected this renders the same states as before.
+ * With multiple servers selected (this component only renders when every
+ * selected server is unready) it lists each server with its own state and
+ * its own Sync Now action. The historical-data backfill is a single global
+ * job shared by every server, so it keeps one button for all of them.
  */
 export function LibraryEmptyState({ onComplete }: LibraryEmptyStateProps) {
-  const { selectedServerId } = useServer();
+  const { selectedServerIds, selectedServers } = useServer();
   const queryClient = useQueryClient();
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
   const [isStartingBackfill, setIsStartingBackfill] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState<MaintenanceJobProgress | null>(null);
 
-  // Get library status to determine which state to show (single-server; wraps into array for hook)
-  const statusResult = useLibraryStatus(selectedServerId ? [selectedServerId] : []);
-  const status = {
-    isLoading: statusResult.isLoading,
-    data: selectedServerId ? statusResult.byServer.get(selectedServerId)?.data : undefined,
-  };
+  // Fan out status across every selected server (works for one or many).
+  const statusResult = useLibraryStatus(selectedServerIds);
 
   // Listen for maintenance progress via WebSocket
   const { socket } = useSocket();
@@ -73,15 +74,15 @@ export function LibraryEmptyState({ onComplete }: LibraryEmptyStateProps) {
     };
   }, [socket, queryClient, onComplete]);
 
-  const handleSync = async () => {
-    if (!selectedServerId) {
+  const handleSync = async (serverId: string | undefined) => {
+    if (!serverId) {
       toast.error('No server selected');
       return;
     }
 
-    setIsSyncing(true);
+    setSyncingIds((prev) => new Set(prev).add(serverId));
     try {
-      await api.servers.sync(selectedServerId);
+      await api.servers.sync(serverId);
       toast.success('Library sync started', {
         description: 'This may take a few minutes depending on library size.',
       });
@@ -96,7 +97,11 @@ export function LibraryEmptyState({ onComplete }: LibraryEmptyStateProps) {
         description: err instanceof Error ? err.message : 'Please try again.',
       });
     } finally {
-      setIsSyncing(false);
+      setSyncingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(serverId);
+        return next;
+      });
     }
   };
 
@@ -118,7 +123,7 @@ export function LibraryEmptyState({ onComplete }: LibraryEmptyStateProps) {
   };
 
   // Show loading state while checking status
-  if (status.isLoading) {
+  if (statusResult.isLoading) {
     return (
       <div className="rounded-xl border border-dashed p-8 text-center">
         <Loader2 className="text-muted-foreground/50 mx-auto h-12 w-12 animate-spin" />
@@ -127,11 +132,15 @@ export function LibraryEmptyState({ onComplete }: LibraryEmptyStateProps) {
     );
   }
 
-  const { isSynced, isSyncRunning, needsBackfill, isBackfillRunning, backfillDays } =
-    status.data ?? {};
+  // The backfill job is global (not per-server), so its running state is the
+  // same for every server - one entry is enough to check.
+  const firstStatus = selectedServerIds.length
+    ? statusResult.byServer.get(selectedServerIds[0] ?? '')?.data
+    : undefined;
+  const isBackfillRunningGlobally = firstStatus?.isBackfillRunning ?? false;
 
   // Show backfill progress
-  if (isBackfillRunning || backfillProgress?.status === 'running') {
+  if (isBackfillRunningGlobally || backfillProgress?.status === 'running') {
     const pct =
       backfillProgress && backfillProgress.totalRecords > 0
         ? Math.round((backfillProgress.processedRecords / backfillProgress.totalRecords) * 100)
@@ -159,16 +168,70 @@ export function LibraryEmptyState({ onComplete }: LibraryEmptyStateProps) {
     );
   }
 
-  // Show backfill prompt if synced but needs backfill
-  if (isSynced && needsBackfill) {
-    // If sync is running, show message that backfill will run automatically
-    if (isSyncRunning) {
+  // Single server selected: identical behavior to the pre-multi-server component.
+  if (selectedServerIds.length <= 1) {
+    const selectedServerId = selectedServerIds[0];
+    const data = selectedServerId ? statusResult.byServer.get(selectedServerId)?.data : undefined;
+    const { isSynced, isSyncRunning, needsBackfill, backfillDays } = data ?? {};
+    const isSyncing = selectedServerId ? syncingIds.has(selectedServerId) : false;
+
+    // Show backfill prompt if synced but needs backfill
+    if (isSynced && needsBackfill) {
+      // If sync is running, show message that backfill will run automatically
+      if (isSyncRunning) {
+        return (
+          <div className="rounded-xl border border-dashed p-8 text-center">
+            <Loader2 className="text-muted-foreground/50 mx-auto h-12 w-12 animate-spin" />
+            <h3 className="mt-4 text-lg font-medium">Library sync in progress...</h3>
+            <p className="text-muted-foreground mx-auto mt-2 max-w-md">
+              Historical data generation will start automatically once the sync completes.
+            </p>
+          </div>
+        );
+      }
+
+      return (
+        <div className="rounded-xl border border-dashed p-8 text-center">
+          <Clock className="text-muted-foreground/50 mx-auto h-12 w-12" />
+          <h3 className="mt-4 text-lg font-medium">Historical data available</h3>
+          <p className="text-muted-foreground mx-auto mt-2 max-w-md">
+            {backfillDays
+              ? `Your library has ${backfillDays} days of history. Generate snapshots to see trends in charts.`
+              : 'Generate historical snapshots to see library trends over time.'}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            onClick={handleBackfill}
+            disabled={isStartingBackfill}
+          >
+            {isStartingBackfill ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Starting...
+              </>
+            ) : (
+              <>
+                <BarChart3 className="mr-2 h-4 w-4" />
+                Generate History
+              </>
+            )}
+          </Button>
+        </div>
+      );
+    }
+
+    // Default: Library not synced
+    // If sync is already running, show progress
+    if (isSyncRunning || isSyncing) {
       return (
         <div className="rounded-xl border border-dashed p-8 text-center">
           <Loader2 className="text-muted-foreground/50 mx-auto h-12 w-12 animate-spin" />
           <h3 className="mt-4 text-lg font-medium">Library sync in progress...</h3>
           <p className="text-muted-foreground mx-auto mt-2 max-w-md">
-            Historical data generation will start automatically once the sync completes.
+            Library statistics will appear once the sync completes. This may take a few minutes
+            depending on library size.
           </p>
         </div>
       );
@@ -176,69 +239,107 @@ export function LibraryEmptyState({ onComplete }: LibraryEmptyStateProps) {
 
     return (
       <div className="rounded-xl border border-dashed p-8 text-center">
-        <Clock className="text-muted-foreground/50 mx-auto h-12 w-12" />
-        <h3 className="mt-4 text-lg font-medium">Historical data available</h3>
+        <Database className="text-muted-foreground/50 mx-auto h-12 w-12" />
+        <h3 className="mt-4 text-lg font-medium">Library not synced yet</h3>
         <p className="text-muted-foreground mx-auto mt-2 max-w-md">
-          {backfillDays
-            ? `Your library has ${backfillDays} days of history. Generate snapshots to see trends in charts.`
-            : 'Generate historical snapshots to see library trends over time.'}
+          Library statistics will appear here once the library has been synced. This typically
+          happens automatically every hour.
         </p>
         <Button
           variant="outline"
           size="sm"
           className="mt-4"
-          onClick={handleBackfill}
-          disabled={isStartingBackfill}
+          onClick={() => void handleSync(selectedServerId)}
+          disabled={!selectedServerId}
         >
-          {isStartingBackfill ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Starting...
-            </>
-          ) : (
-            <>
-              <BarChart3 className="mr-2 h-4 w-4" />
-              Generate History
-            </>
-          )}
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Sync Now
         </Button>
       </div>
     );
   }
 
-  // Default: Library not synced
-  // If sync is already running, show progress
-  if (isSyncRunning || isSyncing) {
-    return (
-      <div className="rounded-xl border border-dashed p-8 text-center">
-        <Loader2 className="text-muted-foreground/50 mx-auto h-12 w-12 animate-spin" />
-        <h3 className="mt-4 text-lg font-medium">Library sync in progress...</h3>
-        <p className="text-muted-foreground mx-auto mt-2 max-w-md">
-          Library statistics will appear once the sync completes. This may take a few minutes
-          depending on library size.
-        </p>
-      </div>
-    );
-  }
+  // Multiple servers selected: show per-server state and a per-server sync
+  // action, plus one shared button for the global backfill job.
+  const rows = selectedServers
+    .filter((server) => selectedServerIds.includes(server.id))
+    .map((server) => ({ server, data: statusResult.byServer.get(server.id)?.data }));
+
+  const needsSync = rows.filter((row) => !row.data?.isSynced);
+  const needsBackfillOnly = rows.filter((row) => row.data?.isSynced && row.data.needsBackfill);
 
   return (
     <div className="rounded-xl border border-dashed p-8 text-center">
       <Database className="text-muted-foreground/50 mx-auto h-12 w-12" />
-      <h3 className="mt-4 text-lg font-medium">Library not synced yet</h3>
+      <h3 className="mt-4 text-lg font-medium">Some libraries need attention</h3>
       <p className="text-muted-foreground mx-auto mt-2 max-w-md">
-        Library statistics will appear here once the library has been synced. This typically happens
-        automatically every hour.
+        Sync the servers below to see combined library statistics.
       </p>
-      <Button
-        variant="outline"
-        size="sm"
-        className="mt-4"
-        onClick={handleSync}
-        disabled={!selectedServerId}
-      >
-        <RefreshCw className="mr-2 h-4 w-4" />
-        Sync Now
-      </Button>
+
+      {needsSync.length > 0 && (
+        <ul className="mx-auto mt-6 max-w-sm space-y-2 text-left">
+          {needsSync.map(({ server, data }) => {
+            const isSyncing = syncingIds.has(server.id) || (data?.isSyncRunning ?? false);
+            return (
+              <li
+                key={server.id}
+                className="border-border flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <ServerBadge server={server} variant="outlined" />
+                  <span className="text-muted-foreground text-sm">
+                    {isSyncing ? 'Syncing...' : 'Not synced yet'}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleSync(server.id)}
+                  disabled={isSyncing}
+                >
+                  {isSyncing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Sync Now
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {needsBackfillOnly.length > 0 && (
+        <div className="mx-auto mt-6 max-w-md space-y-3">
+          <p className="text-muted-foreground text-sm">
+            These servers are synced but have no historical data yet:
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {needsBackfillOnly.map(({ server }) => (
+              <ServerBadge key={server.id} server={server} variant="outlined" />
+            ))}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleBackfill}
+            disabled={isStartingBackfill}
+          >
+            {isStartingBackfill ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Starting...
+              </>
+            ) : (
+              <>
+                <BarChart3 className="mr-2 h-4 w-4" />
+                Generate History
+              </>
+            )}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

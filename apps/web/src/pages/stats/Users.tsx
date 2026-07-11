@@ -3,6 +3,7 @@ import { Users as UsersIcon, Trophy } from 'lucide-react';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { UserCard, UserRow } from '@/components/users';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ErrorState } from '@/components/library/ErrorState';
 import { useTopUsers } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
@@ -10,8 +11,8 @@ import { useTimeRange } from '@/hooks/useTimeRange';
 export function StatsUsers() {
   const { t } = useTranslation(['pages', 'common']);
   const { value: timeRange, setValue: setTimeRange, apiParams } = useTimeRange();
-  const { selectedServerId } = useServer();
-  const topUsers = useTopUsers(apiParams, selectedServerId);
+  const { selectedServerIds } = useServer();
+  const topUsers = useTopUsers(apiParams, selectedServerIds);
 
   const users = topUsers.data ?? [];
   const podiumUsers = users.slice(0, 3);
@@ -30,7 +31,13 @@ export function StatsUsers() {
         <TimeRangePicker value={timeRange} onChange={setTimeRange} />
       </div>
 
-      {topUsers.isLoading ? (
+      {topUsers.isError ? (
+        <ErrorState
+          title={t('common:errors.somethingWentWrong')}
+          message={topUsers.error?.message ?? t('common:errors.unexpectedError')}
+          onRetry={() => void topUsers.refetch()}
+        />
+      ) : topUsers.isLoading ? (
         <div className="space-y-8">
           {/* Podium skeleton */}
           <section>
@@ -90,6 +97,7 @@ export function StatsUsers() {
                     playCount={podiumUsers[1].playCount}
                     watchTimeHours={podiumUsers[1].watchTimeHours}
                     topContent={podiumUsers[1].topContent}
+                    identityServers={podiumUsers[1].identityServers}
                     rank={2}
                     className="w-44"
                   />
@@ -109,6 +117,7 @@ export function StatsUsers() {
                     playCount={podiumUsers[0].playCount}
                     watchTimeHours={podiumUsers[0].watchTimeHours}
                     topContent={podiumUsers[0].topContent}
+                    identityServers={podiumUsers[0].identityServers}
                     rank={1}
                     className="w-48 sm:scale-105"
                   />
@@ -128,6 +137,7 @@ export function StatsUsers() {
                     playCount={podiumUsers[2].playCount}
                     watchTimeHours={podiumUsers[2].watchTimeHours}
                     topContent={podiumUsers[2].topContent}
+                    identityServers={podiumUsers[2].identityServers}
                     rank={3}
                     className="w-44"
                   />
@@ -148,7 +158,7 @@ export function StatsUsers() {
               <div key={`list-${rangeKey}`} className="space-y-2">
                 {listUsers.map((user, index: number) => (
                   <UserRow
-                    key={user.serverUserId}
+                    key={user.userId}
                     userId={user.serverUserId}
                     username={user.username}
                     identityName={user.identityName}
@@ -158,6 +168,7 @@ export function StatsUsers() {
                     playCount={user.playCount}
                     watchTimeHours={user.watchTimeHours}
                     topContent={user.topContent}
+                    identityServers={user.identityServers}
                     rank={index + 4}
                     style={{ animationDelay: `${index * 50}ms` }}
                   />

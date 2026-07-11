@@ -10,7 +10,7 @@ import { sql } from 'drizzle-orm';
 import { statsQuerySchema } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { resolveDateRange } from './utils.js';
-import { validateServerAccess, buildServerFilterFragment } from '../../utils/serverFiltering.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 
 export const contentRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -26,19 +26,12 @@ export const contentRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { period, startDate, endDate, serverId } = query.data;
+    const { period, startDate, endDate, serverId, serverIds } = query.data;
     const authUser = request.user;
     const dateRange = resolveDateRange(period, startDate, endDate);
 
-    // Validate server access if specific server requested
-    if (serverId) {
-      const error = validateServerAccess(authUser, serverId);
-      if (error) {
-        return reply.forbidden(error);
-      }
-    }
-
-    const serverFilter = buildServerFilterFragment(serverId, authUser);
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+    const serverFilter = buildMultiServerFragment(resolvedIds);
 
     // For all-time queries, we need a base WHERE clause
     const startDateFilter = dateRange.start ? sql`started_at >= ${dateRange.start}` : sql`true`;

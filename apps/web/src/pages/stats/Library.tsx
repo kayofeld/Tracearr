@@ -3,16 +3,17 @@ import { Film, Tv } from 'lucide-react';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { MediaCard, MediaCardSmall } from '@/components/media';
 import { Skeleton } from '@/components/ui/skeleton';
+import { InlineErrorState } from '@/components/library/ErrorState';
 import { useTopContent, useShowStats } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useTimeRange } from '@/hooks/useTimeRange';
 
 export function StatsLibrary() {
-  const { t } = useTranslation('pages');
+  const { t } = useTranslation(['pages', 'common']);
   const { value: timeRange, setValue: setTimeRange, apiParams } = useTimeRange();
-  const { selectedServerId } = useServer();
-  const topContent = useTopContent(apiParams, selectedServerId);
-  const showStats = useShowStats(apiParams, selectedServerId, { limit: 10 });
+  const { selectedServerIds } = useServer();
+  const topContent = useTopContent(apiParams, selectedServerIds);
+  const showStats = useShowStats(apiParams, selectedServerIds, { limit: 10 });
 
   // Use separate movies and shows arrays from API
   const movies = topContent.data?.movies ?? [];
@@ -37,7 +38,12 @@ export function StatsLibrary() {
           <h2 className="text-lg font-semibold">{t('library.topMovies')}</h2>
         </div>
 
-        {topContent.isLoading ? (
+        {topContent.isError ? (
+          <InlineErrorState
+            message={topContent.error?.message ?? t('common:errors.unexpectedError')}
+            onRetry={() => void topContent.refetch()}
+          />
+        ) : topContent.isLoading ? (
           <div className="space-y-4">
             <Skeleton className="h-44 w-full rounded-xl" />
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
@@ -102,7 +108,12 @@ export function StatsLibrary() {
           <h2 className="text-lg font-semibold">{t('library.topShows')}</h2>
         </div>
 
-        {topContent.isLoading || showStats.isLoading ? (
+        {showStats.isError ? (
+          <InlineErrorState
+            message={showStats.error?.message ?? t('common:errors.unexpectedError')}
+            onRetry={() => void showStats.refetch()}
+          />
+        ) : topContent.isLoading || showStats.isLoading ? (
           <div className="space-y-4">
             <Skeleton className="h-44 w-full rounded-xl" />
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
