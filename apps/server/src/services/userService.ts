@@ -24,6 +24,9 @@ export type User = typeof users.$inferSelect;
 // Type for server user table row
 export type ServerUser = typeof serverUsers.$inferSelect;
 
+// Transaction handle, or the plain db client when there's no surrounding transaction
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
+
 // Type for server user with user and server info
 export interface ServerUserWithDetails {
   id: string;
@@ -482,20 +485,27 @@ export async function updateServerUserTrustScore(
   serverUserId: string,
   trustScore: number
 ): Promise<ServerUser> {
-  const rows = await db
-    .update(serverUsers)
-    .set({
-      trustScore,
-      updatedAt: new Date(),
-    })
-    .where(eq(serverUsers.id, serverUserId))
-    .returning();
+  // The identity rollup recompute runs in the same transaction as the trust
+  // write so the two never commit out of sync with each other.
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(serverUsers)
+      .set({
+        trustScore,
+        updatedAt: new Date(),
+      })
+      .where(eq(serverUsers.id, serverUserId))
+      .returning();
 
-  const serverUser = rows[0];
-  if (!serverUser) {
-    throw new ServerUserNotFoundError(serverUserId);
-  }
-  return serverUser;
+    const serverUser = rows[0];
+    if (!serverUser) {
+      throw new ServerUserNotFoundError(serverUserId);
+    }
+
+    await recalculateAggregateTrustScore(serverUser.userId, tx);
+
+    return serverUser;
+  });
 }
 
 /**
@@ -809,12 +819,25 @@ export async function getUserWithStats(userId: string): Promise<UserWithStats | 
 }
 
 /**
- * Recalculate aggregate trust score for a user
- * Called by triggers when server_user trust scores change
+ * Recalculate aggregate trust score for a user (the person's overall trust
+ * across all their server accounts, weighted by each account's session count).
+ *
+ * Called after every write to serverUsers.trustScore - there is no database
+ * trigger backing this, so every call site that changes a server account's
+ * trust score is responsible for calling this too (ideally with the same `tx`
+ * it used for the write, so the two updates commit together). Corrects the
+ * identity's rollup going forward; it does not backfill trust changes made
+ * before this recompute existed.
+ *
+ * Pass the transaction handle already in use so this participates in the
+ * same write instead of racing it.
  */
-export async function recalculateAggregateTrustScore(userId: string): Promise<void> {
+export async function recalculateAggregateTrustScore(
+  userId: string,
+  executor: Tx = db
+): Promise<void> {
   // Calculate weighted average by session count
-  const result = await db
+  const result = await executor
     .select({
       weightedSum: sql<number>`coalesce(sum(${serverUsers.trustScore}::numeric * ${serverUsers.sessionCount}), 0)`,
       totalSessions: sql<number>`coalesce(sum(${serverUsers.sessionCount}), 0)`,
@@ -828,7 +851,7 @@ export async function recalculateAggregateTrustScore(userId: string): Promise<vo
   const aggregateScore =
     totalSessions > 0 ? Math.round(Number(weightedSum) / Number(totalSessions)) : 100;
 
-  await db
+  await executor
     .update(users)
     .set({
       aggregateTrustScore: aggregateScore,

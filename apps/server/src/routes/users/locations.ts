@@ -5,14 +5,17 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, sql } from 'drizzle-orm';
-import { userIdParamSchema, type UserLocation } from '@tracearr/shared';
+import { sql } from 'drizzle-orm';
+import { userIdParamSchema, identityScopeQuerySchema, type UserLocation } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { serverUsers } from '../../db/schema.js';
+import { resolveIdentityScopedServerUserIds, serverUserIdAnyFragment } from './queries.js';
 
 export const locationsRoutes: FastifyPluginAsync = async (app) => {
   /**
    * GET /:id/locations - Get user's unique locations (aggregated from sessions)
+   *
+   * scope=identity expands the result to every account under the same
+   * person that the caller can access.
    */
   app.get('/:id/locations', { preHandler: [app.authenticate] }, async (request, reply) => {
     const params = userIdParamSchema.safeParse(request.params);
@@ -20,22 +23,19 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid user ID');
     }
 
+    const query = identityScopeQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return reply.badRequest('Invalid query parameters');
+    }
+
     const { id } = params.data;
     const authUser = request.user;
 
-    // Verify server user exists and access
-    const serverUserRows = await db
-      .select()
-      .from(serverUsers)
-      .where(eq(serverUsers.id, id))
-      .limit(1);
-
-    const serverUser = serverUserRows[0];
-    if (!serverUser) {
-      return reply.notFound('User not found');
-    }
-
-    if (!authUser.serverIds.includes(serverUser.serverId)) {
+    const scoped = await resolveIdentityScopedServerUserIds(db, authUser, id, query.data.scope);
+    if ('error' in scoped) {
+      if (scoped.error === 'notFound') {
+        return reply.notFound('User not found');
+      }
       return reply.forbidden('You do not have access to this user');
     }
 
@@ -47,7 +47,7 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
           geo_city, geo_region, geo_country, geo_lat, geo_lon,
           ip_address, started_at
         FROM sessions
-        WHERE server_user_id = ${id}
+        WHERE ${serverUserIdAnyFragment(scoped.ids)}
         ORDER BY COALESCE(reference_id, id), started_at DESC
       )
       SELECT

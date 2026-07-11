@@ -10,23 +10,47 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, and, sql, inArray } from 'drizzle-orm';
+import { z } from 'zod';
+import { eq, and, sql, inArray, isNull } from 'drizzle-orm';
 import {
   updateUserSchema,
   updateUserIdentitySchema,
   userIdParamSchema,
   paginationSchema,
   serverIdFilterSchema,
+  booleanStringSchema,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { serverUsers, sessions, servers, users } from '../../db/schema.js';
-import { hasServerAccess, buildServerAccessCondition } from '../../utils/serverFiltering.js';
-import { updateUser } from '../../services/userService.js';
+import {
+  hasServerAccess,
+  buildServerAccessCondition,
+  resolveServerIds,
+  buildMultiServerCondition,
+  buildMultiServerFragment,
+} from '../../utils/serverFiltering.js';
+import { updateUser, recalculateAggregateTrustScore } from '../../services/userService.js';
+import { representativeAccountOrderSql } from '../../utils/representativeAccount.js';
 import { PLAY_COUNT } from '../../constants/index.js';
+
+const bulkResetTrustBodySchema = z.object({
+  ids: z.array(z.uuid()).max(1000).optional(),
+  selectAll: z.boolean().optional(),
+  filters: z
+    .object({
+      serverId: z.uuid().optional(),
+      serverIds: z.array(z.uuid()).optional(),
+      includeRemoved: z.boolean().optional(),
+    })
+    .optional(),
+});
 
 export const listRoutes: FastifyPluginAsync = async (app) => {
   // Combined schema for pagination and server filter
-  const userListQuerySchema = paginationSchema.extend(serverIdFilterSchema.shape);
+  const userListQuerySchema = paginationSchema.extend(serverIdFilterSchema.shape).extend({
+    includeRemoved: booleanStringSchema.default(false),
+    search: z.string().trim().min(1).max(100).optional(),
+  });
 
   /**
    * GET / - List all server users with pagination
@@ -37,38 +61,51 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { page, pageSize, serverId } = query.data;
+    const { page, pageSize, serverId, serverIds, includeRemoved, search } = query.data;
     const authUser = request.user;
     const offset = (page - 1) * pageSize;
 
-    // If specific server requested, validate access
-    if (serverId && !hasServerAccess(authUser, serverId)) {
-      return reply.forbidden('You do not have access to this server');
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+
+    // Short-circuit when the user has no accessible servers in the requested set
+    if (resolvedIds?.length === 0) {
+      return {
+        data: [],
+        page,
+        pageSize,
+        total: 0,
+        totalPages: 0,
+      };
     }
 
     // Build conditions for filtering
     const conditions = [];
 
-    // If specific server requested, filter to that server
-    if (serverId) {
-      conditions.push(eq(serverUsers.serverId, serverId));
-    } else if (authUser.role !== 'owner') {
-      // No specific server - filter by user's accessible servers (non-owners only)
-      if (authUser.serverIds.length === 0) {
-        // No server access - return empty result
-        return {
-          data: [],
-          page,
-          pageSize,
-          total: 0,
-          totalPages: 0,
-        };
-      } else if (authUser.serverIds.length === 1) {
-        conditions.push(eq(serverUsers.serverId, authUser.serverIds[0]!));
-      } else {
-        conditions.push(inArray(serverUsers.serverId, authUser.serverIds));
-      }
+    const serverCondition = buildMultiServerCondition(resolvedIds, serverUsers.serverId);
+    if (serverCondition) {
+      conditions.push(serverCondition);
     }
+
+    if (!includeRemoved) {
+      conditions.push(isNull(serverUsers.removedAt));
+    }
+
+    if (search) {
+      const pattern = `%${search.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
+      conditions.push(
+        sql`(${serverUsers.username} ILIKE ${pattern} OR ${users.name} ILIKE ${pattern})`
+      );
+    }
+
+    // One row per identity: keep the login-linked, most-active present account, scoped
+    // to servers the caller can see so an inaccessible account can't win or hide the row.
+    conditions.push(sql`${serverUsers.id} IN (
+      SELECT DISTINCT ON (su.user_id) su.id
+      FROM ${serverUsers} su
+      INNER JOIN ${users} u ON su.user_id = u.id
+      WHERE true ${buildMultiServerFragment(resolvedIds, 'su.server_id')}
+      ORDER BY su.user_id, ${representativeAccountOrderSql('su')}
+    )`);
 
     const serverUserList = await db
       .select({
@@ -90,19 +127,23 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
         // Include identity info
         identityName: users.name,
         role: users.role,
+        // The person's overall trust across all their server accounts,
+        // distinct from `trustScore` (this representative account's own score).
+        identityTrustScore: users.aggregateTrustScore,
       })
       .from(serverUsers)
       .innerJoin(servers, eq(serverUsers.serverId, servers.id))
       .innerJoin(users, eq(serverUsers.userId, users.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(serverUsers.username)
+      .orderBy(serverUsers.username, serverUsers.id)
       .limit(pageSize)
       .offset(offset);
 
-    // Get total count
+    // Get total count (joins users because the search condition references users.name)
     const countResult = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(serverUsers)
+      .innerJoin(users, eq(serverUsers.userId, users.id))
       .where(conditions.length > 0 ? and(...conditions) : undefined);
 
     const total = countResult[0]?.count ?? 0;
@@ -110,7 +151,10 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
     // Batch-fetch each identity's server memberships in one query for the whole
     // page, scoped to servers the caller can access (owners see all).
     const pageUserIds = [...new Set(serverUserList.map((u) => u.userId))];
-    const identityServersByUserId = new Map<string, { id: string; name: string }[]>();
+    const identityServersByUserId = new Map<
+      string,
+      { id: string; name: string; serverUserId: string; removedAt: string | null }[]
+    >();
     if (pageUserIds.length > 0) {
       const identityServerAccessCondition = buildServerAccessCondition(
         authUser,
@@ -125,6 +169,8 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
           userId: serverUsers.userId,
           serverId: serverUsers.serverId,
           serverName: servers.name,
+          serverUserId: serverUsers.id,
+          removedAt: serverUsers.removedAt,
         })
         .from(serverUsers)
         .innerJoin(servers, eq(serverUsers.serverId, servers.id))
@@ -132,7 +178,12 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
 
       for (const row of identityServerRows) {
         const existing = identityServersByUserId.get(row.userId);
-        const entry = { id: row.serverId, name: row.serverName };
+        const entry = {
+          id: row.serverId,
+          name: row.serverName,
+          serverUserId: row.serverUserId,
+          removedAt: row.removedAt ? row.removedAt.toISOString() : null,
+        };
         if (existing) {
           existing.push(entry);
         } else {
@@ -146,7 +197,12 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
       // Fallback is unreachable in practice: the row's own server is always part of the
       // batched scope above. Kept as a safety net, not an expected path.
       identityServers: identityServersByUserId.get(u.userId) ?? [
-        { id: u.serverId, name: u.serverName },
+        {
+          id: u.serverId,
+          name: u.serverName,
+          serverUserId: u.id,
+          removedAt: u.removedAt ? u.removedAt.toISOString() : null,
+        },
       ],
     }));
 
@@ -279,28 +335,36 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
       updateData.trustScore = body.data.trustScore;
     }
 
-    // Update server user
-    const updated = await db
-      .update(serverUsers)
-      .set(updateData)
-      .where(eq(serverUsers.id, id))
-      .returning({
-        id: serverUsers.id,
-        serverId: serverUsers.serverId,
-        userId: serverUsers.userId,
-        externalId: serverUsers.externalId,
-        username: serverUsers.username,
-        email: serverUsers.email,
-        thumbUrl: serverUsers.thumbUrl,
-        isServerAdmin: serverUsers.isServerAdmin,
-        trustScore: serverUsers.trustScore,
-        sessionCount: serverUsers.sessionCount,
-        joinedAt: serverUsers.joinedAt,
-        lastActivityAt: serverUsers.lastActivityAt,
-        updatedAt: serverUsers.updatedAt,
-      });
+    // Update server user, and keep the person's overall trust rollup current
+    // in the same transaction whenever trustScore actually changed.
+    const updatedServerUser = await db.transaction(async (tx) => {
+      const updated = await tx
+        .update(serverUsers)
+        .set(updateData)
+        .where(eq(serverUsers.id, id))
+        .returning({
+          id: serverUsers.id,
+          serverId: serverUsers.serverId,
+          userId: serverUsers.userId,
+          externalId: serverUsers.externalId,
+          username: serverUsers.username,
+          email: serverUsers.email,
+          thumbUrl: serverUsers.thumbUrl,
+          isServerAdmin: serverUsers.isServerAdmin,
+          trustScore: serverUsers.trustScore,
+          sessionCount: serverUsers.sessionCount,
+          joinedAt: serverUsers.joinedAt,
+          lastActivityAt: serverUsers.lastActivityAt,
+          updatedAt: serverUsers.updatedAt,
+        });
 
-    const updatedServerUser = updated[0];
+      const row = updated[0];
+      if (row && updateData.trustScore !== undefined) {
+        await recalculateAggregateTrustScore(row.userId, tx);
+      }
+      return row;
+    });
+
     if (!updatedServerUser) {
       return reply.internalServerError('Failed to update user');
     }
@@ -356,49 +420,123 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * POST /bulk/reset-trust - Bulk reset trust scores to 100
-   * Owner-only. Accepts array of user IDs.
+   * Owner/admin. Accepts either specific server-user IDs or a selectAll flag
+   * with the same roster filters as GET /. Resetting a person's representative
+   * row resets ALL of their accounts on servers the caller can access, so the
+   * identity's overall trust score actually returns to 100 for an owner (not
+   * just the one account that happened to be selected). A scoped admin only
+   * ever touches accounts on servers they can access, so the identity's
+   * rollup recomputes over the person's full account set and may land short
+   * of 100 if a sibling account outside their access still has a lower score.
    */
   app.post('/bulk/reset-trust', { preHandler: [app.authenticate] }, async (request, reply) => {
     const authUser = request.user;
 
-    // Only owners can reset trust scores
-    if (authUser.role !== 'owner') {
-      return reply.forbidden('Only owners can reset trust scores');
+    // Only owners and admins can reset trust scores
+    if (authUser.role !== 'owner' && authUser.role !== 'admin') {
+      return reply.forbidden('Only administrators can reset trust scores');
     }
 
-    const body = request.body as { ids: string[] };
+    const parsedBody = bulkResetTrustBodySchema.safeParse(request.body);
+    if (!parsedBody.success) {
+      return reply.badRequest('Invalid request body');
+    }
+    const body = parsedBody.data;
 
-    if (!body.ids || !Array.isArray(body.ids) || body.ids.length === 0) {
-      return reply.badRequest('ids array is required');
+    if ((!body.ids || body.ids.length === 0) && !body.selectAll) {
+      return reply.badRequest('ids array or selectAll is required');
     }
 
-    // Verify access to all users
-    const userDetails = await db
-      .select({
-        id: serverUsers.id,
-        serverId: serverUsers.serverId,
-      })
-      .from(serverUsers)
-      .where(inArray(serverUsers.id, body.ids));
+    let seedIds: string[] = [];
 
-    // Filter to only accessible users
-    const accessibleIds = userDetails
-      .filter((u) => hasServerAccess(authUser, u.serverId))
-      .map((u) => u.id);
+    if (body.selectAll) {
+      // Same filters as GET / (serverIds, includeRemoved), resolved against
+      // the caller's own access, so selectAll can never promise a reset
+      // outside what the roster actually shows them.
+      const resolvedIds = resolveServerIds(
+        authUser,
+        body.filters?.serverId,
+        body.filters?.serverIds,
+        { strict: false }
+      );
 
-    if (accessibleIds.length === 0) {
+      if (resolvedIds?.length === 0) {
+        return { success: true, updated: 0 };
+      }
+
+      const conditions = [];
+      const serverCondition = buildMultiServerCondition(resolvedIds, serverUsers.serverId);
+      if (serverCondition) {
+        conditions.push(serverCondition);
+      }
+      if (!body.filters?.includeRemoved) {
+        conditions.push(isNull(serverUsers.removedAt));
+      }
+
+      const matching = await db
+        .select({ id: serverUsers.id })
+        .from(serverUsers)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+      seedIds = matching.map((u) => u.id);
+    } else {
+      seedIds = body.ids!;
+    }
+
+    if (seedIds.length === 0) {
       return { success: true, updated: 0 };
     }
 
-    // Bulk update trust scores to 100
-    await db
-      .update(serverUsers)
-      .set({
-        trustScore: 100,
-        updatedAt: new Date(),
+    // Verify access and resolve the identities behind the seed accounts
+    const seedDetails = await db
+      .select({
+        id: serverUsers.id,
+        serverId: serverUsers.serverId,
+        userId: serverUsers.userId,
       })
-      .where(inArray(serverUsers.id, accessibleIds));
+      .from(serverUsers)
+      .where(inArray(serverUsers.id, seedIds));
 
-    return { success: true, updated: accessibleIds.length };
+    const accessibleSeeds = seedDetails.filter((u) => hasServerAccess(authUser, u.serverId));
+    if (accessibleSeeds.length === 0) {
+      return { success: true, updated: 0 };
+    }
+
+    const affectedIdentityIds = [...new Set(accessibleSeeds.map((u) => u.userId))];
+
+    // Expand each touched identity to ALL of their accounts on servers the
+    // caller can access, so a merged person's sibling accounts get reset too.
+    const identityAccessCondition = buildServerAccessCondition(authUser, serverUsers.serverId);
+    const identityWhere = identityAccessCondition
+      ? and(inArray(serverUsers.userId, affectedIdentityIds), identityAccessCondition)
+      : inArray(serverUsers.userId, affectedIdentityIds);
+
+    const accountsToReset = await db
+      .select({ id: serverUsers.id })
+      .from(serverUsers)
+      .where(identityWhere);
+
+    const accountIds = accountsToReset.map((a) => a.id);
+    if (accountIds.length === 0) {
+      return { success: true, updated: 0 };
+    }
+
+    // Bulk update trust scores to 100, then recompute each affected identity's
+    // rollup once in the same transaction.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(serverUsers)
+        .set({
+          trustScore: 100,
+          updatedAt: new Date(),
+        })
+        .where(inArray(serverUsers.id, accountIds));
+
+      for (const userId of affectedIdentityIds) {
+        await recalculateAggregateTrustScore(userId, tx);
+      }
+    });
+
+    return { success: true, updated: accountIds.length };
   });
 };

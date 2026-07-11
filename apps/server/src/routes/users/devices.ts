@@ -5,15 +5,16 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { eq } from 'drizzle-orm';
-import { userIdParamSchema } from '@tracearr/shared';
+import { userIdParamSchema, identityScopeQuerySchema } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { serverUsers } from '../../db/schema.js';
-import { queryUserDevices } from './queries.js';
+import { queryUserDevices, resolveIdentityScopedServerUserIds } from './queries.js';
 
 export const devicesRoutes: FastifyPluginAsync = async (app) => {
   /**
    * GET /:id/devices - Get user's unique devices (aggregated from sessions)
+   *
+   * scope=identity expands the result to every account under the same
+   * person that the caller can access.
    */
   app.get('/:id/devices', { preHandler: [app.authenticate] }, async (request, reply) => {
     const params = userIdParamSchema.safeParse(request.params);
@@ -21,26 +22,23 @@ export const devicesRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid user ID');
     }
 
+    const query = identityScopeQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return reply.badRequest('Invalid query parameters');
+    }
+
     const { id } = params.data;
     const authUser = request.user;
 
-    // Verify server user exists and access
-    const serverUserRows = await db
-      .select()
-      .from(serverUsers)
-      .where(eq(serverUsers.id, id))
-      .limit(1);
-
-    const serverUser = serverUserRows[0];
-    if (!serverUser) {
-      return reply.notFound('User not found');
-    }
-
-    if (!authUser.serverIds.includes(serverUser.serverId)) {
+    const scoped = await resolveIdentityScopedServerUserIds(db, authUser, id, query.data.scope);
+    if ('error' in scoped) {
+      if (scoped.error === 'notFound') {
+        return reply.notFound('User not found');
+      }
       return reply.forbidden('You do not have access to this user');
     }
 
-    const devices = await queryUserDevices(db, id);
+    const devices = await queryUserDevices(db, scoped.ids);
     return { data: devices };
   });
 };

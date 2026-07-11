@@ -5,15 +5,20 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, sql } from 'drizzle-orm';
-import { userIdParamSchema, paginationSchema } from '@tracearr/shared';
+import { sql } from 'drizzle-orm';
+import { userIdParamSchema, identityScopedPaginationSchema } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { serverUsers, sessions } from '../../db/schema.js';
+import { sessions } from '../../db/schema.js';
 import { PLAY_COUNT } from '../../constants/index.js';
+import { resolveIdentityScopedServerUserIds, serverUserIdAnyFragment } from './queries.js';
+import { uuidArraySql } from '../../utils/sqlArrays.js';
 
 export const sessionsRoutes: FastifyPluginAsync = async (app) => {
   /**
    * GET /:id/sessions - Get user's session history (grouped by play)
+   *
+   * scope=identity expands the result to every account under the same
+   * person that the caller can access.
    */
   app.get('/:id/sessions', { preHandler: [app.authenticate] }, async (request, reply) => {
     const params = userIdParamSchema.safeParse(request.params);
@@ -21,37 +26,36 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid user ID');
     }
 
-    const query = paginationSchema.safeParse(request.query);
+    const query = identityScopedPaginationSchema.safeParse(request.query);
     if (!query.success) {
       return reply.badRequest('Invalid query parameters');
     }
 
     const { id } = params.data;
-    const { page, pageSize } = query.data;
+    const { page, pageSize, scope } = query.data;
     const authUser = request.user;
     const offset = (page - 1) * pageSize;
 
-    // Verify server user exists and access
-    const serverUserRows = await db
-      .select()
-      .from(serverUsers)
-      .where(eq(serverUsers.id, id))
-      .limit(1);
-
-    const serverUser = serverUserRows[0];
-    if (!serverUser) {
-      return reply.notFound('User not found');
-    }
-
-    if (!authUser.serverIds.includes(serverUser.serverId)) {
+    const scoped = await resolveIdentityScopedServerUserIds(db, authUser, id, scope);
+    if ('error' in scoped) {
+      if (scoped.error === 'notFound') {
+        return reply.notFound('User not found');
+      }
       return reply.forbidden('You do not have access to this user');
     }
 
+    const ids = scoped.ids;
+    // Explicit array literal plus a 10-year bound so TimescaleDB can exclude
+    // chunks instead of scanning the whole hypertable.
+    const idArray = uuidArraySql(ids);
+    const tenYearsAgo = new Date(Date.now() - 10 * 365 * 24 * 60 * 60 * 1000);
+    const nowDate = new Date();
+
     // Get total unique plays
-    const [countResult] = await db
-      .select({ count: PLAY_COUNT })
-      .from(sessions)
-      .where(eq(sessions.serverUserId, id));
+    const [countResult] = await db.select({ count: PLAY_COUNT }).from(sessions)
+      .where(sql`${sessions.serverUserId} = ANY(${idArray})
+        AND ${sessions.startedAt} >= ${tenYearsAgo}
+        AND ${sessions.startedAt} <= ${nowDate}`);
 
     const total = countResult?.count ?? 0;
 
@@ -71,7 +75,9 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
           (array_agg(s.id ORDER BY s.started_at))[1] AS first_session_id,
           (array_agg(s.state ORDER BY s.started_at DESC))[1] AS state
         FROM sessions s
-        WHERE s.server_user_id = ${id}
+        WHERE ${serverUserIdAnyFragment(ids, 's.server_user_id')}
+          AND s.started_at >= ${tenYearsAgo}
+          AND s.started_at <= ${nowDate}
         GROUP BY COALESCE(s.reference_id, s.id)
         ORDER BY MIN(s.started_at) DESC
         LIMIT ${pageSize} OFFSET ${offset}

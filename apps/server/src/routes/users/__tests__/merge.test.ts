@@ -74,6 +74,7 @@ describe('merge routes', () => {
       movedServerUserIds: [randomUUID()],
       combinedServerUsers: [],
       wasSameServerCombine: false,
+      droppedRuleNames: [],
     });
 
     const response = await app.inject({

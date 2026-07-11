@@ -143,7 +143,8 @@ function createServerUserSelectMock(resolvedValue: unknown) {
 }
 
 /**
- * Helper to create mock chain for terminations query (3 leftJoins)
+ * Helper to create mock chain for terminations query (4 leftJoins: users,
+ * rules, sessions, servers)
  */
 function createTerminationsSelectMock(resolvedValue: unknown) {
   return {
@@ -151,10 +152,12 @@ function createTerminationsSelectMock(resolvedValue: unknown) {
       leftJoin: vi.fn().mockReturnValue({
         leftJoin: vi.fn().mockReturnValue({
           leftJoin: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({
-              orderBy: vi.fn().mockReturnValue({
-                limit: vi.fn().mockReturnValue({
-                  offset: vi.fn().mockResolvedValue(resolvedValue),
+            leftJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                orderBy: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockReturnValue({
+                    offset: vi.fn().mockResolvedValue(resolvedValue),
+                  }),
                 }),
               }),
             }),

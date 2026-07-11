@@ -251,6 +251,11 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
         // COALESCE match key (imdb->tmdb->tvdb->title). Rows sharing a match key
         // (same movie on multiple servers) collapse into one row; play counts and
         // watch time are summed. ARRAY_AGG collects all contributing server IDs.
+        //
+        // unique_viewers is counted by identity (server_users.user_id), computed
+        // separately from the matched titles' raw viewer rows - summing each
+        // server's per-title viewer count would double-count a merged person
+        // who watched the same title on two servers.
         const serverFilter = buildMultiServerFragment(resolvedIds, 'd.server_id');
 
         const itemsResult = await db.execute(sql`
@@ -258,6 +263,7 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
             SELECT
               d.rating_key,
               d.server_user_id,
+              su.user_id AS identity_user_id,
               MAX(d.media_title) AS media_title,
               MAX(d.content_duration_ms) AS content_duration_ms,
               MAX(d.thumb_path) AS thumb_path,
@@ -266,11 +272,12 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
               SUM(d.watched_ms) AS watched_ms,
               MAX(d.max_progress_ms) AS max_progress_ms
             FROM daily_content_engagement d
+            JOIN server_users su ON su.id = d.server_user_id
             WHERE d.day >= ${effectiveStartDate}::timestamptz
               AND d.day < ${endDate}::timestamptz
               AND d.media_type = 'movie'
               ${serverFilter}
-            GROUP BY d.rating_key, d.server_user_id
+            GROUP BY d.rating_key, d.server_user_id, su.user_id
           ),
           content_agg AS (
             SELECT
@@ -290,7 +297,6 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
                 ELSE 0
               END)::bigint AS total_plays,
               ROUND(SUM(uc.watched_ms) / 3600000.0, 1) AS total_watch_hours,
-              COUNT(DISTINCT uc.server_user_id)::bigint AS unique_viewers,
               ROUND(100.0 * COUNT(DISTINCT uc.server_user_id) FILTER (
                 WHERE uc.content_duration_ms > 0
                   AND (COALESCE(uc.max_progress_ms, 0) >= uc.content_duration_ms * 0.85
@@ -314,6 +320,16 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
               AND li.rating_key = ca.rating_key
               AND li.media_type = 'movie'
           ),
+          rating_key_dedup_map AS (
+            SELECT rating_key, COALESCE(match_key, rating_key) AS dedup_key
+            FROM with_match_key
+          ),
+          identity_counts AS (
+            SELECT rkm.dedup_key, COUNT(DISTINCT uc.identity_user_id)::bigint AS unique_viewers
+            FROM user_content uc
+            JOIN rating_key_dedup_map rkm ON rkm.rating_key = uc.rating_key
+            GROUP BY rkm.dedup_key
+          ),
           deduped AS (
             SELECT
               COALESCE(match_key, rating_key) AS dedup_key,
@@ -324,24 +340,24 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
               ARRAY_AGG(DISTINCT server_id::text) AS server_ids,
               SUM(total_plays) AS total_plays,
               ROUND(SUM(total_watch_hours), 1) AS total_watch_hours,
-              SUM(unique_viewers) AS unique_viewers,
               ROUND(AVG(completion_rate), 1) AS completion_rate
             FROM with_match_key
             WHERE media_title IS NOT NULL
             GROUP BY COALESCE(match_key, rating_key)
           )
           SELECT
-            dedup_key AS match_key,
-            media_title,
-            year,
-            thumb_path,
-            server_id,
-            server_ids,
-            total_plays,
-            total_watch_hours,
-            unique_viewers,
-            completion_rate
-          FROM deduped
+            d.dedup_key AS match_key,
+            d.media_title,
+            d.year,
+            d.thumb_path,
+            d.server_id,
+            d.server_ids,
+            d.total_plays,
+            d.total_watch_hours,
+            COALESCE(ic.unique_viewers, 0) AS unique_viewers,
+            d.completion_rate
+          FROM deduped d
+          LEFT JOIN identity_counts ic ON ic.dedup_key = d.dedup_key
           ORDER BY ${sql.raw(sortColumn)} ${sql.raw(sortDir)}
           LIMIT ${pageSize} OFFSET ${offset}
         `);
@@ -563,7 +579,12 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
         // Dedup approach: LOWER + strip non-alphanumeric applied to show_title produces
         // the same key that buildExternalIdMatchKey uses for its title fallback. Shows
         // sharing the same normalized title across servers collapse into one row;
-        // episode views, watch hours, and viewer counts are summed.
+        // episode views and watch hours are summed.
+        //
+        // unique_viewers is counted by identity (server_users.user_id) via a
+        // separate identity_counts CTE - summing each server's per-show viewer
+        // count would double-count a merged person watching the same show on
+        // two servers.
         const serverFilter = buildMultiServerFragment(resolvedIds, 'd.server_id');
 
         const itemsResult = await db.execute(sql`
@@ -586,6 +607,14 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
               AND d.media_type = 'episode'
               ${serverFilter}
             GROUP BY d.rating_key, d.server_user_id
+          ),
+          identity_counts AS (
+            SELECT
+              LOWER(REGEXP_REPLACE(COALESCE(ue.show_title, ''), '[^a-zA-Z0-9]', '', 'g')) AS dedup_key,
+              COUNT(DISTINCT su.user_id)::bigint AS unique_viewers
+            FROM user_episodes ue
+            JOIN server_users su ON su.id = ue.server_user_id
+            GROUP BY LOWER(REGEXP_REPLACE(COALESCE(ue.show_title, ''), '[^a-zA-Z0-9]', '', 'g'))
           ),
           user_shows AS (
             SELECT
@@ -613,7 +642,6 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
               MAX(us.year) AS year,
               SUM(us.episodes_watched)::bigint AS total_episode_views,
               ROUND(SUM(us.total_watched_ms) / 3600000.0, 1) AS total_watch_hours,
-              COUNT(DISTINCT us.server_user_id)::bigint AS unique_viewers,
               ROUND(100.0 * SUM(us.completed_episodes) / NULLIF(SUM(us.episodes_watched), 0), 1) AS avg_completion_rate,
               LEAST(100, ROUND(
                 40 * (AVG(us.episodes_watched)::numeric * ROUND(100.0 * SUM(us.completed_episodes) / NULLIF(SUM(us.episodes_watched), 0), 1) / 100 / 10) +
@@ -633,7 +661,6 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
               ARRAY_AGG(DISTINCT sa.server_id::text) AS server_ids,
               SUM(sa.total_episode_views)::bigint AS total_episode_views,
               ROUND(SUM(sa.total_watch_hours), 1) AS total_watch_hours,
-              SUM(sa.unique_viewers)::bigint AS unique_viewers,
               ROUND(AVG(sa.avg_completion_rate), 1) AS avg_completion_rate,
               ROUND(AVG(sa.binge_score), 0) AS binge_score
             FROM show_agg sa
@@ -641,17 +668,18 @@ export const libraryTopContentRoute: FastifyPluginAsync = async (app) => {
             GROUP BY LOWER(REGEXP_REPLACE(COALESCE(sa.show_title, ''), '[^a-zA-Z0-9]', '', 'g'))
           )
           SELECT
-            show_title,
-            year,
-            thumb_path,
-            server_id,
-            server_ids,
-            total_episode_views,
-            total_watch_hours,
-            unique_viewers,
-            avg_completion_rate,
-            binge_score
-          FROM deduped
+            d.show_title,
+            d.year,
+            d.thumb_path,
+            d.server_id,
+            d.server_ids,
+            d.total_episode_views,
+            d.total_watch_hours,
+            COALESCE(ic.unique_viewers, 0) AS unique_viewers,
+            d.avg_completion_rate,
+            d.binge_score
+          FROM deduped d
+          LEFT JOIN identity_counts ic ON ic.dedup_key = d.dedup_key
           ORDER BY ${sql.raw(sortColumn)} ${sql.raw(sortDir)}
           LIMIT ${pageSize} OFFSET ${offset}
         `);

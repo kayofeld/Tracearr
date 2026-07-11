@@ -15,6 +15,7 @@ import { db } from '../../db/client.js';
 import '../../db/schema.js';
 import { resolveDateRange } from './utils.js';
 import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
+import { representativeAccountOrderSql } from '../../utils/representativeAccount.js';
 
 // Extended schema with optional serverUserId filter
 const bandwidthQuerySchema = statsQuerySchema.safeExtend({
@@ -100,8 +101,9 @@ export const bandwidthRoutes: FastifyPluginAsync = async (app) => {
           (DATE_TRUNC('day', started_at AT TIME ZONE ${tz}))::date::text AS date,
           server_id,
           COUNT(*)::int AS sessions,
-          -- Weighted avg bitrate per (date, server): AVG across raw rows
-          AVG(COALESCE(bitrate, 0))::bigint AS avg_bitrate,
+          -- Weighted avg bitrate per (date, server): sum(bitrate) / session count, same
+          -- shape as the aggregate branch above so summary and chart never disagree.
+          (SUM(COALESCE(bitrate, 0)::bigint) / NULLIF(COUNT(*), 0))::bigint AS avg_bitrate,
           -- Calculate actual data transferred in bytes: kbps * ms / 8 = bytes
           (SUM(COALESCE(bitrate, 0)::bigint * COALESCE(duration_ms, 0)::bigint) / 8)::bigint AS total_bytes,
           MAX(COALESCE(bitrate, 0))::bigint AS peak_bitrate,
@@ -149,9 +151,10 @@ export const bandwidthRoutes: FastifyPluginAsync = async (app) => {
   /**
    * GET /bandwidth/top-users - Top bandwidth consumers
    *
-   * Returns users ranked by total bandwidth consumption across selected servers.
-   * Same human on two servers = two rows (serverUserId is server-scoped).
-   * Each row carries a serverId discriminator.
+   * Returns identities ranked by total bandwidth consumption across selected
+   * servers. A merged person is one row: bytes/sessions summed across every
+   * account they have on the resolved servers, with a representative account
+   * (deterministic tiebreak) carrying the serverId/serverUserId for the row.
    */
   app.get('/bandwidth/top-users', { preHandler: [app.authenticate] }, async (request, reply) => {
     const query = statsQuerySchema.safeParse(request.query);
@@ -164,23 +167,27 @@ export const bandwidthRoutes: FastifyPluginAsync = async (app) => {
     const dateRange = resolveDateRange(period, startDate, endDate);
 
     const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
+    if (resolvedIds?.length === 0) {
+      return { data: [] };
+    }
     const useAggregate = await hasBandwidthAggregate();
 
     let result;
 
     if (useAggregate) {
       const serverFilter = buildMultiServerFragment(resolvedIds, 'dbu.server_id');
+      const serverFilterSu2 = buildMultiServerFragment(resolvedIds, 'su2.server_id');
       const baseWhere = dateRange.start
         ? sql`WHERE dbu.day >= ${dateRange.start}`
         : sql`WHERE true`;
 
       result = await db.execute(sql`
         SELECT
-          su.username AS username,
+          rep.username AS username,
           u.name AS identity_name,
-          su.thumb_url AS thumb_url,
-          su.id AS server_user_id,
-          su.server_id AS server_id,
+          rep.thumb_url AS thumb_url,
+          rep.id AS server_user_id,
+          rep.server_id AS server_id,
           -- Calculate actual data transferred in bytes: kbps * ms / 8 = bytes
           (SUM(dbu.total_bits_ms) / 8)::bigint AS total_bytes,
           SUM(dbu.session_count)::int AS sessions,
@@ -188,39 +195,54 @@ export const bandwidthRoutes: FastifyPluginAsync = async (app) => {
           SUM(dbu.total_duration_ms)::bigint AS total_duration_ms
         FROM daily_bandwidth_by_user dbu
         JOIN server_users su ON dbu.server_user_id = su.id
-        LEFT JOIN users u ON su.user_id = u.id
+        JOIN users u ON su.user_id = u.id
+        INNER JOIN LATERAL (
+          SELECT su2.id, su2.username, su2.thumb_url, su2.server_id
+          FROM server_users su2
+          WHERE su2.user_id = u.id ${serverFilterSu2}
+          ORDER BY ${representativeAccountOrderSql('su2')}
+          LIMIT 1
+        ) rep ON true
         ${baseWhere}
         ${period === 'custom' ? sql`AND dbu.day < ${dateRange.end}` : sql``}
         ${serverFilter}
-        GROUP BY su.id, su.username, su.thumb_url, su.server_id, u.name
+        GROUP BY u.id, u.name, rep.id, rep.username, rep.thumb_url, rep.server_id
         ORDER BY total_bytes DESC
         LIMIT 10
       `);
     } else {
       const serverFilter = buildMultiServerFragment(resolvedIds, 's.server_id');
+      const serverFilterSu2 = buildMultiServerFragment(resolvedIds, 'su2.server_id');
       const baseWhere = dateRange.start
         ? sql`WHERE s.started_at >= ${dateRange.start}`
         : sql`WHERE true`;
 
       result = await db.execute(sql`
         SELECT
-          su.username AS username,
+          rep.username AS username,
           u.name AS identity_name,
-          su.thumb_url AS thumb_url,
-          su.id AS server_user_id,
-          su.server_id AS server_id,
+          rep.thumb_url AS thumb_url,
+          rep.id AS server_user_id,
+          rep.server_id AS server_id,
           -- Calculate actual data transferred in bytes: kbps * ms / 8 = bytes
           (SUM(COALESCE(s.bitrate, 0)::bigint * COALESCE(s.duration_ms, 0)::bigint) / 8)::bigint AS total_bytes,
           COUNT(*)::int AS sessions,
-          AVG(COALESCE(s.bitrate, 0))::bigint AS avg_bitrate,
+          (SUM(COALESCE(s.bitrate, 0)::bigint) / NULLIF(COUNT(*), 0))::bigint AS avg_bitrate,
           SUM(COALESCE(s.duration_ms, 0))::bigint AS total_duration_ms
         FROM sessions s
         JOIN server_users su ON s.server_user_id = su.id
-        LEFT JOIN users u ON su.user_id = u.id
+        JOIN users u ON su.user_id = u.id
+        INNER JOIN LATERAL (
+          SELECT su2.id, su2.username, su2.thumb_url, su2.server_id
+          FROM server_users su2
+          WHERE su2.user_id = u.id ${serverFilterSu2}
+          ORDER BY ${representativeAccountOrderSql('su2')}
+          LIMIT 1
+        ) rep ON true
         ${baseWhere}
         ${period === 'custom' ? sql`AND s.started_at < ${dateRange.end}` : sql``}
         ${serverFilter}
-        GROUP BY su.id, su.username, su.thumb_url, su.server_id, u.name
+        GROUP BY u.id, u.name, rep.id, rep.username, rep.thumb_url, rep.server_id
         ORDER BY total_bytes DESC
         LIMIT 10
       `);
@@ -276,27 +298,32 @@ export const bandwidthRoutes: FastifyPluginAsync = async (app) => {
     const dateRange = resolveDateRange(period, startDate, endDate);
 
     const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
-    const serverFilter = buildMultiServerFragment(resolvedIds);
+    const serverFilter = buildMultiServerFragment(resolvedIds, 's.server_id');
 
     const baseWhere = dateRange.start
-      ? sql`WHERE started_at >= ${dateRange.start}`
+      ? sql`WHERE s.started_at >= ${dateRange.start}`
       : sql`WHERE true`;
 
-    // Aggregate KPIs across all selected servers
+    // Aggregate KPIs across all selected servers. unique_users is counted by
+    // identity (server_users.user_id), not by account, so a person merged
+    // across two selected servers counts once.
     const result = await db.execute(sql`
       SELECT
         COUNT(*)::int AS total_sessions,
         -- Calculate actual data transferred in bytes: kbps * ms / 8 = bytes
-        (SUM(COALESCE(bitrate, 0)::bigint * COALESCE(duration_ms, 0)::bigint) / 8)::bigint AS total_bytes,
-        AVG(COALESCE(bitrate, 0))::bigint AS avg_bitrate,
-        MAX(COALESCE(bitrate, 0))::bigint AS peak_bitrate,
-        MIN(COALESCE(bitrate, 0)) FILTER (WHERE bitrate > 0)::bigint AS min_bitrate,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY COALESCE(bitrate, 0))::bigint AS median_bitrate,
-        SUM(COALESCE(duration_ms, 0))::bigint AS total_duration_ms,
-        COUNT(DISTINCT server_user_id)::int AS unique_users
-      FROM sessions
+        (SUM(COALESCE(s.bitrate, 0)::bigint * COALESCE(s.duration_ms, 0)::bigint) / 8)::bigint AS total_bytes,
+        -- Session-weighted: sum(bitrate) / session count, matching the daily chart and
+        -- top-users formula so this KPI never disagrees with the chart it summarizes.
+        (SUM(COALESCE(s.bitrate, 0)::bigint) / NULLIF(COUNT(*), 0))::bigint AS avg_bitrate,
+        MAX(COALESCE(s.bitrate, 0))::bigint AS peak_bitrate,
+        MIN(COALESCE(s.bitrate, 0)) FILTER (WHERE s.bitrate > 0)::bigint AS min_bitrate,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY COALESCE(s.bitrate, 0))::bigint AS median_bitrate,
+        SUM(COALESCE(s.duration_ms, 0))::bigint AS total_duration_ms,
+        COUNT(DISTINCT su.user_id)::int AS unique_users
+      FROM sessions s
+      JOIN server_users su ON su.id = s.server_user_id
       ${baseWhere}
-      ${period === 'custom' ? sql`AND started_at < ${dateRange.end}` : sql``}
+      ${period === 'custom' ? sql`AND s.started_at < ${dateRange.end}` : sql``}
       ${serverFilter}
     `);
 
@@ -313,23 +340,26 @@ export const bandwidthRoutes: FastifyPluginAsync = async (app) => {
 
     const totalBytes = Number(row.total_bytes ?? 0);
 
-    // Compute per-server KPI breakdown - one pass with GROUP BY server_id
+    // Compute per-server KPI breakdown - one pass with GROUP BY server_id.
+    // unique_users here is legitimately account-scoped per single server: a
+    // same-server duplicate is already collapsed into one server_users row
+    // by merge, so COUNT(DISTINCT server_user_id) equals distinct identities.
     const perServerResult = await db.execute(sql`
       SELECT
-        server_id,
+        s.server_id,
         COUNT(*)::int AS total_sessions,
-        (SUM(COALESCE(bitrate, 0)::bigint * COALESCE(duration_ms, 0)::bigint) / 8)::bigint AS total_bytes,
-        AVG(COALESCE(bitrate, 0))::bigint AS avg_bitrate,
-        MAX(COALESCE(bitrate, 0))::bigint AS peak_bitrate,
-        MIN(COALESCE(bitrate, 0)) FILTER (WHERE bitrate > 0)::bigint AS min_bitrate,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY COALESCE(bitrate, 0))::bigint AS median_bitrate,
-        SUM(COALESCE(duration_ms, 0))::bigint AS total_duration_ms,
-        COUNT(DISTINCT server_user_id)::int AS unique_users
-      FROM sessions
+        (SUM(COALESCE(s.bitrate, 0)::bigint * COALESCE(s.duration_ms, 0)::bigint) / 8)::bigint AS total_bytes,
+        (SUM(COALESCE(s.bitrate, 0)::bigint) / NULLIF(COUNT(*), 0))::bigint AS avg_bitrate,
+        MAX(COALESCE(s.bitrate, 0))::bigint AS peak_bitrate,
+        MIN(COALESCE(s.bitrate, 0)) FILTER (WHERE s.bitrate > 0)::bigint AS min_bitrate,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY COALESCE(s.bitrate, 0))::bigint AS median_bitrate,
+        SUM(COALESCE(s.duration_ms, 0))::bigint AS total_duration_ms,
+        COUNT(DISTINCT s.server_user_id)::int AS unique_users
+      FROM sessions s
       ${baseWhere}
-      ${period === 'custom' ? sql`AND started_at < ${dateRange.end}` : sql``}
+      ${period === 'custom' ? sql`AND s.started_at < ${dateRange.end}` : sql``}
       ${serverFilter}
-      GROUP BY server_id
+      GROUP BY s.server_id
     `);
 
     const byServer: Record<string, BandwidthSummaryServerKpis> = {};

@@ -933,13 +933,17 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       ? sql``
       : sql`LEFT JOIN library_items li ON li.server_id = s.server_id AND li.rating_key = s.rating_key`;
 
+    // uniqueUsers is counted by identity (server_users.user_id), not by
+    // account, so a person merged across two servers in the filtered set
+    // counts once - consistent with unique_content's cross-server dedup.
     const aggregateResult = await db.execute(sql`
       SELECT
         COUNT(DISTINCT COALESCE(s.reference_id, s.id))::int as play_count,
         COALESCE(SUM(s.duration_ms), 0)::bigint as total_watch_time_ms,
-        COUNT(DISTINCT s.server_user_id)::int as unique_users,
+        COUNT(DISTINCT su_agg.user_id)::int as unique_users,
         ${uniqueContentExpr}::int as unique_content
       FROM sessions s
+      JOIN server_users su_agg ON su_agg.id = s.server_user_id
       ${libraryJoin}
       ${whereClause}
     `);

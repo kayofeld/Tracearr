@@ -44,7 +44,12 @@ vi.mock('../../db/client.js', () => ({
     execute: (...args: unknown[]) => mockDbExecute(...args),
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
+        // The server-filtered active-users query joins server_users to count
+        // distinct identities, other server-filtered queries stay unjoined.
         where: vi.fn().mockResolvedValue([]),
+        innerJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
       }),
     }),
   },

@@ -120,28 +120,32 @@ export const engagementRoutes: FastifyPluginAsync = async (app) => {
           ),
           top_content_data AS (
             SELECT
-              rating_key,
-              media_title,
-              show_title,
-              media_type,
-              thumb_path,
-              server_id,
-              year,
-              SUM(plays) AS total_plays,
-              ROUND(SUM(cumulative_watched_ms) / 1000.0 / 60 / 60, 1) AS total_watch_hours,
-              COUNT(DISTINCT server_user_id) AS unique_viewers,
-              SUM(valid_sessions) AS valid_sessions,
-              SUM(total_sessions) AS total_sessions,
-              COUNT(*) FILTER (WHERE engagement_tier IN ('watched', 'rewatched')) AS completions,
-              COUNT(*) FILTER (WHERE engagement_tier = 'rewatched') AS rewatches,
-              COUNT(*) FILTER (WHERE engagement_tier = 'abandoned') AS abandonments,
-              ROUND(100.0 * COUNT(*) FILTER (WHERE engagement_tier IN ('watched', 'rewatched'))
+              ca.rating_key,
+              ca.media_title,
+              ca.show_title,
+              ca.media_type,
+              ca.thumb_path,
+              ca.server_id,
+              ca.year,
+              SUM(ca.plays) AS total_plays,
+              ROUND(SUM(ca.cumulative_watched_ms) / 1000.0 / 60 / 60, 1) AS total_watch_hours,
+              COUNT(DISTINCT su.user_id) AS unique_viewers,
+              SUM(ca.valid_sessions) AS valid_sessions,
+              SUM(ca.total_sessions) AS total_sessions,
+              COUNT(*) FILTER (WHERE ca.engagement_tier IN ('watched', 'rewatched')) AS completions,
+              COUNT(*) FILTER (WHERE ca.engagement_tier = 'rewatched') AS rewatches,
+              COUNT(*) FILTER (WHERE ca.engagement_tier = 'abandoned') AS abandonments,
+              ROUND(100.0 * COUNT(*) FILTER (WHERE ca.engagement_tier IN ('watched', 'rewatched'))
                     / NULLIF(COUNT(*), 0), 1) AS completion_rate,
-              ROUND(100.0 * COUNT(*) FILTER (WHERE engagement_tier = 'abandoned')
+              ROUND(100.0 * COUNT(*) FILTER (WHERE ca.engagement_tier = 'abandoned')
                     / NULLIF(COUNT(*), 0), 1) AS abandonment_rate
-            FROM content_agg
+            FROM content_agg ca
+            -- Groups are per rating_key (server-scoped), where an identity has at most one
+            -- account, so su.user_id counts match server_user_id counts; the join keeps the
+            -- viewer metric identity-based if this ever gains cross-server title dedup.
+            JOIN server_users su ON su.id = ca.server_user_id
             WHERE true ${mediaTypeFilter}
-            GROUP BY rating_key, media_title, show_title, media_type, content_duration_ms, thumb_path, server_id, year
+            GROUP BY ca.rating_key, ca.media_title, ca.show_title, ca.media_type, ca.content_duration_ms, ca.thumb_path, ca.server_id, ca.year
             ORDER BY total_plays DESC
             LIMIT ${limit}
           ),
@@ -314,25 +318,26 @@ export const engagementRoutes: FastifyPluginAsync = async (app) => {
             GROUP BY ca.server_user_id, ca.show_title, ist.avg_episodes_per_viewing_day
           )
           SELECT
-            show_title,
-            MAX(thumb_path) AS thumb_path,
-            MAX(server_id::text)::uuid AS server_id,
-            MAX(year) AS year,
-            SUM(unique_episodes_watched) AS total_episode_views,
-            SUM(total_watch_hours) AS total_watch_hours,
-            COUNT(DISTINCT server_user_id) AS unique_viewers,
-            SUM(total_valid_sessions) AS valid_sessions,
-            SUM(total_all_sessions) AS total_sessions,
-            ROUND(AVG(unique_episodes_watched), 1) AS avg_episodes_per_viewer,
-            ROUND(AVG(episode_completion_rate), 1) AS avg_completion_rate,
+            sa.show_title,
+            MAX(sa.thumb_path) AS thumb_path,
+            MAX(sa.server_id::text)::uuid AS server_id,
+            MAX(sa.year) AS year,
+            SUM(sa.unique_episodes_watched) AS total_episode_views,
+            SUM(sa.total_watch_hours) AS total_watch_hours,
+            COUNT(DISTINCT su.user_id) AS unique_viewers,
+            SUM(sa.total_valid_sessions) AS valid_sessions,
+            SUM(sa.total_all_sessions) AS total_sessions,
+            ROUND(AVG(sa.unique_episodes_watched), 1) AS avg_episodes_per_viewer,
+            ROUND(AVG(sa.episode_completion_rate), 1) AS avg_completion_rate,
             -- Enhanced binge score (0-100): Volume×Quality (60%) + Daily Intensity (40%)
             -- Note: Continuity metrics not available in date-filtered queries
             ROUND(
-              LEAST(AVG(unique_episodes_watched) * AVG(episode_completion_rate) / 100, 60) +
-              LEAST(AVG(avg_episodes_per_viewing_day) * 8, 40),
+              LEAST(AVG(sa.unique_episodes_watched) * AVG(sa.episode_completion_rate) / 100, 60) +
+              LEAST(AVG(sa.avg_episodes_per_viewing_day) * 8, 40),
             1) AS binge_score
-          FROM show_agg
-          GROUP BY show_title
+          FROM show_agg sa
+          JOIN server_users su ON su.id = sa.server_user_id
+          GROUP BY sa.show_title
           ORDER BY total_episode_views DESC
           LIMIT ${limit}
         `),
@@ -514,11 +519,11 @@ export const engagementRoutes: FastifyPluginAsync = async (app) => {
       return reply.badRequest('Invalid query parameters');
     }
 
-    const { period, startDate, endDate, serverId, limit, orderBy } = query.data;
+    const { period, startDate, endDate, serverId, serverIds, limit, orderBy } = query.data;
     const authUser = request.user;
     const dateRange = resolveDateRange(period, startDate, endDate);
 
-    const resolvedIds = resolveServerIds(authUser, serverId, undefined);
+    const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
     const serverFilter = buildMultiServerFragment(resolvedIds);
 
     // Map orderBy to SQL column
@@ -615,24 +620,25 @@ export const engagementRoutes: FastifyPluginAsync = async (app) => {
           GROUP BY ca.server_user_id, ca.show_title, ist.avg_episodes_per_viewing_day
         )
         SELECT
-          show_title,
-          MAX(server_id::text)::uuid AS server_id,
-          MAX(thumb_path) AS thumb_path,
-          MAX(year) AS year,
-          SUM(unique_episodes_watched)::bigint AS total_episode_views,
-          SUM(total_watch_hours)::numeric AS total_watch_hours,
-          COUNT(DISTINCT server_user_id)::bigint AS unique_viewers,
-          SUM(total_valid_sessions)::bigint AS valid_sessions,
-          SUM(total_all_sessions)::bigint AS total_sessions,
-          ROUND(AVG(unique_episodes_watched), 1) AS avg_episodes_per_viewer,
-          ROUND(AVG(episode_completion_rate), 1) AS avg_completion_rate,
+          sa.show_title,
+          MAX(sa.server_id::text)::uuid AS server_id,
+          MAX(sa.thumb_path) AS thumb_path,
+          MAX(sa.year) AS year,
+          SUM(sa.unique_episodes_watched)::bigint AS total_episode_views,
+          SUM(sa.total_watch_hours)::numeric AS total_watch_hours,
+          COUNT(DISTINCT su.user_id)::bigint AS unique_viewers,
+          SUM(sa.total_valid_sessions)::bigint AS valid_sessions,
+          SUM(sa.total_all_sessions)::bigint AS total_sessions,
+          ROUND(AVG(sa.unique_episodes_watched), 1) AS avg_episodes_per_viewer,
+          ROUND(AVG(sa.episode_completion_rate), 1) AS avg_completion_rate,
           -- Enhanced binge score (0-100): Volume×Quality (60%) + Daily Intensity (40%)
           ROUND(
-            LEAST(AVG(unique_episodes_watched) * AVG(episode_completion_rate) / 100, 60) +
-            LEAST(AVG(avg_episodes_per_viewing_day) * 8, 40),
+            LEAST(AVG(sa.unique_episodes_watched) * AVG(sa.episode_completion_rate) / 100, 60) +
+            LEAST(AVG(sa.avg_episodes_per_viewing_day) * 8, 40),
           1) AS binge_score
-        FROM show_agg
-        GROUP BY show_title
+        FROM show_agg sa
+        JOIN server_users su ON su.id = sa.server_user_id
+        GROUP BY sa.show_title
         ORDER BY ${orderColumn} DESC
         LIMIT ${limit}
       `);
