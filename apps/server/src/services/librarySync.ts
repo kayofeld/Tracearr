@@ -14,7 +14,7 @@ import { db } from '../db/client.js';
 import { servers, libraryItems, librarySnapshots } from '../db/schema.js';
 import { createMediaServerClient, type MediaLibraryItem } from './mediaServer/index.js';
 import type { LibrarySyncProgress } from '@tracearr/shared';
-import { REDIS_KEYS } from '@tracearr/shared';
+import { REDIS_KEYS, RESOLUTION_TIERS, resolutionTierRank } from '@tracearr/shared';
 import { getHeavyOpsStatus } from '../jobs/heavyOpsLock.js';
 import { scrubStringFields } from '../utils/sanitizeText.js';
 import type { Redis } from 'ioredis';
@@ -899,15 +899,17 @@ export class LibrarySyncService {
     const validItems = items.filter((item) => item.fileSize && item.fileSize > 0);
 
     for (const item of validItems) {
-      // Resolution counts
-      const res = item.videoResolution?.toLowerCase();
-      if (res === '4k' || res === '2160p' || res === 'uhd') {
+      // Resolution counts. The snapshot schema only has 4 buckets, so tiers
+      // above 1080p (1440p, 8K) fold into the 4K bucket - the closest one
+      // available - rather than being silently dropped into SD.
+      const rank = resolutionTierRank(item.videoResolution);
+      if (rank !== null && rank >= RESOLUTION_TIERS['1440p']) {
         count4k++;
-      } else if (res === '1080p' || res === '1080') {
+      } else if (rank === RESOLUTION_TIERS['1080p']) {
         count1080p++;
-      } else if (res === '720p' || res === '720') {
+      } else if (rank === RESOLUTION_TIERS['720p']) {
         count720p++;
-      } else if (res) {
+      } else if (item.videoResolution) {
         countSd++;
       }
 

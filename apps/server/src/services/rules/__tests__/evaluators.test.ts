@@ -231,6 +231,11 @@ describe('Helper Functions', () => {
       expect(getResolution(null, 1080)).toBe('1080p');
       expect(getResolution(1920, null)).toBe('1080p');
     });
+
+    // regression: issue #798, 1440p folds up to 4K since VideoResolution has no 1440p tier
+    it('returns 4K for 1440p dimensions 2560x1440 (previously 1080p under the old ladder)', () => {
+      expect(getResolution(2560, 1440)).toBe('4K');
+    });
   });
 
   describe('resolutionToNumber', () => {

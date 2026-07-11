@@ -506,3 +506,13 @@ export {
 
 // Media display utilities
 export { formatEpisodeLabel, type FormatEpisodeLabelOptions } from './media.js';
+
+// Resolution classification
+export {
+  RESOLUTION_TIERS,
+  classifyByDimensions,
+  normalizeResolutionLabel,
+  resolutionTierRank,
+  normalizeResolution,
+  type ResolutionInput,
+} from './resolution.js';

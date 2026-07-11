@@ -36,6 +36,7 @@ import {
   extractMusicMetadata,
   extractStreamDetails,
 } from './jellyfinEmbyUtils.js';
+import { classifyByDimensions } from '@tracearr/shared';
 
 // ============================================================================
 // Stream Decisions Function Type
@@ -568,16 +569,15 @@ export function mapJellyfinType(
 }
 
 /**
- * Convert video dimensions to resolution string
+ * Convert video dimensions to a resolution string.
+ *
+ * Uses width OR height (whichever gives the higher tier) so 4:3 and other
+ * non-16:9 sources aren't misclassified from width alone.
  */
-export function getResolutionString(width?: number, _height?: number): string | undefined {
+export function getResolutionString(width?: number, height?: number): string | undefined {
   if (!width || width <= 0) return undefined;
 
-  if (width >= 3840) return '4k';
-  if (width >= 1920) return '1080p';
-  if (width >= 1280) return '720p';
-  if (width >= 720) return '480p';
-  return 'sd';
+  return classifyByDimensions(width, height)?.toLowerCase();
 }
 
 /**

@@ -31,6 +31,7 @@ import type {
   TranscodeInfo,
   SubtitleInfo,
 } from '@tracearr/shared';
+import { normalizeResolutionLabel } from '@tracearr/shared';
 import { calculateProgress } from '../shared/parserUtils.js';
 import { extractPlexLiveTvMetadata, extractPlexMusicMetadata } from './plexUtils.js';
 
@@ -1460,18 +1461,8 @@ function parseExternalIds(guids: Array<{ id: string }> | undefined): {
  * Normalize to consistent format with 'p' suffix for numeric resolutions
  */
 function normalizeVideoResolution(resolution: string | undefined): string | undefined {
-  if (!resolution) return undefined;
-
-  const lower = resolution.toLowerCase();
-  if (lower === '4k' || lower === 'uhd') return '4k';
-  if (lower === 'sd') return 'sd';
-
-  // Add 'p' suffix if not present and is numeric
-  if (/^\d+$/.test(lower)) {
-    return `${lower}p`;
-  }
-
-  return lower;
+  const normalized = normalizeResolutionLabel(resolution);
+  return normalized ? normalized.toLowerCase() : undefined;
 }
 
 /**

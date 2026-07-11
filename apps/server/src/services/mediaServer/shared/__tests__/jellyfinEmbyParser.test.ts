@@ -212,28 +212,37 @@ describe('mapJellyfinType', () => {
 // ============================================================================
 
 describe('getResolutionString', () => {
-  it('returns 4k for width >= 3840', () => {
+  it('returns 4k for width >= 3800', () => {
     expect(getResolutionString(3840, 2160)).toBe('4k');
     expect(getResolutionString(4096, 2160)).toBe('4k');
   });
 
-  it('returns 1080p for width >= 1920', () => {
-    expect(getResolutionString(1920, 1080)).toBe('1080p');
-    expect(getResolutionString(2560, 1440)).toBe('1080p');
+  it('returns 1440p for width >= 2500', () => {
+    // Previously misclassified as 1080p because the height param was unused
+    expect(getResolutionString(2560, 1440)).toBe('1440p');
   });
 
-  it('returns 720p for width >= 1280', () => {
+  it('returns 1080p for width >= 1800', () => {
+    expect(getResolutionString(1920, 1080)).toBe('1080p');
+  });
+
+  it('returns 720p for width >= 1200', () => {
     expect(getResolutionString(1280, 720)).toBe('720p');
     expect(getResolutionString(1366, 768)).toBe('720p');
   });
 
-  it('returns 480p for width >= 720', () => {
+  it('returns 480p for width >= 700', () => {
     expect(getResolutionString(720, 480)).toBe('480p');
     expect(getResolutionString(854, 480)).toBe('480p');
   });
 
-  it('returns sd for width < 720', () => {
-    expect(getResolutionString(640, 480)).toBe('sd');
+  it('returns 480p when height alone crosses the 480p band', () => {
+    // 640x480 (VGA/4:3): width is below the 480p band, but height indicates
+    // full 480p source - previously misclassified as sd since height was ignored
+    expect(getResolutionString(640, 480)).toBe('480p');
+  });
+
+  it('returns sd when both width and height are below every band', () => {
     expect(getResolutionString(320, 240)).toBe('sd');
   });
 

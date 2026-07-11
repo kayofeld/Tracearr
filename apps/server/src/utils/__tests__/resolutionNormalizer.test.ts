@@ -5,6 +5,7 @@
  * Specifically tests handling of:
  * - Widescreen/anamorphic content (Issue #75)
  * - 4:3 aspect ratio content (Issue #183)
+ * - Server label taking precedence over dimensions (Issue #798)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -71,58 +72,63 @@ describe('normalizeResolution', () => {
       expect(normalizeResolution({ resolution: '540' })).toBe('540p');
     });
 
-    it('should use resolution string only when no dimensions available', () => {
-      // Resolution string is a fallback - dimensions take priority
+    it('should use resolution string when no dimensions available', () => {
       expect(normalizeResolution({ resolution: '1080p' })).toBe('1080p');
       expect(normalizeResolution({ resolution: '720p' })).toBe('720p');
     });
   });
 
-  describe('width/height priority over resolution string (Issue #277)', () => {
-    it('should prefer width/height over resolution string', () => {
-      // Plex sends "720" for 1920x800 widescreen, but dimensions indicate 1080p
-      expect(normalizeResolution({ resolution: '720', width: 1920, height: 800 })).toBe('1080p');
+  describe('label takes precedence over dimensions (Issue #798)', () => {
+    it('should trust the server label even when it is present alongside dimensions', () => {
+      // Root cause of Issue #798: a 1916x1036 file is genuinely 1080p, but the
+      // old width>=1920 cutoff missed it by 4px and downgraded it to 720p.
+      // Plex's own label should always win.
+      expect(normalizeResolution({ resolution: '1080', width: 1916, height: 1036 })).toBe('1080p');
     });
 
-    it('should return 1080p for widescreen even when Plex says 720 (Issue #277)', () => {
-      // Main bug: 1920x800 scope content incorrectly labeled as 720p
-      expect(normalizeResolution({ resolution: '720', width: 1920, height: 800 })).toBe('1080p');
-      expect(normalizeResolution({ resolution: '720', width: 1920, height: 804 })).toBe('1080p');
-      expect(normalizeResolution({ resolution: '720', width: 1920, height: 816 })).toBe('1080p');
+    it('should never let dimensions recompute a label the server already gave', () => {
+      expect(normalizeResolution({ resolution: '720', width: 1920, height: 800 })).toBe('720p');
+      expect(normalizeResolution({ resolution: '4k', width: 640, height: 480 })).toBe('4K');
     });
 
-    it('should return 4K for ultrawide even when Plex says 1080 or lower', () => {
-      expect(normalizeResolution({ resolution: '1080', width: 3840, height: 1600 })).toBe('4K');
+    it('should fall back to dimensions when no label is present', () => {
+      // Plex clears videoResolution on transcode sessions with original media -
+      // dimensions are the only signal available there.
+      expect(normalizeResolution({ width: 1920, height: 800 })).toBe('1080p');
+      expect(normalizeResolution({ width: 1440, height: 1080 })).toBe('1080p');
     });
 
-    it('should return 1080p for 4:3 content even if width suggests 720p', () => {
-      // 1440x1080 is 4:3 content - height indicates 1080p source
-      expect(normalizeResolution({ resolution: '1080', width: 1440, height: 1080 })).toBe('1080p');
+    it('should fall back to dimensions when the label is empty', () => {
+      expect(normalizeResolution({ resolution: '', width: 1920, height: 1080 })).toBe('1080p');
     });
   });
 
   describe('width-based detection (widescreen support)', () => {
-    it('should return 4K for width >= 3840', () => {
-      expect(normalizeResolution({ width: 3840 })).toBe('4K');
+    it('should return 4K for width >= 3800', () => {
+      expect(normalizeResolution({ width: 3800 })).toBe('4K');
       expect(normalizeResolution({ width: 4096 })).toBe('4K');
     });
 
-    it('should return 1080p for width >= 1920', () => {
-      expect(normalizeResolution({ width: 1920 })).toBe('1080p');
-      expect(normalizeResolution({ width: 2560 })).toBe('1080p');
+    it('should return 1440p for width >= 2500', () => {
+      expect(normalizeResolution({ width: 2560 })).toBe('1440p');
     });
 
-    it('should return 720p for width >= 1280', () => {
+    it('should return 1080p for width >= 1800', () => {
+      expect(normalizeResolution({ width: 1800 })).toBe('1080p');
+      expect(normalizeResolution({ width: 1920 })).toBe('1080p');
+    });
+
+    it('should return 720p for width >= 1200', () => {
       expect(normalizeResolution({ width: 1280 })).toBe('720p');
       expect(normalizeResolution({ width: 1600 })).toBe('720p');
     });
 
-    it('should return 480p for width >= 854', () => {
+    it('should return 480p for width >= 700', () => {
       expect(normalizeResolution({ width: 854 })).toBe('480p');
       expect(normalizeResolution({ width: 960 })).toBe('480p');
     });
 
-    it('should return SD for width < 854', () => {
+    it('should return SD for width < 700', () => {
       expect(normalizeResolution({ width: 640 })).toBe('SD');
       expect(normalizeResolution({ width: 320 })).toBe('SD');
     });
@@ -223,27 +229,27 @@ describe('normalizeResolution', () => {
   });
 
   describe('height-based fallback', () => {
-    it('should return 4K for height >= 2160 (when no width)', () => {
+    it('should return 4K for height >= 2000 (when no width)', () => {
       expect(normalizeResolution({ height: 2160 })).toBe('4K');
       expect(normalizeResolution({ height: 2400 })).toBe('4K');
     });
 
-    it('should return 1080p for height >= 1080 (when no width)', () => {
+    it('should return 1080p for height >= 1000 (when no width)', () => {
       expect(normalizeResolution({ height: 1080 })).toBe('1080p');
       expect(normalizeResolution({ height: 1200 })).toBe('1080p');
     });
 
-    it('should return 720p for height >= 720 (when no width)', () => {
+    it('should return 720p for height >= 700 (when no width)', () => {
       expect(normalizeResolution({ height: 720 })).toBe('720p');
       expect(normalizeResolution({ height: 900 })).toBe('720p');
     });
 
-    it('should return 480p for height >= 480 (when no width)', () => {
+    it('should return 480p for height >= 400 (when no width)', () => {
       expect(normalizeResolution({ height: 480 })).toBe('480p');
       expect(normalizeResolution({ height: 576 })).toBe('480p');
     });
 
-    it('should return SD for height < 480 (when no width)', () => {
+    it('should return SD for height < 400 (when no width)', () => {
       expect(normalizeResolution({ height: 360 })).toBe('SD');
       expect(normalizeResolution({ height: 240 })).toBe('SD');
     });
