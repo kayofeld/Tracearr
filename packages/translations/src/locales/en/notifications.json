@@ -147,7 +147,8 @@
         "message": "You can now proceed with setup"
       },
       "usersMerged": {
-        "title": "Users merged"
+        "title": "Users merged",
+        "rulesKept": "Kept target's version of: {{names}}"
       },
       "serverUserSplit": {
         "title": "Account split into a separate user"

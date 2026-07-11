@@ -78,6 +78,8 @@
     "uptime": "Uptime"
   },
   "devices": {
+    "analyzedSessions": "Analyzed Sessions",
+    "analyzedSessionsTooltip": "Sessions in device + codec combinations with at least {{count}} sessions and a known codec. Rare combinations and sessions with no codec info aren't counted.",
     "compatibilityMatrix": "Compatibility Matrix",
     "compatibilityMatrixDesc": "Direct play rates by device and video codec. Sorted by session volume.",
     "description": "See which devices direct play vs transcode each codec",
@@ -463,6 +465,7 @@
   "userDetail": {
     "acrossAllServers": "Across all linked accounts:",
     "adjustTrustScore": "Adjust Trust Score",
+    "allServers": "All servers",
     "backToUsers": "Back to Users",
     "byRule": "By / Rule",
     "linkedAccounts": "Linked accounts",
@@ -471,6 +474,8 @@
     "noSessionsFound": "No sessions found for this user.",
     "noTerminationsFound": "No stream terminations for this user.",
     "noViolationsFound": "No hi ha incompliment per a aquest usuari.",
+    "overallTrust": "Overall Trust",
+    "serverScope": "Server",
     "sessions": "Sessions",
     "splitAccount": "Split into separate user",
     "splitConfirmDescription": "Detach this server account into its own user. Its watch history and violations move with it.",
@@ -484,11 +489,11 @@
     "violations": "Incompliments"
   },
   "users": {
-    "allUsers": "Tots els usuaris",
     "mergeConfirm": "Merge",
     "mergeDialogDescription": "Every server account, session, and violation from the duplicate moves to the primary. The duplicate identity is deleted.",
     "mergeDialogTitle": "Merge users",
     "mergePickPrimary": "Choose the primary identity",
+    "mergePrimaryBadge": "Primary",
     "mergePrimaryForced": "This account can log in, so it must stay the primary.",
     "mergeSameIdentity": "These accounts already belong to the same user",
     "mergeSameServerAcknowledge": "I understand the same-server history combine cannot be undone",
@@ -507,6 +512,8 @@
     "resetTrustScoreTitle_other": "Reset Trust Score for {{count}} Users",
     "searchPlaceholder": "Cerca d'usuaris...",
     "selectAllUsers": "Selecciona els {{count}} usuaris",
+    "serversColumn": "Servers",
+    "showRemoved": "Show removed",
     "suggestionsDescription": "These identities look like the same person across servers. Review and merge them if they match.",
     "suggestionsError": "Could not load merge suggestions",
     "suggestionsMatchEmail": "Same email",
@@ -517,6 +524,7 @@
   },
   "violations": {
     "allClear": "Esborra-ho tot",
+    "allPeople": "All people",
     "allSeverities": "All Severities",
     "allStatuses": "All Statuses",
     "detail": {
@@ -550,10 +558,16 @@
     "dismissViolation_one": "Dismiss {{count}} Violation",
     "dismissViolation_other": "Dismiss {{count}} Violations",
     "dismissViolationsConfirm": "Are you sure you want to dismiss? This will remove them from the violation log permanently and restore associated trust scores.",
+    "filterByPerson": "Filter violations by this person",
+    "filterPeople": "People",
     "noMatches": "No s'ha trobat cap coincidència",
     "noViolationsDetected": "No s'han detectat incompliments de les normes",
     "noViolationsFound": "No violations found",
     "noViolationsRecorded": "No violations have been recorded yet.",
+    "peopleSelectedCount": "{{count}} people",
+    "personFilterEmpty": "No matching people found",
+    "personFilterError": "Failed to load people",
+    "personFilterPlaceholder": "Filter by person",
     "selectAllViolations": "Seleccioneu tots els filtres d'incompliments de {{count}}",
     "title": "Incompliments",
     "tryAdjustingFilters": "Proveu d'ajustar els vostres filtres",

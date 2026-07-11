@@ -243,6 +243,7 @@
         "title": "Réinitialiser les scores de confiance"
       },
       "usersMerged": {
+        "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },
       "violationAcknowledged": {

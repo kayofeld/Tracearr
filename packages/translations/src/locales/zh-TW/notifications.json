@@ -243,6 +243,7 @@
         "title": "重置信任分数"
       },
       "usersMerged": {
+        "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },
       "violationAcknowledged": {

@@ -78,6 +78,8 @@
     "uptime": "Uptime"
   },
   "devices": {
+    "analyzedSessions": "Analyzed Sessions",
+    "analyzedSessionsTooltip": "Sessions in device + codec combinations with at least {{count}} sessions and a known codec. Rare combinations and sessions with no codec info aren't counted.",
     "compatibilityMatrix": "Compatibility Matrix",
     "compatibilityMatrixDesc": "Direct play rates by device and video codec. Sorted by session volume.",
     "description": "See which devices direct play vs transcode each codec",
@@ -463,6 +465,7 @@
   "userDetail": {
     "acrossAllServers": "Across all linked accounts:",
     "adjustTrustScore": "Adjust Trust Score",
+    "allServers": "All servers",
     "backToUsers": "返回用户",
     "byRule": "按 / 规则",
     "linkedAccounts": "Linked accounts",
@@ -471,6 +474,8 @@
     "noSessionsFound": "未找到此用户的会话。",
     "noTerminationsFound": "此用户没有流终止。",
     "noViolationsFound": "没有此用户的违规行为。",
+    "overallTrust": "Overall Trust",
+    "serverScope": "Server",
     "sessions": "会话",
     "splitAccount": "Split into separate user",
     "splitConfirmDescription": "Detach this server account into its own user. Its watch history and violations move with it.",
@@ -484,11 +489,11 @@
     "violations": "违规"
   },
   "users": {
-    "allUsers": "所有用户",
     "mergeConfirm": "Merge",
     "mergeDialogDescription": "Every server account, session, and violation from the duplicate moves to the primary. The duplicate identity is deleted.",
     "mergeDialogTitle": "Merge users",
     "mergePickPrimary": "Choose the primary identity",
+    "mergePrimaryBadge": "Primary",
     "mergePrimaryForced": "This account can log in, so it must stay the primary.",
     "mergeSameIdentity": "These accounts already belong to the same user",
     "mergeSameServerAcknowledge": "I understand the same-server history combine cannot be undone",
@@ -507,6 +512,8 @@
     "resetTrustScoreTitle_other": "重置{{count}}个用户的信任分数",
     "searchPlaceholder": "搜索用户……",
     "selectAllUsers": "选择所有{{count}}个用户",
+    "serversColumn": "Servers",
+    "showRemoved": "Show removed",
     "suggestionsDescription": "These identities look like the same person across servers. Review and merge them if they match.",
     "suggestionsError": "Could not load merge suggestions",
     "suggestionsMatchEmail": "Same email",
@@ -517,6 +524,7 @@
   },
   "violations": {
     "allClear": "全部清除",
+    "allPeople": "All people",
     "allSeverities": "所有严重程度",
     "allStatuses": "所有状态",
     "detail": {
@@ -550,10 +558,16 @@
     "dismissViolation_one": "清除 {{count}} 违规",
     "dismissViolation_other": "清除 {{count}} 违规",
     "dismissViolationsConfirm": "您确定要删除吗？这将永久从违反日志中删除它们并恢复相关的信任分数。",
+    "filterByPerson": "Filter violations by this person",
+    "filterPeople": "People",
     "noMatches": "无匹配",
     "noViolationsDetected": "没有检测到违反规则的行为",
     "noViolationsFound": "未发现任何违规行为",
     "noViolationsRecorded": "尚未记录任何违反行为。",
+    "peopleSelectedCount": "{{count}} people",
+    "personFilterEmpty": "No matching people found",
+    "personFilterError": "Failed to load people",
+    "personFilterPlaceholder": "Filter by person",
     "selectAllViolations": "选择所有符合筛选条件的{{count}}个违规项",
     "title": "违规",
     "tryAdjustingFilters": "尝试调整筛选条件",

@@ -243,6 +243,7 @@
         "title": "Επαναφορά Βαθμών Εμπιστοσύνης"
       },
       "usersMerged": {
+        "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },
       "violationAcknowledged": {

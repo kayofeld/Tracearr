@@ -243,6 +243,7 @@
         "title": "Zresetuj wyniki zaufania"
       },
       "usersMerged": {
+        "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },
       "violationAcknowledged": {

@@ -243,7 +243,8 @@
         "title": "Trust Scores Reset"
       },
       "usersMerged": {
-        "title": "Users merged"
+        "title": "Users merged",
+        "rulesKept": "Kept target's version of: {{names}}"
       },
       "violationAcknowledged": {
         "message": "The violation has been marked as acknowledged",

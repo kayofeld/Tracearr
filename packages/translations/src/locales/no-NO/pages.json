@@ -78,6 +78,8 @@
     "uptime": "Oppetid"
   },
   "devices": {
+    "analyzedSessions": "Analyzed Sessions",
+    "analyzedSessionsTooltip": "Sessions in device + codec combinations with at least {{count}} sessions and a known codec. Rare combinations and sessions with no codec info aren't counted.",
     "compatibilityMatrix": "Kompatibilitetsmatrise",
     "compatibilityMatrixDesc": "Direkte avspillingsrater av enhet og videokodek. Sortert etter øktvolum.",
     "description": "Se hvilke enheter som spiller direkte mot transkode hver kodek",
@@ -463,6 +465,7 @@
   "userDetail": {
     "acrossAllServers": "Across all linked accounts:",
     "adjustTrustScore": "Juster tillitssum",
+    "allServers": "All servers",
     "backToUsers": "Tilbake til brukere",
     "byRule": "Av / Regel",
     "linkedAccounts": "Linked accounts",
@@ -471,6 +474,8 @@
     "noSessionsFound": "Ingen økter funnet for denne brukeren.",
     "noTerminationsFound": "Ingen strømopphør for denne brukeren.",
     "noViolationsFound": "Ingen brudd for denne brukeren.",
+    "overallTrust": "Overall Trust",
+    "serverScope": "Server",
     "sessions": "Økter",
     "splitAccount": "Split into separate user",
     "splitConfirmDescription": "Detach this server account into its own user. Its watch history and violations move with it.",
@@ -484,11 +489,11 @@
     "violations": "Brudd"
   },
   "users": {
-    "allUsers": "Alle brukere",
     "mergeConfirm": "Merge",
     "mergeDialogDescription": "Every server account, session, and violation from the duplicate moves to the primary. The duplicate identity is deleted.",
     "mergeDialogTitle": "Merge users",
     "mergePickPrimary": "Choose the primary identity",
+    "mergePrimaryBadge": "Primary",
     "mergePrimaryForced": "This account can log in, so it must stay the primary.",
     "mergeSameIdentity": "These accounts already belong to the same user",
     "mergeSameServerAcknowledge": "I understand the same-server history combine cannot be undone",
@@ -507,6 +512,8 @@
     "resetTrustScoreTitle_other": "Tilbakestillingsscore for {{count}} Brukere",
     "searchPlaceholder": "Søk etter brukere...",
     "selectAllUsers": "Velg alle {{count}} brukere",
+    "serversColumn": "Servers",
+    "showRemoved": "Show removed",
     "suggestionsDescription": "These identities look like the same person across servers. Review and merge them if they match.",
     "suggestionsError": "Could not load merge suggestions",
     "suggestionsMatchEmail": "Same email",
@@ -517,6 +524,7 @@
   },
   "violations": {
     "allClear": "Alt klart",
+    "allPeople": "All people",
     "allSeverities": "Alle Alvorlighetsgrader",
     "allStatuses": "Alle statuser",
     "detail": {
@@ -550,10 +558,16 @@
     "dismissViolation_one": "Avvis {{count}} Brudd",
     "dismissViolation_other": "Avvis {{count}} avvik",
     "dismissViolationsConfirm": "Er du sikker på at du vil avvise? Dette vil fjerne dem fra voldsloggen permanent og gjenopprette tilknyttede tillitspoeng.",
+    "filterByPerson": "Filter violations by this person",
+    "filterPeople": "People",
     "noMatches": "Ingen treff",
     "noViolationsDetected": "Ingen regelbrudd oppdaget",
     "noViolationsFound": "Ingen brudd funnet",
     "noViolationsRecorded": "Ingen brudd er registrert ennå.",
+    "peopleSelectedCount": "{{count}} people",
+    "personFilterEmpty": "No matching people found",
+    "personFilterError": "Failed to load people",
+    "personFilterPlaceholder": "Filter by person",
     "selectAllViolations": "Velg alle overtredelser av {{count}} som matcher filtre",
     "title": "Brudd",
     "tryAdjustingFilters": "Prøv å justere filtrene dine",

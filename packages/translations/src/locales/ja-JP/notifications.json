@@ -243,6 +243,7 @@
         "title": "信頼スコアをリセット"
       },
       "usersMerged": {
+        "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },
       "violationAcknowledged": {

@@ -78,6 +78,8 @@
     "uptime": "Délai de disponibilité"
   },
   "devices": {
+    "analyzedSessions": "Analyzed Sessions",
+    "analyzedSessionsTooltip": "Sessions in device + codec combinations with at least {{count}} sessions and a known codec. Rare combinations and sessions with no codec info aren't counted.",
     "compatibilityMatrix": "Matrice de compatibilité",
     "compatibilityMatrixDesc": "Taux de lecture directe par appareil et codec vidéo. Trié par volume de session.",
     "description": "Voir quels périphériques jouent directement vs transcoder chaque codec",
@@ -463,6 +465,7 @@
   "userDetail": {
     "acrossAllServers": "Across all linked accounts:",
     "adjustTrustScore": "Ajuster le score de confiance",
+    "allServers": "All servers",
     "backToUsers": "Retour aux utilisateurs",
     "byRule": "Par / Règle",
     "linkedAccounts": "Linked accounts",
@@ -471,6 +474,8 @@
     "noSessionsFound": "Aucune session trouvée pour cet utilisateur.",
     "noTerminationsFound": "Aucune interruption de lecture pour cet utilisateur.",
     "noViolationsFound": "Aucune violation pour cet utilisateur.",
+    "overallTrust": "Overall Trust",
+    "serverScope": "Server",
     "sessions": "Sessions",
     "splitAccount": "Split into separate user",
     "splitConfirmDescription": "Detach this server account into its own user. Its watch history and violations move with it.",
@@ -484,11 +489,11 @@
     "violations": "Violations"
   },
   "users": {
-    "allUsers": "Tous les utilisateurs",
     "mergeConfirm": "Merge",
     "mergeDialogDescription": "Every server account, session, and violation from the duplicate moves to the primary. The duplicate identity is deleted.",
     "mergeDialogTitle": "Merge users",
     "mergePickPrimary": "Choose the primary identity",
+    "mergePrimaryBadge": "Primary",
     "mergePrimaryForced": "This account can log in, so it must stay the primary.",
     "mergeSameIdentity": "These accounts already belong to the same user",
     "mergeSameServerAcknowledge": "I understand the same-server history combine cannot be undone",
@@ -507,6 +512,8 @@
     "resetTrustScoreTitle_other": "Réinitialiser le score de confiance pour {{count}} utilisateurs",
     "searchPlaceholder": "Rechercher des utilisateurs...",
     "selectAllUsers": "Sélectionner les {{count}} utilisateurs",
+    "serversColumn": "Servers",
+    "showRemoved": "Show removed",
     "suggestionsDescription": "These identities look like the same person across servers. Review and merge them if they match.",
     "suggestionsError": "Could not load merge suggestions",
     "suggestionsMatchEmail": "Same email",
@@ -517,6 +524,7 @@
   },
   "violations": {
     "allClear": "Tout effacer",
+    "allPeople": "All people",
     "allSeverities": "Toutes les gravités",
     "allStatuses": "Tous les états",
     "detail": {
@@ -550,10 +558,16 @@
     "dismissViolation_one": "Ignorer {{count}} violation",
     "dismissViolation_other": "Ignorer {{count}} violations",
     "dismissViolationsConfirm": "Êtes-vous sûr de vouloir l'ignorer ? Elle sera définitivement supprimée du journal de violation et les scores de confiance associés seront restaurés.",
+    "filterByPerson": "Filter violations by this person",
+    "filterPeople": "People",
     "noMatches": "Aucune correspondance",
     "noViolationsDetected": "Aucune violation de règle détectée",
     "noViolationsFound": "Aucune violation trouvée",
     "noViolationsRecorded": "Il n'y a pas encore de violation enregistrée.",
+    "peopleSelectedCount": "{{count}} people",
+    "personFilterEmpty": "No matching people found",
+    "personFilterError": "Failed to load people",
+    "personFilterPlaceholder": "Filter by person",
     "selectAllViolations": "Sélectionner les {{count}} violations correspondant aux filtres",
     "title": "Violations",
     "tryAdjustingFilters": "Essayez d'ajuster vos filtres",

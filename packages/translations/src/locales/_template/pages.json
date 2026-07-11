@@ -53,7 +53,6 @@
   },
   "users": {
     "title": "Users",
-    "allUsers": "All Users",
     "noUsersFound": "No users found.",
     "searchPlaceholder": "Search users...",
     "selectAllUsers": "Select all {{count}} users",
@@ -104,7 +103,8 @@
     "splitConfirmTitle": "Split server account",
     "splitConfirmDescription": "Detach this server account into its own user. Its watch history and violations move with it.",
     "splitConfirmLoading": "Splitting...",
-    "acrossAllServers": "Across all linked accounts:"
+    "acrossAllServers": "Across all linked accounts:",
+    "overallTrust": "Overall Trust"
   },
   "history": {
     "title": "History",

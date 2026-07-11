@@ -53,10 +53,11 @@
   },
   "users": {
     "title": "Users",
-    "allUsers": "All Users",
+    "showRemoved": "Show removed",
     "noUsersFound": "No users found.",
     "searchPlaceholder": "Search users...",
     "selectAllUsers": "Select all {{count}} users",
+    "serversColumn": "Servers",
     "resetTrustScore": "Reset Trust Score",
     "resetTrustScoreTitle_one": "Reset Trust Score for {{count}} User",
     "resetTrustScoreTitle_other": "Reset Trust Score for {{count}} Users",
@@ -65,6 +66,7 @@
     "mergeDialogTitle": "Merge users",
     "mergeDialogDescription": "Every server account, session, and violation from the duplicate moves to the primary. The duplicate identity is deleted.",
     "mergePickPrimary": "Choose the primary identity",
+    "mergePrimaryBadge": "Primary",
     "mergePrimaryForced": "This account can log in, so it must stay the primary.",
     "mergeSameServerWarningTitle": "This action is irreversible",
     "mergeSameServerDialogDescription": "This merge permanently combines both accounts on the same server. It cannot be undone.",
@@ -104,7 +106,10 @@
     "splitConfirmTitle": "Split server account",
     "splitConfirmDescription": "Detach this server account into its own user. Its watch history and violations move with it.",
     "splitConfirmLoading": "Splitting...",
-    "acrossAllServers": "Across all linked accounts:"
+    "acrossAllServers": "Across all linked accounts:",
+    "overallTrust": "Overall Trust",
+    "serverScope": "Server",
+    "allServers": "All servers"
   },
   "history": {
     "title": "History",
@@ -227,6 +232,13 @@
     "noViolationsRecorded": "No violations have been recorded yet.",
     "allSeverities": "All Severities",
     "allStatuses": "All Statuses",
+    "filterPeople": "People",
+    "allPeople": "All people",
+    "peopleSelectedCount": "{{count}} people",
+    "personFilterPlaceholder": "Filter by person",
+    "personFilterEmpty": "No matching people found",
+    "personFilterError": "Failed to load people",
+    "filterByPerson": "Filter violations by this person",
     "detail": {
       "notFound": "Violation not found",
       "violationDetails": "Violation Details",
@@ -459,6 +471,8 @@
   "devices": {
     "title": "Device Compatibility",
     "description": "See which devices direct play vs transcode each codec",
+    "analyzedSessions": "Analyzed Sessions",
+    "analyzedSessionsTooltip": "Sessions in device + codec combinations with at least {{count}} sessions and a known codec. Rare combinations and sessions with no codec info aren't counted.",
     "directPlayRate": "Direct Play Rate",
     "videoAndAudio": "Video + audio",
     "uniqueDevices": "Unique Devices",

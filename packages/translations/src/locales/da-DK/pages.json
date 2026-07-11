@@ -78,6 +78,8 @@
     "uptime": "Oppetid"
   },
   "devices": {
+    "analyzedSessions": "Analyzed Sessions",
+    "analyzedSessionsTooltip": "Sessions in device + codec combinations with at least {{count}} sessions and a known codec. Rare combinations and sessions with no codec info aren't counted.",
     "compatibilityMatrix": "Kompatibilitetsmatrix",
     "compatibilityMatrixDesc": "Direkte afspilningshastigheder efter enhed og video-codec. Sorteret efter sessionsvolumen.",
     "description": "Se hvilke enheder direkte afspilning vs transcode hver codec",
@@ -463,6 +465,7 @@
   "userDetail": {
     "acrossAllServers": "Across all linked accounts:",
     "adjustTrustScore": "Justér Tillid Score",
+    "allServers": "All servers",
     "backToUsers": "Tilbage til Brugere",
     "byRule": "Af / Regel",
     "linkedAccounts": "Linked accounts",
@@ -471,6 +474,8 @@
     "noSessionsFound": "Ingen sessioner fundet for denne bruger.",
     "noTerminationsFound": "Ingen stream termineringer for denne bruger.",
     "noViolationsFound": "Ingen overtrædelser for denne bruger.",
+    "overallTrust": "Overall Trust",
+    "serverScope": "Server",
     "sessions": "Sessioner",
     "splitAccount": "Split into separate user",
     "splitConfirmDescription": "Detach this server account into its own user. Its watch history and violations move with it.",
@@ -484,11 +489,11 @@
     "violations": "Overtrædelser"
   },
   "users": {
-    "allUsers": "Alle Brugere",
     "mergeConfirm": "Merge",
     "mergeDialogDescription": "Every server account, session, and violation from the duplicate moves to the primary. The duplicate identity is deleted.",
     "mergeDialogTitle": "Merge users",
     "mergePickPrimary": "Choose the primary identity",
+    "mergePrimaryBadge": "Primary",
     "mergePrimaryForced": "This account can log in, so it must stay the primary.",
     "mergeSameIdentity": "These accounts already belong to the same user",
     "mergeSameServerAcknowledge": "I understand the same-server history combine cannot be undone",
@@ -507,6 +512,8 @@
     "resetTrustScoreTitle_other": "Nulstil tillidsscore for {{count}} brugere",
     "searchPlaceholder": "Søg efter brugere...",
     "selectAllUsers": "Vælg alle {{count}} brugere",
+    "serversColumn": "Servers",
+    "showRemoved": "Show removed",
     "suggestionsDescription": "These identities look like the same person across servers. Review and merge them if they match.",
     "suggestionsError": "Could not load merge suggestions",
     "suggestionsMatchEmail": "Same email",
@@ -517,6 +524,7 @@
   },
   "violations": {
     "allClear": "Alle Ryd",
+    "allPeople": "All people",
     "allSeverities": "Alle Sværheder",
     "allStatuses": "Alle Status",
     "detail": {
@@ -550,10 +558,16 @@
     "dismissViolation_one": "Afvis {{count}} Overtrædelse",
     "dismissViolation_other": "Afvis {{count}} Overtrædelser",
     "dismissViolationsConfirm": "Er du sikker på, at du vil afvise? Dette vil fjerne dem fra overtrædelsesloggen permanent og genoprette tilknyttede tillidsscore.",
+    "filterByPerson": "Filter violations by this person",
+    "filterPeople": "People",
     "noMatches": "Ingen Kampe",
     "noViolationsDetected": "Ingen regelovertrædelser fundet",
     "noViolationsFound": "Ingen overtrædelser fundet",
     "noViolationsRecorded": "Der er endnu ikke registreret overtrædelser.",
+    "peopleSelectedCount": "{{count}} people",
+    "personFilterEmpty": "No matching people found",
+    "personFilterError": "Failed to load people",
+    "personFilterPlaceholder": "Filter by person",
     "selectAllViolations": "Vælg alle {{count}} krænkelser af matchende filtre",
     "title": "Overtrædelser",
     "tryAdjustingFilters": "Prøv at justere dine filtre",
