@@ -29,6 +29,7 @@ import { closeDatabase, recreatePool, runMigrations } from '../db/client.js';
 import { setSetting } from './settings.js';
 import { loadJwtRevokeSettings } from '../plugins/auth.js';
 import { initTimescaleDB } from '../db/timescale.js';
+import { closeAuth } from '../lib/auth.js';
 
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +38,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_PATH = resolve(__dirname, '../../src/db/migrations');
 
 let lastPhase: Exclude<RestorePhase, 'failed'> = 'creating_restore_point';
+
+// getAuth() captures db at construction - recreatePool() won't heal it, closeAuth() rebuilds it.
+export async function reinitDatabaseConsumers(): Promise<void> {
+  await recreatePool();
+  await closeAuth();
+}
 
 function setPhase(phase: RestorePhase, message: string, error?: string): void {
   if (phase !== 'failed') lastPhase = phase;
@@ -116,7 +123,7 @@ export async function orchestrateRestore(
 
     // Phase 4: Run migrations on restored database
     setPhase('running_migrations', 'Running database migrations...');
-    await recreatePool();
+    await reinitDatabaseConsumers();
     await runMigrations(MIGRATIONS_PATH);
     app.log.info('Migrations complete on restored database');
 
@@ -169,7 +176,7 @@ export async function orchestrateRestore(
 
       try {
         await restoreDatabase(restorePointPath);
-        await recreatePool();
+        await reinitDatabaseConsumers();
         app.log.info('Rollback from restore point succeeded');
         setPhase('failed', 'Restore failed. Your previous data has been restored.', message);
       } catch (rollbackErr) {
@@ -181,17 +188,23 @@ export async function orchestrateRestore(
         );
         // Best-effort pool recovery so recovery loop can at least connect
         try {
-          await recreatePool();
-        } catch {
-          // Nothing more we can do
+          await reinitDatabaseConsumers();
+        } catch (reinitErr) {
+          app.log.error(
+            { err: reinitErr },
+            'Reinit after failed rollback also failed, restart the container'
+          );
         }
       }
     } else {
       setPhase('failed', 'Restore failed. No restore point was created.', message);
       try {
-        await recreatePool();
-      } catch {
-        // Best effort
+        await reinitDatabaseConsumers();
+      } catch (reinitErr) {
+        app.log.error(
+          { err: reinitErr },
+          'Reinit after failed restore also failed, restart the container'
+        );
       }
     }
 
