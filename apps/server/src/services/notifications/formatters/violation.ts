@@ -341,7 +341,7 @@ export function formatViolationDetailsForDiscord(
 export function formatViolationMessage(violation: ViolationWithDetails): string {
   const userName = violation.user.identityName ?? violation.user.username;
   const ruleName = violation.rule.name;
-  const severity = violation.severity as keyof typeof SEVERITY_LEVELS;
+  const severity = violation.severity;
 
   return `User ${userName} triggered ${ruleName} (${SEVERITY_LEVELS[severity].label} severity)`;
 }

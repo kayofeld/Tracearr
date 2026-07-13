@@ -91,7 +91,7 @@ export async function waitForResult<T>(
 
   while (true) {
     const result = await getValue();
-    if (result) return result as NonNullable<T>;
+    if (result) return result;
 
     if (Date.now() - startTime > timeout) {
       throw new Error(message);

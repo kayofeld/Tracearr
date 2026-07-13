@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { proxyImage, type FallbackType } from '../services/imageProxy.js';
+import { proxyImage } from '../services/imageProxy.js';
 
 // Static Tracearr logo paths (check for custom logo first, then use default)
 const CUSTOM_LOGO_PATH = join(process.cwd(), 'data', 'logo.png');
@@ -71,7 +71,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       imagePath: url,
       width,
       height,
-      fallback: fallback as FallbackType,
+      fallback: fallback,
     });
 
     // Set cache headers

@@ -24,12 +24,7 @@ import { db } from '../db/client.js';
 import { rules, serverUsers, violations, servers, users } from '../db/schema.js';
 import { hasServerAccess } from '../utils/serverFiltering.js';
 import { scheduleInactivityChecks, hasInactivityCondition } from '../jobs/inactivityCheckQueue.js';
-import {
-  needsMigration,
-  convertLegacyRule,
-  migrateRules,
-  type LegacyRule,
-} from '../services/rules/migration.js';
+import { needsMigration, convertLegacyRule, migrateRules } from '../services/rules/migration.js';
 
 /**
  * Batch resolve the server ids each given identity has an account on, so
@@ -843,7 +838,7 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
         serverUserId: r.serverUserId,
         serverId: r.serverId,
         isActive: r.isActive,
-      })) as LegacyRule[]
+      }))
     );
 
     return {
@@ -927,7 +922,7 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
         serverUserId: r.serverUserId,
         serverId: r.serverId,
         isActive: r.isActive,
-      })) as LegacyRule[]
+      }))
     );
 
     // Update migrated rules in database within a transaction
@@ -1026,7 +1021,7 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
       serverUserId: rule.serverUserId,
       serverId: rule.serverId,
       isActive: rule.isActive,
-    } as LegacyRule);
+    });
 
     if (!migrated) {
       return reply.badRequest(`Cannot migrate rule: unknown type ${rule.type}`);

@@ -227,7 +227,7 @@ export function StoragePredictionChart({
             color: 'hsl(var(--muted-foreground))',
           },
           formatter: function () {
-            const date = new Date(this.value as number);
+            const date = new Date(this.value);
             // Include year for longer time periods (year/all) to differentiate labels
             const options: Intl.DateTimeFormatOptions =
               period === 'year' || period === 'all'

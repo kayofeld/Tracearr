@@ -100,7 +100,7 @@ const PUBLIC_KEYS = Object.keys(PUBLIC_DEFAULTS) as (keyof Settings)[];
 
 /** Get ALL settings as a typed Settings object (used by GET /settings). */
 export async function getAllSettings(): Promise<Settings> {
-  return getSettings(PUBLIC_KEYS) as Promise<Settings>;
+  return getSettings(PUBLIC_KEYS);
 }
 
 /** Upsert one or more settings. */

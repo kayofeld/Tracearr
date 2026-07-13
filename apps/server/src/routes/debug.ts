@@ -9,7 +9,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { promises as fs, createReadStream, createWriteStream } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { getActiveAggregateNames } from '../db/timescale.js';
@@ -734,7 +734,7 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
       // Create zip
       await new Promise<void>((resolve, reject) => {
         const output = createWriteStream(zipPath);
-        const archive = archiver('zip', { zlib: { level: 1 } });
+        const archive = new ZipArchive({ zlib: { level: 1 } });
         output.on('close', resolve);
         archive.on('error', reject);
         archive.pipe(output);

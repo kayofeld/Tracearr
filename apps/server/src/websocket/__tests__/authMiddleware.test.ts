@@ -72,7 +72,7 @@ describe('resolveSocketUser', () => {
   });
 
   it('returns null when nothing verifies', async () => {
-    vi.mocked(resolveBetterAuthSession).mockResolvedValue(null as never);
+    vi.mocked(resolveBetterAuthSession).mockResolvedValue(null);
 
     const user = await resolveSocketUser({ token: 'garbage', headers: {} });
 

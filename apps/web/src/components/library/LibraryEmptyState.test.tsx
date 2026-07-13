@@ -97,7 +97,7 @@ describe('LibraryEmptyState', () => {
   it('shows a loading state while status is still being fetched', () => {
     mockUseServer.mockReturnValue(useServerReturn(['s1'], [server('s1', 'Plex')]));
     mockUseLibraryStatus.mockReturnValue(
-      statusResult({}, true) as unknown as ReturnType<typeof useLibraryStatus>
+      statusResult({}, true)
     );
 
     render(<LibraryEmptyState />, { wrapper: wrapper() });
@@ -116,7 +116,7 @@ describe('LibraryEmptyState', () => {
           isBackfillRunning: false,
           backfillDays: null,
         },
-      }) as unknown as ReturnType<typeof useLibraryStatus>
+      })
     );
     vi.mocked(api.servers.sync).mockResolvedValue({} as never);
 
@@ -139,7 +139,7 @@ describe('LibraryEmptyState', () => {
           isBackfillRunning: false,
           backfillDays: 30,
         },
-      }) as unknown as ReturnType<typeof useLibraryStatus>
+      })
     );
     vi.mocked(api.maintenance.startJob).mockResolvedValue({} as never);
 
@@ -173,7 +173,7 @@ describe('LibraryEmptyState', () => {
           isBackfillRunning: false,
           backfillDays: null,
         },
-      }) as unknown as ReturnType<typeof useLibraryStatus>
+      })
     );
     vi.mocked(api.servers.sync).mockResolvedValue({} as never);
 
@@ -210,7 +210,7 @@ describe('LibraryEmptyState', () => {
           isBackfillRunning: false,
           backfillDays: 10,
         },
-      }) as unknown as ReturnType<typeof useLibraryStatus>
+      })
     );
 
     render(<LibraryEmptyState />, { wrapper: wrapper() });
@@ -241,7 +241,7 @@ describe('LibraryEmptyState', () => {
           isBackfillRunning: true,
           backfillDays: 10,
         },
-      }) as unknown as ReturnType<typeof useLibraryStatus>
+      })
     );
 
     render(<LibraryEmptyState />, { wrapper: wrapper() });

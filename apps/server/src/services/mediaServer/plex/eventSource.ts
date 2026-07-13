@@ -204,7 +204,7 @@ export class PlexEventSource extends EventEmitter {
         this.handleError(error);
       };
     } catch (error) {
-      this.handleError(error as Error);
+      this.handleError(error);
     }
   }
 

@@ -283,7 +283,7 @@ export function buildPendingActiveSession(pendingData: PendingSessionData): Acti
     sessionKey: processed.sessionKey,
 
     // State
-    state: pendingData.currentState as 'playing' | 'paused',
+    state: pendingData.currentState,
 
     // Media metadata
     mediaType: processed.mediaType,

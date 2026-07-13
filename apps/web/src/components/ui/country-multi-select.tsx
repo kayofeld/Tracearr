@@ -44,7 +44,7 @@ export function CountryMultiSelect({
 
   // Get all countries and memoize
   const countries = useMemo<Country[]>(() => {
-    return getData() as Country[];
+    return getData();
   }, []);
 
   // Filter countries based on search

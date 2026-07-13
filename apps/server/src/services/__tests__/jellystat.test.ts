@@ -535,7 +535,7 @@ describe('transformActivityToSession', () => {
         PlaybackDuration: 'invalid',
       };
       const session = transformActivityToSession(
-        activityWithInvalidDuration as JellystatPlaybackActivity,
+        activityWithInvalidDuration,
         serverId,
         serverUserId,
         mockGeo
@@ -571,7 +571,7 @@ describe('transformActivityToSession', () => {
       // ZERO_RUNTIME_ACTIVITY has RuntimeTicks: 0 and PercentComplete: 0
       // Since both are 0, we can't determine the total duration
       const session = transformActivityToSession(
-        ZERO_RUNTIME_ACTIVITY as JellystatPlaybackActivity,
+        ZERO_RUNTIME_ACTIVITY,
         serverId,
         serverUserId,
         mockGeo
@@ -596,7 +596,7 @@ describe('transformActivityToSession', () => {
       };
 
       const session = transformActivityToSession(
-        activityWithPercent as JellystatPlaybackActivity,
+        activityWithPercent,
         serverId,
         serverUserId,
         mockGeo
@@ -619,7 +619,7 @@ describe('transformActivityToSession', () => {
       };
 
       const session = transformActivityToSession(
-        activityWithPercent as JellystatPlaybackActivity,
+        activityWithPercent,
         serverId,
         serverUserId,
         mockGeo
@@ -2479,7 +2479,7 @@ describe('Theme Music Filtering', () => {
     // transformActivityToSession should work regardless - the filtering
     // happens at the import level, not the transformation level
     const session = transformActivityToSession(
-      THEME_SONG_ACTIVITY as JellystatPlaybackActivity,
+      THEME_SONG_ACTIVITY,
       'server-1',
       'user-1',
       {

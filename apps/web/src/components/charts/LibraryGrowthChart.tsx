@@ -147,10 +147,10 @@ export function LibraryGrowthChart({ data, isLoading, height = 250 }: LibraryGro
         type: 'datetime',
         tickPixelInterval: 120,
         dateTimeLabelFormats: {
-          day: '%b %e',
-          week: '%b %e',
-          month: `%b '%y`,
-          year: '%Y',
+          day: { main: '%b %e' },
+          week: { main: '%b %e' },
+          month: { main: `%b '%y` },
+          year: { main: '%Y' },
         },
         labels: {
           style: { color: 'hsl(var(--muted-foreground))' },

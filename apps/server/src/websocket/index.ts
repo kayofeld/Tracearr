@@ -178,12 +178,12 @@ export function initializeWebSocket(
     void socket.join('sessions');
 
     // Handle session subscriptions
-    socket.on(WS_EVENTS.SUBSCRIBE_SESSIONS as 'subscribe:sessions', () => {
+    socket.on(WS_EVENTS.SUBSCRIBE_SESSIONS, () => {
       void socket.join('sessions');
       console.log(`[WebSocket] ${socket.id} subscribed to sessions`);
     });
 
-    socket.on(WS_EVENTS.UNSUBSCRIBE_SESSIONS as 'unsubscribe:sessions', () => {
+    socket.on(WS_EVENTS.UNSUBSCRIBE_SESSIONS, () => {
       void socket.leave('sessions');
       console.log(`[WebSocket] ${socket.id} unsubscribed from sessions`);
     });

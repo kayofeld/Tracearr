@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           trustScore: user.aggregateTrustScore ?? user.trustScore ?? 100,
           hasPassword: user.hasPassword,
           hasPlexLinked: user.hasPlexLinked,
-        } as UserProfile;
+        };
       } catch {
         // No session cookie, an expired session, or a network error - either way
         // there's no authenticated user to show right now.

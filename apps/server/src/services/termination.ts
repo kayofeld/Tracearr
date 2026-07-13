@@ -10,7 +10,6 @@ import { db } from '../db/client.js';
 import { terminationLogs, sessions } from '../db/schema.js';
 import { createMediaServerClient } from './mediaServer/index.js';
 import { getCacheService, getPubSubService } from './cache.js';
-import type { ServerType } from '@tracearr/shared';
 
 // ============================================================================
 // Types
@@ -103,7 +102,7 @@ export async function terminateSession(
 
   // Create media server client
   const client = createMediaServerClient({
-    type: session.server.type as ServerType,
+    type: session.server.type,
     url: session.server.url,
     token: session.server.token,
   });

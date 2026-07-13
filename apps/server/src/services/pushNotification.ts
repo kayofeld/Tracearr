@@ -491,7 +491,7 @@ export class PushNotificationService {
     const sessions = await getSessionsWithPreferences();
     if (sessions.length === 0) return;
 
-    const severity = violation.severity as keyof typeof SEVERITY_LEVELS;
+    const severity = violation.severity;
     const severityNum = getSeverityPriority(severity);
 
     // Filter sessions based on preferences
@@ -530,7 +530,7 @@ export class PushNotificationService {
     // Apply quiet hours filtering (violations use severity for bypass)
     const activeSessions = applyQuietHours(
       rateLimitedSessions,
-      severity as NotificationSeverity,
+      severity,
       'violation'
     );
     if (activeSessions.length === 0) {

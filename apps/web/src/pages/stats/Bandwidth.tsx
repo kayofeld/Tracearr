@@ -82,7 +82,7 @@ function BandwidthChart({
             const row = rowByDate.get(date);
             return row ? (row.avgBitrateMbps ?? row.avgBitrate) : null;
           }),
-        } as Highcharts.SeriesOptionsType;
+        };
       });
     } else {
       // Single-server: one area per the existing row order (one row per date)
@@ -103,7 +103,7 @@ function BandwidthChart({
               [1, 'hsl(var(--primary) / 0.05)'],
             ],
           },
-        } as Highcharts.SeriesOptionsType,
+        },
       ];
     }
 

@@ -67,10 +67,10 @@ export function LibraryEmptyState({ onComplete }: LibraryEmptyStateProps) {
       }
     };
 
-    socket.on(WS_EVENTS.MAINTENANCE_PROGRESS as 'maintenance:progress', handleProgress);
+    socket.on(WS_EVENTS.MAINTENANCE_PROGRESS, handleProgress);
 
     return () => {
-      socket.off(WS_EVENTS.MAINTENANCE_PROGRESS as 'maintenance:progress', handleProgress);
+      socket.off(WS_EVENTS.MAINTENANCE_PROGRESS, handleProgress);
     };
   }, [socket, queryClient, onComplete]);
 

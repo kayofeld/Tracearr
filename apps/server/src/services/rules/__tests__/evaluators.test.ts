@@ -181,7 +181,7 @@ function createCondition(overrides: Partial<Condition>): Condition {
     operator: 'eq',
     value: 1,
     ...overrides,
-  } as Condition;
+  };
 }
 
 // Helper to extract matched result from evaluator (handles sync/async)

@@ -166,7 +166,7 @@ describe('LibrarySyncService full-scan cycle', () => {
 
   it('uses incremental sync on first few cycles', async () => {
     const client = makeMockClient({ totalCount: 100, itemsSinceCount: 5 });
-    mockCreateClient.mockReturnValue(client as any);
+    mockCreateClient.mockReturnValue(client);
 
     // Simulate prior sync state (cycle 1, not at interval yet)
     await mockRedis.set(
@@ -183,7 +183,7 @@ describe('LibrarySyncService full-scan cycle', () => {
 
   it('forces full scan when cycle reaches FULL_SCAN_INTERVAL', async () => {
     const client = makeMockClient({ totalCount: 100 });
-    mockCreateClient.mockReturnValue(client as any);
+    mockCreateClient.mockReturnValue(client);
 
     await mockRedis.set(
       'tracearr:library:sync:last:srv-1:1',
@@ -200,7 +200,7 @@ describe('LibrarySyncService full-scan cycle', () => {
 
   it('always forces full scan for manual triggers', async () => {
     const client = makeMockClient({ totalCount: 100 });
-    mockCreateClient.mockReturnValue(client as any);
+    mockCreateClient.mockReturnValue(client);
 
     await mockRedis.set(
       'tracearr:library:sync:last:srv-1:1',

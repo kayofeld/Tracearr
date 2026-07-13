@@ -32,11 +32,11 @@ export function PlaysChart({
       type: 'datetime',
       tickPixelInterval: 120,
       dateTimeLabelFormats: {
-        hour: getHour12() ? '%l %p' : '%k:%M',
-        day: '%b %e',
-        week: '%b %e',
-        month: `%b '%y`,
-        year: '%Y',
+        hour: { main: getHour12() ? '%l %p' : '%k:%M' },
+        day: { main: '%b %e' },
+        week: { main: '%b %e' },
+        month: { main: `%b '%y` },
+        year: { main: '%Y' },
       },
       labels: {
         style: {

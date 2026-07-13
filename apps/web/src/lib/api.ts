@@ -450,12 +450,7 @@ class ApiClient {
       this.request<Server>(`/servers/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(
-          Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)) as {
-            name?: string;
-            url?: string;
-            clientIdentifier?: string;
-            color?: string | null;
-          }
+          Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined))
         ),
       }),
     /** @deprecated Use servers.update(id, { url, clientIdentifier }) */

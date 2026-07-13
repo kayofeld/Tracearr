@@ -172,7 +172,7 @@ function createCondition(overrides: Partial<Condition>): Condition {
     operator: 'eq',
     value: 1,
     ...overrides,
-  } as Condition;
+  };
 }
 
 function matched(result: ReturnType<(typeof evaluatorRegistry)['unique_ips_in_window']>): boolean {

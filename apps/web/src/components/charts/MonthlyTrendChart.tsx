@@ -56,8 +56,8 @@ export function MonthlyTrendChart({ data, isLoading, height = 250 }: MonthlyTren
         type: 'datetime',
         tickPixelInterval: 100,
         dateTimeLabelFormats: {
-          month: `%b '%y`,
-          year: '%Y',
+          month: { main: `%b '%y` },
+          year: { main: '%Y' },
         },
         labels: {
           style: {

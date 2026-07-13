@@ -340,7 +340,7 @@ export function transformActivityToSession(
       : null;
 
   // Get PercentComplete from PlayState (available via looseObject but not typed)
-  const playStateAny = activity.PlayState as Record<string, unknown> | null | undefined;
+  const playStateAny = activity.PlayState;
   const percentComplete =
     typeof playStateAny?.PercentComplete === 'number' ? playStateAny.PercentComplete : null;
 

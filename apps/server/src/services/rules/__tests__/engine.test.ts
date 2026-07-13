@@ -498,7 +498,7 @@ describe('evaluateRule', () => {
                 {
                   field: 'user_id',
                   operator: 'not_in',
-                  value: excludedUserId as unknown as string[],
+                  value: excludedUserId,
                 },
               ],
             },

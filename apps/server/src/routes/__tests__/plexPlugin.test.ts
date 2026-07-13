@@ -389,7 +389,7 @@ describe('plex better auth plugin', () => {
         success: false,
         code: PlexClient.AdminVerifyError.CONNECTION_FAILED,
         message: 'Cannot reach Plex server',
-      } as never);
+      });
 
       await expect(callEndpoint('plexConnect', connectPayload)).rejects.toMatchObject({
         statusCode: 503,

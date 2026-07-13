@@ -1294,7 +1294,7 @@ describe('Deduplication Logic', () => {
           : null;
 
       const emptyRatingKeyStr =
-        typeof ('' as number | '') === 'number' ? String('' as number | '') : null;
+        typeof ('' as number | '') === 'number' ? String('') : null;
 
       expect(ratingKeyStr).toBe('25314');
       expect(emptyRatingKeyStr).toBeNull();

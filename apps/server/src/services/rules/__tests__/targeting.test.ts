@@ -196,7 +196,7 @@ describe('resolveTargetSessions', () => {
   describe('default behavior', () => {
     it('should default to triggering for undefined target', () => {
       const result = resolveTargetSessions({
-        target: undefined as unknown as 'triggering',
+        target: undefined,
         triggeringSession: middleSession,
         serverUserId: userId,
         activeSessions: allSessions,

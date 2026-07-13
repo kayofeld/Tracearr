@@ -126,14 +126,6 @@ export function ServerSettings() {
     }
   }, [user, serverType]);
 
-  // Fetch Plex accounts when dialog opens with Plex selected
-  useEffect(() => {
-    if (showAddDialog && serverType === 'plex' && user?.role === 'owner') {
-      void fetchPlexAccounts();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only trigger on dialog open, not serverType changes
-  }, [showAddDialog]);
-
   // Handle both array and wrapped response formats
   const servers = Array.isArray(serversData)
     ? serversData
@@ -188,7 +180,7 @@ export function ServerSettings() {
     setServerName('');
     setApiKey('');
     setConnectError(null);
-    setServerType(defaultServerType as 'plex' | 'jellyfin' | 'emby');
+    setServerType(defaultServerType);
     setPlexDialogStep('loading');
     setPlexServers([]);
     setConnectingPlexServer(null);
@@ -252,6 +244,14 @@ export function ServerSettings() {
       setPlexDialogStep('no-servers');
     }
   };
+
+  // Fetch Plex accounts when dialog opens with Plex selected
+  useEffect(() => {
+    if (showAddDialog && serverType === 'plex' && user?.role === 'owner') {
+      void fetchPlexAccounts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only trigger on dialog open, not serverType changes
+  }, [showAddDialog]);
 
   // Handle Plex server selection from PlexServerSelector
   const handlePlexServerSelect = async (

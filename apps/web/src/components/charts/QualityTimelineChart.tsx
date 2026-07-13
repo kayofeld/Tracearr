@@ -63,10 +63,10 @@ export function QualityTimelineChart({ data, isLoading, height = 250 }: QualityT
         type: 'datetime',
         tickPixelInterval: 120,
         dateTimeLabelFormats: {
-          day: '%b %e',
-          week: '%b %e',
-          month: `%b '%y`,
-          year: '%Y',
+          day: { main: '%b %e' },
+          week: { main: '%b %e' },
+          month: { main: `%b '%y` },
+          year: { main: '%Y' },
         },
         labels: {
           style: {

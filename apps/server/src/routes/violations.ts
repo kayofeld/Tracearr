@@ -822,7 +822,7 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
 
     const total = (countResult.rows[0] as { count: number })?.count ?? 0;
 
-    const formattedData = await enrichViolations(violationData as ViolationRow[]);
+    const formattedData = await enrichViolations(violationData);
 
     return {
       data: formattedData,
@@ -906,7 +906,7 @@ export const violationRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Enrich with related sessions, user history, and action results
-    const enriched = await enrichViolations([violation as ViolationRow]);
+    const enriched = await enrichViolations([violation]);
     const enrichedViolation = enriched[0];
     if (!enrichedViolation) {
       return reply.notFound('Violation not found');

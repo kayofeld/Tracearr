@@ -142,6 +142,6 @@ describe('compareArray', () => {
   });
 
   it('returns false when expected is not an array', () => {
-    expect(compareArray('US', 'in', 'US' as unknown as string[])).toBe(false);
+    expect(compareArray('US', 'in', 'US')).toBe(false);
   });
 });

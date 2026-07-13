@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Plus, Save, Loader2 } from 'lucide-react';
 import type {
-  Condition,
   ConditionGroup as ConditionGroupType,
   RuleConditions,
   RuleActions,
@@ -71,7 +70,7 @@ function createDefaultConditionGroup(): ConditionGroupType {
         field: defaultField,
         operator: getDefaultOperatorForField(defaultField),
         value: getDefaultValueForField(defaultField),
-      } as Condition,
+      },
     ],
   };
 }

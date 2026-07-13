@@ -61,7 +61,7 @@ export function ActionRow({ action, onChange, onRemove, showRemove = true }: Act
     onChange({
       ...action,
       [fieldName]: value,
-    } as Action);
+    });
   };
 
   // Split fields into inline and full-width

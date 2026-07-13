@@ -141,7 +141,7 @@ describe('getServerUserByExternalId', () => {
     mockSelectChain([mockServerUser]);
 
     const result = await getServerUserByExternalId(
-      mockServerUser.serverId as string,
+      mockServerUser.serverId,
       'external-123'
     );
 

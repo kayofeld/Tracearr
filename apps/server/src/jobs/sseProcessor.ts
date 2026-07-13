@@ -750,7 +750,7 @@ async function fetchFullSession(
     }
 
     const client = createMediaServerClient({
-      type: server.type as 'plex',
+      type: server.type,
       url: server.url,
       token: server.token,
     });
@@ -763,7 +763,7 @@ async function fetchFullSession(
     }
 
     return {
-      session: mapMediaSession(targetSession, server.type as 'plex'),
+      session: mapMediaSession(targetSession, server.type),
       server,
     };
   } catch (error) {

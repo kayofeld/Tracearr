@@ -161,7 +161,7 @@ export function LibraryStorage() {
   const firstStorageError = useMemo(() => {
     for (const id of selectedServerIds) {
       const entry = storageMulti.byServer.get(id);
-      if (entry?.isError) return entry.error as Error | null;
+      if (entry?.isError) return entry.error;
     }
     return null;
   }, [storageMulti.byServer, selectedServerIds]);

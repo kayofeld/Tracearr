@@ -146,7 +146,7 @@ function mockTransaction() {
     delete: vi.fn().mockReturnValue(deleteChain),
   };
   // Transaction executes the callback with tx and returns its result
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   vi.mocked(db.transaction).mockImplementation(async (callback: any) => {
     return callback(tx);
   });
@@ -164,7 +164,7 @@ function mockSelectDistinctChain(results: unknown[][]) {
       }),
     } as never;
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   vi.mocked((db as any).selectDistinct as ReturnType<typeof vi.fn>).mockImplementation(mock);
   return mock;
 }
@@ -1312,7 +1312,7 @@ describe('LibrarySyncService', () => {
       const service = new LibrarySyncService();
       await service.syncServer(mockServer.id);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       expect((db as any).selectDistinct).not.toHaveBeenCalled();
       // No aggregate refresh either
       expect(db.execute).not.toHaveBeenCalled();

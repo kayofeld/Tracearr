@@ -227,7 +227,7 @@ export class JellyfinEmbyEventSource extends EventEmitter {
       this.eventSource.addEventListener('ping', this.pingListener);
       this.eventSource.addEventListener('hello', this.helloListener);
     } catch (error) {
-      this.handleError(error as Error);
+      this.handleError(error);
     }
   }
 

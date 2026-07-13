@@ -43,27 +43,30 @@ export function useDebouncedSave<K extends keyof Settings>(
     (valueToSave: Settings[K] | undefined) => {
       isSavingRef.current = true;
       setStatus('saving');
-      updateSettings.mutate({ [key]: valueToSave ?? null } as Partial<Settings>, {
-        onSuccess: () => {
-          isSavingRef.current = false;
-          lastSavedRef.current = valueToSave;
-          hasErrorRef.current = false;
-          setErrorMessage(null);
-          setStatus('saved');
-          onSaved?.();
-          if (statusTimeoutRef.current) {
-            clearTimeout(statusTimeoutRef.current);
-          }
-          statusTimeoutRef.current = setTimeout(() => setStatus('idle'), 2000);
-        },
-        onError: (err) => {
-          isSavingRef.current = false;
-          hasErrorRef.current = true;
-          setErrorMessage(err.message || 'Failed to save');
-          setStatus('error');
-          onError?.(err);
-        },
-      });
+      updateSettings.mutate(
+        { [key]: valueToSave ?? null },
+        {
+          onSuccess: () => {
+            isSavingRef.current = false;
+            lastSavedRef.current = valueToSave;
+            hasErrorRef.current = false;
+            setErrorMessage(null);
+            setStatus('saved');
+            onSaved?.();
+            if (statusTimeoutRef.current) {
+              clearTimeout(statusTimeoutRef.current);
+            }
+            statusTimeoutRef.current = setTimeout(() => setStatus('idle'), 2000);
+          },
+          onError: (err) => {
+            isSavingRef.current = false;
+            hasErrorRef.current = true;
+            setErrorMessage(err.message || 'Failed to save');
+            setStatus('error');
+            onError?.(err);
+          },
+        }
+      );
     },
     [key, updateSettings, onSaved, onError]
   );

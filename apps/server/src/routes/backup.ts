@@ -14,7 +14,6 @@ import { join, basename } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import type { BackupScheduleType } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { isRestoring } from '../serverState.js';
 import { BACKUP_DIR, createBackup, validateBackup, listBackups } from '../services/backup.js';
@@ -340,7 +339,7 @@ export const backupRoutes: FastifyPluginAsync = async (app) => {
     });
 
     // Reschedule the BullMQ repeatable job
-    await scheduleBackupJob({ type: type as BackupScheduleType, time, dayOfWeek, dayOfMonth });
+    await scheduleBackupJob({ type: type, time, dayOfWeek, dayOfMonth });
 
     return { success: true };
   });

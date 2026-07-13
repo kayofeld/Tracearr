@@ -52,6 +52,10 @@ interface SocketContextValue {
 
 const SocketContext = createContext<SocketContextValue | null>(null);
 
+// session:updated fires once per active session per poll tick; trailing-edge
+// throttle so a busy tick doesn't trigger a refetch per session.
+const SESSION_UPDATED_THROTTLE_MS = 2000;
+
 export function SocketProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation(['notifications', 'common']);
   const { isAuthenticated } = useAuth();
@@ -71,6 +75,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
   // Build a ref to the routing map for access in event handlers
   const routingMapRef = useRef<Map<NotificationEventType, NotificationChannelRouting>>(new Map());
+  const sessionUpdatedThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Update the ref when routing data changes
   useEffect(() => {
@@ -158,7 +163,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     // Handle real-time events
     // Note: Since users can filter by server, we invalidate all matching query patterns
     // and let react-query refetch with the appropriate server filter
-    newSocket.on(WS_EVENTS.SESSION_STARTED as 'session:started', (session: ActiveSession) => {
+    newSocket.on(WS_EVENTS.SESSION_STARTED, (session: ActiveSession) => {
       // Invalidate all active sessions queries (regardless of server filter)
       void queryClient.invalidateQueries({ queryKey: ['sessions', 'active'] });
       // Invalidate dashboard stats and session history
@@ -176,7 +181,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    newSocket.on(WS_EVENTS.SESSION_STOPPED as 'session:stopped', (_sessionId: string) => {
+    newSocket.on(WS_EVENTS.SESSION_STOPPED, (_sessionId: string) => {
       // Invalidate all active sessions queries (regardless of server filter)
       void queryClient.invalidateQueries({ queryKey: ['sessions', 'active'] });
       // Invalidate dashboard stats and session history (stopped session now has duration)
@@ -189,12 +194,15 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    newSocket.on(WS_EVENTS.SESSION_UPDATED as 'session:updated', (_session: ActiveSession) => {
-      // Invalidate all active sessions queries (regardless of server filter)
-      void queryClient.invalidateQueries({ queryKey: ['sessions', 'active'] });
+    newSocket.on(WS_EVENTS.SESSION_UPDATED, (_session: ActiveSession) => {
+      if (sessionUpdatedThrottleRef.current) return;
+      sessionUpdatedThrottleRef.current = setTimeout(() => {
+        sessionUpdatedThrottleRef.current = null;
+        void queryClient.invalidateQueries({ queryKey: ['sessions', 'active'] });
+      }, SESSION_UPDATED_THROTTLE_MS);
     });
 
-    newSocket.on(WS_EVENTS.VIOLATION_NEW as 'violation:new', (violation: ViolationWithDetails) => {
+    newSocket.on(WS_EVENTS.VIOLATION_NEW, (violation: ViolationWithDetails) => {
       // Invalidate violations query
       void queryClient.invalidateQueries({ queryKey: ['violations'] });
       void queryClient.invalidateQueries({ queryKey: ['stats', 'dashboard'] });
@@ -214,13 +222,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    newSocket.on(WS_EVENTS.STATS_UPDATED as 'stats:updated', (_stats: DashboardStats) => {
+    newSocket.on(WS_EVENTS.STATS_UPDATED, (_stats: DashboardStats) => {
       // Invalidate all dashboard stats queries (they now have server-specific cache keys)
       void queryClient.invalidateQueries({ queryKey: ['stats', 'dashboard'] });
     });
 
     newSocket.on(
-      WS_EVENTS.VERSION_UPDATE as 'version:update',
+      WS_EVENTS.VERSION_UPDATE,
       (data: { current: string; latest: string; releaseUrl: string }) => {
         // Invalidate version query to refresh update status
         void queryClient.invalidateQueries({ queryKey: ['version'] });
@@ -239,137 +247,120 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    newSocket.on(
-      WS_EVENTS.SERVER_DOWN as 'server:down',
-      (data: { serverId: string; serverName: string }) => {
-        // Track unhealthy server for persistent banner
-        setUnhealthyServers((prev) => {
-          // Avoid duplicates
-          if (prev.some((s) => s.serverId === data.serverId)) return prev;
-          return [...prev, { ...data, since: new Date() }];
-        });
+    newSocket.on(WS_EVENTS.SERVER_DOWN, (data: { serverId: string; serverName: string }) => {
+      // Track unhealthy server for persistent banner
+      setUnhealthyServers((prev) => {
+        // Avoid duplicates
+        if (prev.some((s) => s.serverId === data.serverId)) return prev;
+        return [...prev, { ...data, since: new Date() }];
+      });
 
-        if (isWebToastEnabled('server_down')) {
-          toast.error(t('notifications:toast.info.serverOffline.title'), {
-            description: t('notifications:toast.info.serverOffline.message', {
-              name: data.serverName,
-            }),
-            duration: 10000,
-          });
-        }
-      }
-    );
-
-    newSocket.on(
-      WS_EVENTS.SERVER_UP as 'server:up',
-      (data: { serverId: string; serverName: string }) => {
-        // Remove from unhealthy servers
-        setUnhealthyServers((prev) => prev.filter((s) => s.serverId !== data.serverId));
-
-        if (isWebToastEnabled('server_up')) {
-          toast.success(t('notifications:toast.info.serverOnline.title'), {
-            description: t('notifications:toast.info.serverOnline.message', {
-              name: data.serverName,
-            }),
-          });
-        }
-      }
-    );
-
-    newSocket.on(
-      WS_EVENTS.SERVER_CONNECTION as 'server:connection',
-      (status: ServerConnectionStatus) => {
-        setServerConnectionStatuses((prev) => {
-          const next = new Map(prev);
-          next.set(status.serverId, status);
-          return next;
+      if (isWebToastEnabled('server_down')) {
+        toast.error(t('notifications:toast.info.serverOffline.title'), {
+          description: t('notifications:toast.info.serverOffline.message', {
+            name: data.serverName,
+          }),
+          duration: 10000,
         });
       }
-    );
+    });
+
+    newSocket.on(WS_EVENTS.SERVER_UP, (data: { serverId: string; serverName: string }) => {
+      // Remove from unhealthy servers
+      setUnhealthyServers((prev) => prev.filter((s) => s.serverId !== data.serverId));
+
+      if (isWebToastEnabled('server_up')) {
+        toast.success(t('notifications:toast.info.serverOnline.title'), {
+          description: t('notifications:toast.info.serverOnline.message', {
+            name: data.serverName,
+          }),
+        });
+      }
+    });
+
+    newSocket.on(WS_EVENTS.SERVER_CONNECTION, (status: ServerConnectionStatus) => {
+      setServerConnectionStatuses((prev) => {
+        const next = new Map(prev);
+        next.set(status.serverId, status);
+        return next;
+      });
+    });
 
     // Library sync progress - invalidate library caches when sync completes
-    newSocket.on(
-      WS_EVENTS.LIBRARY_SYNC_PROGRESS as 'library:sync:progress',
-      (progress: LibrarySyncProgress) => {
-        if (progress.status === 'complete' || progress.status === 'error') {
-          // Invalidate all library queries to refresh storage and stale content
-          void queryClient.invalidateQueries({ queryKey: ['library'] });
-        }
+    newSocket.on(WS_EVENTS.LIBRARY_SYNC_PROGRESS, (progress: LibrarySyncProgress) => {
+      if (progress.status === 'complete' || progress.status === 'error') {
+        // Invalidate all library queries to refresh storage and stale content
+        void queryClient.invalidateQueries({ queryKey: ['library'] });
       }
-    );
+    });
 
     // Tautulli import progress - invalidate session data when import completes
-    newSocket.on(
-      WS_EVENTS.IMPORT_PROGRESS as 'import:progress',
-      (progress: TautulliImportProgress) => {
-        if (progress.status === 'complete') {
-          // Invalidate session history and stats after importing watch history
-          void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-          void queryClient.invalidateQueries({ queryKey: ['stats'] });
-          void queryClient.invalidateQueries({ queryKey: ['users'] });
-        }
+    newSocket.on(WS_EVENTS.IMPORT_PROGRESS, (progress: TautulliImportProgress) => {
+      if (progress.status === 'complete') {
+        // Invalidate session history and stats after importing watch history
+        void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        void queryClient.invalidateQueries({ queryKey: ['stats'] });
+        void queryClient.invalidateQueries({ queryKey: ['users'] });
       }
-    );
+    });
 
     // Jellystat import progress - invalidate session data when import completes
-    newSocket.on(
-      WS_EVENTS.IMPORT_JELLYSTAT_PROGRESS as 'import:jellystat:progress',
-      (progress: JellystatImportProgress) => {
-        if (progress.status === 'complete') {
-          // Invalidate session history and stats after importing watch history
-          void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-          void queryClient.invalidateQueries({ queryKey: ['stats'] });
-          void queryClient.invalidateQueries({ queryKey: ['users'] });
-        }
+    newSocket.on(WS_EVENTS.IMPORT_JELLYSTAT_PROGRESS, (progress: JellystatImportProgress) => {
+      if (progress.status === 'complete') {
+        // Invalidate session history and stats after importing watch history
+        void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        void queryClient.invalidateQueries({ queryKey: ['stats'] });
+        void queryClient.invalidateQueries({ queryKey: ['users'] });
       }
-    );
+    });
 
     // Maintenance job progress - invalidate relevant caches when jobs complete
-    newSocket.on(
-      WS_EVENTS.MAINTENANCE_PROGRESS as 'maintenance:progress',
-      (progress: MaintenanceJobProgress) => {
-        if (progress.status === 'complete') {
-          // Different jobs affect different data
-          switch (progress.type) {
-            case 'rebuild_timescale_views':
-              // Rebuilding views affects all chart/stats data
-              void queryClient.invalidateQueries({ queryKey: ['library'] });
-              void queryClient.invalidateQueries({ queryKey: ['stats'] });
-              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-              break;
-            case 'normalize_players':
-            case 'normalize_codecs':
-              // These affect session/playback data
-              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-              void queryClient.invalidateQueries({ queryKey: ['library'] });
-              break;
-            case 'normalize_countries':
-              // Affects geographic data in sessions
-              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-              break;
-            case 'fix_imported_progress':
-              // Affects session progress data
-              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-              void queryClient.invalidateQueries({ queryKey: ['stats'] });
-              break;
-            case 'backfill_user_dates':
-              // Affects user data
-              void queryClient.invalidateQueries({ queryKey: ['users'] });
-              break;
-            default:
-              // Unknown job type - invalidate common caches as fallback
-              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-              void queryClient.invalidateQueries({ queryKey: ['stats'] });
-              break;
-          }
+    newSocket.on(WS_EVENTS.MAINTENANCE_PROGRESS, (progress: MaintenanceJobProgress) => {
+      if (progress.status === 'complete') {
+        // Different jobs affect different data
+        switch (progress.type) {
+          case 'rebuild_timescale_views':
+            // Rebuilding views affects all chart/stats data
+            void queryClient.invalidateQueries({ queryKey: ['library'] });
+            void queryClient.invalidateQueries({ queryKey: ['stats'] });
+            void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            break;
+          case 'normalize_players':
+          case 'normalize_codecs':
+            // These affect session/playback data
+            void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            void queryClient.invalidateQueries({ queryKey: ['library'] });
+            break;
+          case 'normalize_countries':
+            // Affects geographic data in sessions
+            void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            break;
+          case 'fix_imported_progress':
+            // Affects session progress data
+            void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            void queryClient.invalidateQueries({ queryKey: ['stats'] });
+            break;
+          case 'backfill_user_dates':
+            // Affects user data
+            void queryClient.invalidateQueries({ queryKey: ['users'] });
+            break;
+          default:
+            // Unknown job type - invalidate common caches as fallback
+            void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            void queryClient.invalidateQueries({ queryKey: ['stats'] });
+            break;
         }
       }
-    );
+    });
 
     setSocket(newSocket);
 
     return () => {
       newSocket.disconnect();
+      if (sessionUpdatedThrottleRef.current) {
+        clearTimeout(sessionUpdatedThrottleRef.current);
+        sessionUpdatedThrottleRef.current = null;
+      }
     };
   }, [isAuthenticated, isInMaintenance, queryClient, isWebToastEnabled]);
 

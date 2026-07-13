@@ -13,7 +13,6 @@ import {
   SESSION_LIMITS,
   type ActiveSession,
   type RuleV2,
-  type SessionState,
 } from '@tracearr/shared';
 import { and, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import { db } from '../../db/client.js';
@@ -1064,7 +1063,7 @@ async function processServerSessions(
         }
 
         const pauseResult = calculatePauseAccumulation(
-          previousState as SessionState,
+          previousState,
           newState,
           {
             lastPausedAt: existingSession.lastPausedAt,

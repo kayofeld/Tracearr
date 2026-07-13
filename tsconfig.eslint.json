@@ -7,7 +7,6 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
       "@tracearr/shared": ["./packages/shared/src"],
       "@tracearr/shared/*": ["./packages/shared/src/*"],

@@ -40,6 +40,6 @@ export function buildPerServerSeries<T extends { serverId: string }>(
       color: server.color ?? undefined,
       stacking,
       data: serverRows,
-    } as Highcharts.SeriesOptionsType;
+    };
   });
 }

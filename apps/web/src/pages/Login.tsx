@@ -214,7 +214,7 @@ export function Login() {
 
       // Navigate popup to Plex auth
       if (popup && !popup.closed) {
-        popup.location.href = result.authUrl;
+        popup.location.assign(result.authUrl);
       }
 
       // Start polling

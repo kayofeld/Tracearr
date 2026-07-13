@@ -201,7 +201,7 @@ export const PayloadBuilders = {
       event: 'violation_detected',
       title: 'Violation Detected',
       message: `User ${userName} triggered a rule violation`,
-      severity: violation.severity as NotificationSeverity,
+      severity: violation.severity,
       timestamp: new Date().toISOString(),
       context: { type: 'violation_detected', violation },
     };

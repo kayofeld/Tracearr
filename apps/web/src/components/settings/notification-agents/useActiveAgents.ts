@@ -57,7 +57,7 @@ export function useActiveAgents(settings: Settings | undefined): ActiveAgent[] {
     // Custom webhook agents - only ONE can be active based on webhookFormat
     if (
       settings.webhookFormat &&
-      CUSTOM_WEBHOOK_AGENTS.includes(settings.webhookFormat as NotificationAgentType)
+      CUSTOM_WEBHOOK_AGENTS.includes(settings.webhookFormat)
     ) {
       const agentType = settings.webhookFormat as NotificationAgentType;
       const config = AGENT_CONFIGS[agentType];

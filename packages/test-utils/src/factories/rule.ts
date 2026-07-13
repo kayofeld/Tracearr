@@ -135,7 +135,7 @@ export async function createImpossibleTravelRule(
 ): Promise<CreatedRule> {
   return createTestRule({
     type: 'impossible_travel',
-    params: { ...DEFAULT_PARAMS.impossible_travel, ...params } as ImpossibleTravelParams,
+    params: { ...DEFAULT_PARAMS.impossible_travel, ...params },
     ...overrides,
   });
 }
@@ -149,7 +149,7 @@ export async function createSimultaneousLocationsRule(
 ): Promise<CreatedRule> {
   return createTestRule({
     type: 'simultaneous_locations',
-    params: { ...DEFAULT_PARAMS.simultaneous_locations, ...params } as SimultaneousLocationsParams,
+    params: { ...DEFAULT_PARAMS.simultaneous_locations, ...params },
     ...overrides,
   });
 }
@@ -163,7 +163,7 @@ export async function createDeviceVelocityRule(
 ): Promise<CreatedRule> {
   return createTestRule({
     type: 'device_velocity',
-    params: { ...DEFAULT_PARAMS.device_velocity, ...params } as DeviceVelocityParams,
+    params: { ...DEFAULT_PARAMS.device_velocity, ...params },
     ...overrides,
   });
 }
@@ -177,7 +177,7 @@ export async function createConcurrentStreamsRule(
 ): Promise<CreatedRule> {
   return createTestRule({
     type: 'concurrent_streams',
-    params: { ...DEFAULT_PARAMS.concurrent_streams, ...params } as ConcurrentStreamsParams,
+    params: { ...DEFAULT_PARAMS.concurrent_streams, ...params },
     ...overrides,
   });
 }
@@ -191,7 +191,7 @@ export async function createGeoRestrictionRule(
 ): Promise<CreatedRule> {
   return createTestRule({
     type: 'geo_restriction',
-    params: { ...DEFAULT_PARAMS.geo_restriction, ...params } as GeoRestrictionParams,
+    params: { ...DEFAULT_PARAMS.geo_restriction, ...params },
     ...overrides,
   });
 }
@@ -205,7 +205,7 @@ export async function createAccountInactivityRule(
 ): Promise<CreatedRule> {
   return createTestRule({
     type: 'account_inactivity',
-    params: { ...DEFAULT_PARAMS.account_inactivity, ...params } as AccountInactivityParams,
+    params: { ...DEFAULT_PARAMS.account_inactivity, ...params },
     ...overrides,
   });
 }

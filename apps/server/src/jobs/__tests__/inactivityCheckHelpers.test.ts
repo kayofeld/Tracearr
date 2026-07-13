@@ -144,7 +144,7 @@ describe('extractInactiveDaysFromConditions', () => {
       groups: [
         {
           conditions: [
-            { field: 'inactive_days', operator: 'eq', value: 'thirty' as unknown as number },
+            { field: 'inactive_days', operator: 'eq', value: 'thirty' },
           ],
         },
       ],

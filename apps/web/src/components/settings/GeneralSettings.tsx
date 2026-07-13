@@ -437,7 +437,7 @@ export function GeneralSettings() {
               id="unitSystem"
               label={t('general.unitSystem')}
               description={t('general.unitSystemDesc')}
-              value={(unitSystemField.value as string) ?? 'metric'}
+              value={unitSystemField.value ?? 'metric'}
               onChange={(v) => unitSystemField.setValue(v as 'metric' | 'imperial')}
               options={[
                 { value: 'metric', label: t('general.metric') },

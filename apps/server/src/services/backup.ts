@@ -25,7 +25,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import { Open } from 'unzipper';
 import type { BackupListItem, BackupMetadata, BackupType } from '@tracearr/shared';
 import { sql } from 'drizzle-orm';
@@ -195,7 +195,7 @@ export async function createBackup(
 
     await new Promise<void>((resolvePromise, reject) => {
       const output = createWriteStream(zipPath);
-      const archive = archiver('zip', { zlib: { level: 1 } });
+      const archive = new ZipArchive({ zlib: { level: 1 } });
 
       output.on('close', () => resolvePromise());
       archive.on('error', reject);
