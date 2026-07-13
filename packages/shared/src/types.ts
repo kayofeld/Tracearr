@@ -1058,12 +1058,7 @@ export interface Settings {
 
 // Tailscale integration
 export type TailscaleStatus =
-  | 'disabled'
-  | 'starting'
-  | 'awaiting_auth'
-  | 'connected'
-  | 'error'
-  | 'stopping';
+  'disabled' | 'starting' | 'awaiting_auth' | 'connected' | 'error' | 'stopping';
 
 export interface TailscaleExitNode {
   id: string;
@@ -1543,12 +1538,7 @@ export interface PushNotificationPayload {
 
 // SSE connection states
 export type SSEConnectionState =
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'disconnected'
-  | 'fallback'
-  | 'unsupported'; // Plugin not installed on this server
+  'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'fallback' | 'unsupported'; // Plugin not installed on this server
 
 // Plex SSE notification container (outer wrapper)
 export interface PlexSSENotification {
@@ -1697,14 +1687,7 @@ export interface TerminationLogWithDetails {
 
 // Reachability error categorization for a tested Plex connection
 export type PlexConnectionErrorCode =
-  | 'timeout'
-  | 'dns'
-  | 'refused'
-  | 'unreachable'
-  | 'reset'
-  | 'tls'
-  | 'http'
-  | 'unknown';
+  'timeout' | 'dns' | 'refused' | 'unreachable' | 'reset' | 'tls' | 'http' | 'unknown';
 
 export interface PlexConnectionError {
   code: PlexConnectionErrorCode;
@@ -1828,10 +1811,7 @@ export interface MaintenanceJobResult {
 // =============================================================================
 
 export type RunningTaskType =
-  | 'library_sync'
-  | 'tautulli_import'
-  | 'jellystat_import'
-  | 'maintenance';
+  'library_sync' | 'tautulli_import' | 'jellystat_import' | 'maintenance';
 
 export interface RunningTask {
   /** Unique task identifier */
@@ -2202,15 +2182,6 @@ export interface BandwidthSummary {
 // Library Statistics Types
 // =============================================================================
 
-// Per-server KPI slice used inside LibraryStatsResponse.byServer
-export interface LibraryStatsServerKpis {
-  totalItems: number;
-  totalSizeBytes: string;
-  movieCount: number;
-  episodeCount: number;
-  showCount: number;
-}
-
 // Library Stats Response (GET /library/stats)
 export interface LibraryStatsResponse {
   totalItems: number;
@@ -2225,8 +2196,6 @@ export interface LibraryStatsResponse {
     countSd: number;
   };
   asOf: string | null;
-  /** Per-server KPI breakdown keyed by server ID (present when multiple servers are in scope) */
-  byServer?: Record<string, LibraryStatsServerKpis>;
 }
 
 // Library Growth Response (GET /library/growth)

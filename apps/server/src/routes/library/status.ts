@@ -6,10 +6,12 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { sql } from 'drizzle-orm';
+import { libraryStatusQuerySchema, type LibraryStatusQueryInput } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { isMaintenanceJobRunning } from '../../jobs/maintenanceQueue.js';
 import { getLibrarySyncStatus } from '../../jobs/librarySyncQueue.js';
 import { validLibraryItemCondition } from '../../utils/snapshotValidation.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 
 /** Library status response shape */
 interface LibraryStatusResponse {
@@ -35,6 +37,126 @@ interface LibraryStatusResponse {
   backfillDays: number | null;
 }
 
+interface LibraryStatusRow {
+  itemCount: number;
+  snapshotCount: number;
+  earliestItemDate: string | null;
+  earliestSnapshotDate: string | null;
+}
+
+const EMPTY_ROW: LibraryStatusRow = {
+  itemCount: 0,
+  snapshotCount: 0,
+  earliestItemDate: null,
+  earliestSnapshotDate: null,
+};
+
+async function fetchLibraryStatusRows(serverIds: string[]): Promise<Map<string, LibraryStatusRow>> {
+  const idList = sql.join(
+    serverIds.map((id) => sql`${id}::uuid`),
+    sql`, `
+  );
+  const itemFilter = buildMultiServerFragment(serverIds, 'li.server_id');
+  const snapshotFilter = buildMultiServerFragment(serverIds, 'lsd.server_id');
+
+  const result = await db.execute(sql`
+    WITH item_agg AS (
+      SELECT li.server_id,
+        MIN(li.created_at) FILTER (WHERE ${validLibraryItemCondition('li')})::date AS earliest_item,
+        COUNT(*)::int AS item_count
+      FROM library_items li
+      WHERE 1=1 ${itemFilter}
+      GROUP BY li.server_id
+    ),
+    snapshot_agg AS (
+      SELECT lsd.server_id,
+        MIN(lsd.day)::date AS earliest_snapshot,
+        COUNT(DISTINCT lsd.day)::int AS snapshot_count
+      FROM library_stats_daily lsd
+      WHERE 1=1 ${snapshotFilter}
+      GROUP BY lsd.server_id
+    )
+    SELECT
+      sid.server_id,
+      ia.earliest_item,
+      sa.earliest_snapshot,
+      COALESCE(ia.item_count, 0)::int AS item_count,
+      COALESCE(sa.snapshot_count, 0)::int AS snapshot_count
+    FROM unnest(ARRAY[${idList}]::uuid[]) AS sid(server_id)
+    LEFT JOIN item_agg ia ON ia.server_id = sid.server_id
+    LEFT JOIN snapshot_agg sa ON sa.server_id = sid.server_id
+  `);
+
+  const rows = result.rows as {
+    server_id: string;
+    earliest_item: string | null;
+    earliest_snapshot: string | null;
+    item_count: number;
+    snapshot_count: number;
+  }[];
+
+  return new Map(
+    rows.map((row) => [
+      row.server_id,
+      {
+        itemCount: row.item_count,
+        snapshotCount: row.snapshot_count,
+        earliestItemDate: row.earliest_item,
+        earliestSnapshotDate: row.earliest_snapshot,
+      },
+    ])
+  );
+}
+
+function deriveLibraryStatus(
+  row: LibraryStatusRow
+): Pick<
+  LibraryStatusResponse,
+  | 'isSynced'
+  | 'needsBackfill'
+  | 'itemCount'
+  | 'snapshotCount'
+  | 'earliestItemDate'
+  | 'earliestSnapshotDate'
+  | 'backfillDays'
+> {
+  const { itemCount, snapshotCount, earliestItemDate, earliestSnapshotDate } = row;
+  const isSynced = itemCount > 0;
+
+  let needsBackfill = false;
+  let backfillDays: number | null = null;
+
+  if (isSynced) {
+    if (snapshotCount === 0) {
+      needsBackfill = true;
+      if (earliestItemDate) {
+        backfillDays = Math.floor(
+          (Date.now() - new Date(earliestItemDate).getTime()) / (1000 * 60 * 60 * 24)
+        );
+      }
+    } else if (earliestItemDate && earliestSnapshotDate) {
+      const itemDate = new Date(earliestItemDate);
+      const snapshotDate = new Date(earliestSnapshotDate);
+      if (itemDate < snapshotDate) {
+        needsBackfill = true;
+        backfillDays = Math.floor(
+          (snapshotDate.getTime() - itemDate.getTime()) / (1000 * 60 * 60 * 24)
+        );
+      }
+    }
+  }
+
+  return {
+    isSynced,
+    needsBackfill,
+    itemCount,
+    snapshotCount,
+    earliestItemDate,
+    earliestSnapshotDate,
+    backfillDays,
+  };
+}
+
 export const libraryStatusRoute: FastifyPluginAsync = async (app) => {
   /**
    * GET /status - Check library sync and backfill status
@@ -42,28 +164,67 @@ export const libraryStatusRoute: FastifyPluginAsync = async (app) => {
    * Returns information about whether the library needs syncing or backfilling.
    * Used by frontend to show appropriate empty states and action buttons.
    */
-  app.get<{ Querystring: { serverId?: string } }>(
+  app.get<{ Querystring: LibraryStatusQueryInput }>(
     '/status',
     { preHandler: [app.authenticate] },
     async (request, reply) => {
-      const { serverId } = request.query;
+      const query = libraryStatusQuerySchema.safeParse(request.query);
+      if (!query.success) {
+        return reply.badRequest('Invalid query parameters');
+      }
 
-      // Build WHERE clause for server filtering
-      const serverFilter = serverId ? sql`AND li.server_id = ${serverId}::uuid` : sql``;
-      const serverFilterWhere = serverId ? sql`WHERE li.server_id = ${serverId}::uuid` : sql``;
-      const aggregateServerFilter = serverId ? sql`WHERE lsd.server_id = ${serverId}::uuid` : sql``;
+      const { serverId, serverIds } = query.data;
+      const authUser = request.user;
+      const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
 
-      // Get library status in a single query
-      // Note: We check library_stats_daily (continuous aggregate) instead of raw library_snapshots
-      // because charts query the aggregate. This ensures the banner reflects actual chart data availability.
-      // The aggregate persists even after raw snapshots are cleaned up.
+      const backfillStatus = await isMaintenanceJobRunning('backfill_library_snapshots');
+
+      if (serverIds) {
+        const targetIds = resolvedIds ?? [];
+        const [rowsById, syncStatuses] = await Promise.all([
+          fetchLibraryStatusRows(targetIds),
+          Promise.all(targetIds.map((id) => getLibrarySyncStatus(id))),
+        ]);
+
+        const response: Record<string, LibraryStatusResponse> = {};
+        targetIds.forEach((id, i) => {
+          response[id] = {
+            ...deriveLibraryStatus(rowsById.get(id) ?? EMPTY_ROW),
+            isSyncRunning: syncStatuses[i]?.isActive ?? false,
+            isBackfillRunning: backfillStatus.isRunning,
+            backfillState: backfillStatus.state,
+          };
+        });
+
+        return reply.send(response);
+      }
+
+      if (serverId && resolvedIds) {
+        const [rowsById, syncStatus] = await Promise.all([
+          fetchLibraryStatusRows(resolvedIds),
+          getLibrarySyncStatus(serverId),
+        ]);
+
+        return reply.send({
+          ...deriveLibraryStatus(rowsById.get(serverId) ?? EMPTY_ROW),
+          isSyncRunning: syncStatus?.isActive ?? false,
+          isBackfillRunning: backfillStatus.isRunning,
+          backfillState: backfillStatus.state,
+        } satisfies LibraryStatusResponse);
+      }
+
+      // No explicit server: combined totals, scoped to accessible servers for non-owners.
+      const itemFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
+      const snapshotFilter = buildMultiServerFragment(resolvedIds, 'lsd.server_id');
       const result = await db.execute(sql`
         SELECT
           (SELECT MIN(li.created_at)::date FROM library_items li
-           WHERE ${validLibraryItemCondition('li')} ${serverFilter}) AS earliest_item,
-          (SELECT MIN(lsd.day)::date FROM library_stats_daily lsd ${aggregateServerFilter}) AS earliest_snapshot,
-          (SELECT COUNT(*)::int FROM library_items li ${serverFilterWhere}) AS item_count,
-          (SELECT COUNT(DISTINCT lsd.day)::int FROM library_stats_daily lsd ${aggregateServerFilter}) AS snapshot_count
+           WHERE ${validLibraryItemCondition('li')} ${itemFilter}) AS earliest_item,
+          (SELECT MIN(lsd.day)::date FROM library_stats_daily lsd
+           WHERE 1=1 ${snapshotFilter}) AS earliest_snapshot,
+          (SELECT COUNT(*)::int FROM library_items li WHERE 1=1 ${itemFilter}) AS item_count,
+          (SELECT COUNT(DISTINCT lsd.day)::int FROM library_stats_daily lsd
+           WHERE 1=1 ${snapshotFilter}) AS snapshot_count
       `);
 
       const row = result.rows[0] as {
@@ -73,65 +234,17 @@ export const libraryStatusRoute: FastifyPluginAsync = async (app) => {
         snapshot_count: number;
       };
 
-      const itemCount = row.item_count ?? 0;
-      const snapshotCount = row.snapshot_count ?? 0;
-      const earliestItemDate = row.earliest_item;
-      const earliestSnapshotDate = row.earliest_snapshot;
-
-      // Library is synced if we have items
-      const isSynced = itemCount > 0;
-
-      // Needs backfill if:
-      // 1. Has items but no snapshots, OR
-      // 2. Snapshots start after items were added (missing historical data)
-      let needsBackfill = false;
-      let backfillDays: number | null = null;
-
-      if (isSynced) {
-        if (snapshotCount === 0) {
-          needsBackfill = true;
-          if (earliestItemDate) {
-            const daysDiff = Math.floor(
-              (Date.now() - new Date(earliestItemDate).getTime()) / (1000 * 60 * 60 * 24)
-            );
-            backfillDays = daysDiff;
-          }
-        } else if (earliestItemDate && earliestSnapshotDate) {
-          const itemDate = new Date(earliestItemDate);
-          const snapshotDate = new Date(earliestSnapshotDate);
-          if (itemDate < snapshotDate) {
-            needsBackfill = true;
-            backfillDays = Math.floor(
-              (snapshotDate.getTime() - itemDate.getTime()) / (1000 * 60 * 60 * 24)
-            );
-          }
-        }
-      }
-
-      // Check if backfill job is running
-      const backfillStatus = await isMaintenanceJobRunning('backfill_library_snapshots');
-
-      // Check if library sync is running
-      let isSyncRunning = false;
-      if (serverId) {
-        const syncStatus = await getLibrarySyncStatus(serverId);
-        isSyncRunning = syncStatus?.isActive ?? false;
-      }
-
-      const response: LibraryStatusResponse = {
-        isSynced,
-        isSyncRunning,
-        needsBackfill,
+      return reply.send({
+        ...deriveLibraryStatus({
+          itemCount: row.item_count ?? 0,
+          snapshotCount: row.snapshot_count ?? 0,
+          earliestItemDate: row.earliest_item,
+          earliestSnapshotDate: row.earliest_snapshot,
+        }),
+        isSyncRunning: false,
         isBackfillRunning: backfillStatus.isRunning,
         backfillState: backfillStatus.state,
-        itemCount,
-        snapshotCount,
-        earliestItemDate,
-        earliestSnapshotDate,
-        backfillDays,
-      };
-
-      return reply.send(response);
+      } satisfies LibraryStatusResponse);
     }
   );
 };

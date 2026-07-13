@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { buildCompositeKey, shouldWriteToDb } from '../stateTracker.js';
 import { updatePendingSession } from '../pendingConfirmation.js';
 import { PLAYBACK_CONFIRM_THRESHOLD_MS, DB_WRITE_FLUSH_INTERVAL_MS } from '../types.js';
+import {
+  getEffectiveFlushIntervalMs,
+  recordDbWrite,
+  shouldFlushDbWrite,
+} from '../dbWriteThrottle.js';
 import type { PendingSessionData } from '../types.js';
 
 // Helper to create a base pending session for tests
@@ -281,30 +286,33 @@ describe('change detection for DB writes', () => {
   });
 
   describe('flush interval', () => {
-    it('DB_WRITE_FLUSH_INTERVAL_MS is 30 seconds', () => {
-      expect(DB_WRITE_FLUSH_INTERVAL_MS).toBe(30_000);
+    it('DB_WRITE_FLUSH_INTERVAL_MS is 15 seconds', () => {
+      expect(DB_WRITE_FLUSH_INTERVAL_MS).toBe(15_000);
     });
 
     it('flush interval forces write even when shouldWriteToDb is false', () => {
-      // This tests the invariant: when no state changes and 30s has elapsed,
-      // the processor should still write progress/lastSeenAt to DB.
-      // The logic is: hasChanges || flushElapsed
       const hasChanges = shouldWriteToDb(base, { ...base });
       expect(hasChanges).toBe(false);
 
-      // Simulate: lastWrite was 31s ago
-      const lastWrite = Date.now() - 31_000;
-      const flushElapsed = Date.now() - lastWrite >= DB_WRITE_FLUSH_INTERVAL_MS;
+      const sessionId = 'flush-elapsed-session';
+      const now = Date.now();
+      recordDbWrite(sessionId, now);
+      const flushElapsed = shouldFlushDbWrite(
+        sessionId,
+        now + getEffectiveFlushIntervalMs(sessionId)
+      );
       expect(flushElapsed).toBe(true);
 
-      // Combined decision: should write
       expect(hasChanges || flushElapsed).toBe(true);
     });
 
     it('skip write when no changes and flush interval not elapsed', () => {
       const hasChanges = shouldWriteToDb(base, { ...base });
-      const lastWrite = Date.now() - 5_000; // 5s ago
-      const flushElapsed = Date.now() - lastWrite >= DB_WRITE_FLUSH_INTERVAL_MS;
+
+      const sessionId = 'flush-pending-session';
+      const now = Date.now();
+      recordDbWrite(sessionId, now);
+      const flushElapsed = shouldFlushDbWrite(sessionId, now + 5_000);
 
       expect(hasChanges || flushElapsed).toBe(false);
     });

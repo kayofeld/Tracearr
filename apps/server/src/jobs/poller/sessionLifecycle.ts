@@ -15,7 +15,7 @@ import {
   type Session,
   type StreamDetailFields,
 } from '@tracearr/shared';
-import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { serverUsers, sessions, violations } from '../../db/schema.js';
 import type { GeoLocation } from '../../services/geoip.js';
@@ -459,6 +459,73 @@ export async function findActiveSessionsAll(
     .select()
     .from(sessions)
     .where(and(...conditions));
+}
+
+function groupActiveSessionRow(
+  map: Map<string, (typeof sessions.$inferSelect)[]>,
+  key: string,
+  row: typeof sessions.$inferSelect
+): void {
+  const bucket = map.get(key);
+  if (bucket) bucket.push(row);
+  else map.set(key, [row]);
+}
+
+/** Batch equivalent of findActiveSession for a whole poll tick, grouped by sessionKey. */
+export async function batchFindActiveSessionsByKey(
+  serverId: string,
+  sessionKeys: string[]
+): Promise<Map<string, (typeof sessions.$inferSelect)[]>> {
+  const result = new Map<string, (typeof sessions.$inferSelect)[]>();
+  if (sessionKeys.length === 0) return result;
+
+  const chunkBound = new Date(Date.now() - ACTIVE_SESSION_CHUNK_BOUND_MS);
+  const rows = await db
+    .select()
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.serverId, serverId),
+        inArray(sessions.sessionKey, [...new Set(sessionKeys)]),
+        isNull(sessions.stoppedAt),
+        gte(sessions.startedAt, chunkBound)
+      )
+    )
+    .orderBy(desc(sessions.startedAt));
+
+  for (const row of rows) groupActiveSessionRow(result, row.sessionKey, row);
+  return result;
+}
+
+/** Batch equivalent of findActiveSessionByComposite, grouped by serverUserId+ratingKey. */
+export async function batchFindActiveSessionsByComposite(
+  serverId: string,
+  identities: { serverUserId: string; ratingKey: string }[]
+): Promise<Map<string, (typeof sessions.$inferSelect)[]>> {
+  const result = new Map<string, (typeof sessions.$inferSelect)[]>();
+  if (identities.length === 0) return result;
+
+  const serverUserIds = [...new Set(identities.map((i) => i.serverUserId))];
+  const ratingKeys = [...new Set(identities.map((i) => i.ratingKey))];
+  const chunkBound = new Date(Date.now() - ACTIVE_SESSION_CHUNK_BOUND_MS);
+  const rows = await db
+    .select()
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.serverId, serverId),
+        inArray(sessions.serverUserId, serverUserIds),
+        inArray(sessions.ratingKey, ratingKeys),
+        isNull(sessions.stoppedAt),
+        gte(sessions.startedAt, chunkBound)
+      )
+    )
+    .orderBy(desc(sessions.startedAt));
+
+  for (const row of rows) {
+    groupActiveSessionRow(result, `${row.serverUserId}::${row.ratingKey}`, row);
+  }
+  return result;
 }
 
 // ============================================================================
@@ -1199,6 +1266,8 @@ export interface PollResultsInput {
   stoppedKeys: string[];
   /** Sessions that were updated */
   updatedSessions: ActiveSession[];
+  /** Whether any session crossed the watched-completion threshold this tick */
+  watchedTransitionOccurred: boolean;
   /** Cached sessions for looking up stopped session details */
   cachedSessions: ActiveSession[];
   /** Cache service for persistence */
@@ -1206,7 +1275,8 @@ export interface PollResultsInput {
     incrementalSyncActiveSessions: (
       newSessions: ActiveSession[],
       stoppedIds: string[],
-      updatedSessions: ActiveSession[]
+      updatedSessions: ActiveSession[],
+      watchedTransitionOccurred?: boolean
     ) => Promise<void>;
     addUserSession: (userId: string, sessionId: string) => Promise<void>;
     removeUserSession: (userId: string, sessionId: string) => Promise<void>;
@@ -1241,6 +1311,7 @@ export async function processPollResults(input: PollResultsInput): Promise<void>
     newSessions,
     stoppedKeys,
     updatedSessions,
+    watchedTransitionOccurred,
     cachedSessions,
     cacheService,
     pubSubService,
@@ -1262,7 +1333,8 @@ export async function processPollResults(input: PollResultsInput): Promise<void>
     await cacheService.incrementalSyncActiveSessions(
       newSessions,
       stoppedSessionIds,
-      updatedSessions
+      updatedSessions,
+      watchedTransitionOccurred
     );
 
     // Update user session sets for new sessions
@@ -1286,8 +1358,9 @@ export async function processPollResults(input: PollResultsInput): Promise<void>
       await enqueueNotification({ type: 'session_started', payload: session });
     }
 
-    for (const session of updatedSessions) {
-      await pubSubService.publish('session:updated', session);
+    // No consumer reads the payload, so one tick's updates collapse to a single publish.
+    if (updatedSessions.length > 0) {
+      await pubSubService.publish('session:updated', updatedSessions[0]);
     }
 
     for (const key of stoppedKeys) {

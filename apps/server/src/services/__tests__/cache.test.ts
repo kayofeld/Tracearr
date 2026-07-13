@@ -823,6 +823,45 @@ describe('CacheService', () => {
     });
   });
 
+  describe('dashboard stats invalidation gating', () => {
+    it('does not invalidate dashboard stats on a progress-only sync (updates only)', async () => {
+      await cache.addActiveSession(createTestActiveSession('session-1'));
+      (redis.scan as any).mockClear();
+
+      const updated = { ...createTestActiveSession('session-1'), progressMs: 5000 };
+      await cache.incrementalSyncActiveSessions([], [], [updated], false);
+
+      expect(redis.scan).not.toHaveBeenCalled();
+    });
+
+    it('invalidates dashboard stats when a new session was added', async () => {
+      (redis.scan as any).mockClear();
+
+      await cache.incrementalSyncActiveSessions([createTestActiveSession('new-1')], [], [], false);
+
+      expect(redis.scan).toHaveBeenCalled();
+    });
+
+    it('invalidates dashboard stats when a session stopped', async () => {
+      await cache.addActiveSession(createTestActiveSession('session-1'));
+      (redis.scan as any).mockClear();
+
+      await cache.incrementalSyncActiveSessions([], ['session-1'], [], false);
+
+      expect(redis.scan).toHaveBeenCalled();
+    });
+
+    it('invalidates dashboard stats when a watched transition occurred, even with only updates', async () => {
+      await cache.addActiveSession(createTestActiveSession('session-1'));
+      (redis.scan as any).mockClear();
+
+      const updated = { ...createTestActiveSession('session-1'), watched: true };
+      await cache.incrementalSyncActiveSessions([], [], [updated], true);
+
+      expect(redis.scan).toHaveBeenCalled();
+    });
+  });
+
   describe('concurrent operations (race condition fix verification)', () => {
     it('should handle concurrent add and remove on different sessions', async () => {
       // This test verifies the fix for the original race condition

@@ -256,6 +256,8 @@ export const REDIS_KEYS = {
   // Filter options caching
   FILTER_OPTIONS: (userId: string, scopeHash: string) =>
     `${_redisPrefix}tracearr:filter-options:${userId}:${scopeHash}`,
+  // v1 segment invalidates cached entries if the GeoLocation shape ever changes
+  PLEX_GEOIP: (ip: string) => `${_redisPrefix}tracearr:geoip:plex:v1:${ip}`,
 };
 
 // Cache TTLs in seconds
@@ -287,6 +289,9 @@ export const CACHE_TTL = {
   MOBILE_LAST_SEEN: 300, // 5 minutes - throttle for device activity updates
   // Filter options (dropdown values change infrequently)
   FILTER_OPTIONS: 120, // 2 minutes
+  PLEX_GEOIP: 86400,
+  // Fail-open: short negative cache keeps a down plex.tv from being hit every poll tick
+  PLEX_GEOIP_NEGATIVE: 600,
 } as const;
 
 // Notification event types (must match NotificationEventType in types.ts)

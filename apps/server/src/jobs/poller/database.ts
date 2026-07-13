@@ -215,6 +215,16 @@ export async function getActiveRules(): Promise<Rule[]> {
   }));
 }
 
+// TTL fallback for multi-instance deployments: another instance's invalidation isn't visible here, so a rule change can take up to this long to apply.
+const RULES_CACHE_TTL_MS = 10_000;
+
+let rulesCache: { data: RuleV2[]; expiresAt: number } | null = null;
+
+/** Invalidate the active V2 rules cache. Call from every rule create/update/delete/toggle path. */
+export function invalidateRulesCache(): void {
+  rulesCache = null;
+}
+
 /**
  * Get all active V2 rules (rules with conditions/actions defined).
  *
@@ -228,12 +238,17 @@ export async function getActiveRules(): Promise<Rule[]> {
  * // Evaluate session events against these rules
  */
 export async function getActiveRulesV2(): Promise<RuleV2[]> {
+  const now = Date.now();
+  if (rulesCache && rulesCache.expiresAt > now) {
+    return rulesCache.data;
+  }
+
   const activeRules = await db
     .select()
     .from(rules)
     .where(and(eq(rules.isActive, true), isNotNull(rules.conditions)));
 
-  return activeRules.map((r) => ({
+  const mapped = activeRules.map((r) => ({
     id: r.id,
     name: r.name,
     description: r.description,
@@ -248,4 +263,7 @@ export async function getActiveRulesV2(): Promise<RuleV2[]> {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   }));
+
+  rulesCache = { data: mapped, expiresAt: now + RULES_CACHE_TTL_MS };
+  return mapped;
 }

@@ -9,8 +9,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api, getBrowserTimezone } from '@/lib/api';
-import { useMultiServerQuery } from '@/hooks/useMultiServerQuery';
-import type { MultiServerQueryResult } from '@/hooks/useMultiServerQuery';
+import type { LibraryStatusResponse } from '@/lib/api';
 import type {
   LibraryStatsResponse,
   LibraryGrowthResponse,
@@ -345,30 +344,33 @@ export function useLibraryResolution(serverId?: string | null, libraryId?: strin
   });
 }
 
-/** Library status response type */
-export interface LibraryStatusResponse {
-  isSynced: boolean;
-  isSyncRunning: boolean;
-  needsBackfill: boolean;
-  isBackfillRunning: boolean;
-  backfillState: 'active' | 'waiting' | 'delayed' | null;
-  itemCount: number;
-  snapshotCount: number;
-  earliestItemDate: string | null;
-  earliestSnapshotDate: string | null;
-  backfillDays: number | null;
+export type { LibraryStatusResponse } from '@/lib/api';
+
+export interface LibraryStatusFanOut {
+  byServer: Map<string, { data?: LibraryStatusResponse; isLoading: boolean }>;
+  isLoading: boolean;
+  isFetching: boolean;
+  error: unknown;
 }
 
-/**
- * Fan-out library sync/backfill status across all selected servers.
- * Returns a MultiServerQueryResult so callers can inspect per-server state.
- */
-export function useLibraryStatus(
-  serverIds: string[]
-): MultiServerQueryResult<LibraryStatusResponse> {
-  return useMultiServerQuery<LibraryStatusResponse>(serverIds, (id) => ({
-    queryKey: ['library', 'status', id],
-    queryFn: () => api.library.status(id),
+/** Fetch sync/backfill status for every selected server in one request. */
+export function useLibraryStatus(serverIds: string[]): LibraryStatusFanOut {
+  const sortedIds = [...serverIds].sort().join(',');
+  const query = useQuery<Record<string, LibraryStatusResponse>>({
+    queryKey: ['library', 'status', sortedIds],
+    queryFn: () => api.library.status(serverIds),
     staleTime: 1000 * 30,
-  }));
+    enabled: serverIds.length > 0,
+  });
+
+  const byServer = new Map(
+    serverIds.map((id) => [id, { data: query.data?.[id], isLoading: query.isLoading }])
+  );
+
+  return {
+    byServer,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    error: query.error,
+  };
 }

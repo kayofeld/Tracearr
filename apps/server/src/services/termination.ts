@@ -10,6 +10,7 @@ import { db } from '../db/client.js';
 import { terminationLogs, sessions } from '../db/schema.js';
 import { createMediaServerClient } from './mediaServer/index.js';
 import { getCacheService, getPubSubService } from './cache.js';
+import { clearDbWriteTracking } from '../jobs/poller/dbWriteThrottle.js';
 
 // ============================================================================
 // Types
@@ -177,6 +178,8 @@ export async function terminateSession(
         forceStopped: true,
       })
       .where(eq(sessions.id, session.id));
+
+    clearDbWriteTracking(session.id);
 
     // Update cache (remove from active sessions)
     const cacheService = getCacheService();

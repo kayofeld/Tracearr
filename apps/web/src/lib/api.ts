@@ -97,6 +97,19 @@ import { BASE_PATH } from '@/lib/basePath';
 export { BASE_PATH, BASE_URL, imageProxyUrl } from '@/lib/basePath';
 import { MAINTENANCE_EVENT } from '@/hooks/useMaintenanceMode';
 
+export interface LibraryStatusResponse {
+  isSynced: boolean;
+  isSyncRunning: boolean;
+  needsBackfill: boolean;
+  isBackfillRunning: boolean;
+  backfillState: 'active' | 'waiting' | 'delayed' | null;
+  itemCount: number;
+  snapshotCount: number;
+  earliestItemDate: string | null;
+  earliestSnapshotDate: string | null;
+  backfillDays: number | null;
+}
+
 // Stats time range parameters
 export interface StatsTimeRange {
   period: 'day' | 'week' | 'month' | 'year' | 'all' | 'custom';
@@ -1064,7 +1077,6 @@ class ApiClient {
         `/stats/device-compatibility?${params.toString()}`
       );
     },
-    // Matrix is single-server only; fan-out in useDeviceCompatibilityMatrix calls this per id.
     deviceCompatibilityMatrix: async (
       timeRange?: StatsTimeRange,
       serverId?: string,
@@ -1073,6 +1085,18 @@ class ApiClient {
       const params = this.buildStatsParams(timeRange ?? { period: 'month' }, serverId);
       params.set('minSessions', String(minSessions));
       return this.request<DeviceCompatibilityMatrix>(
+        `/stats/device-compatibility/matrix?${params.toString()}`
+      );
+    },
+    // Batches every selected server into one request, keyed by server id.
+    deviceCompatibilityMatrixMulti: async (
+      timeRange?: StatsTimeRange,
+      serverIds?: string[],
+      minSessions = 5
+    ) => {
+      const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
+      params.set('minSessions', String(minSessions));
+      return this.request<Record<string, DeviceCompatibilityMatrix>>(
         `/stats/device-compatibility/matrix?${params.toString()}`
       );
     },
@@ -1319,21 +1343,14 @@ class ApiClient {
       if (libraryId) params.set('libraryId', libraryId);
       return this.request<LibraryResolutionResponse>(`/library/resolution?${params.toString()}`);
     },
-    status: (serverId?: string) => {
+    status: (serverIds: string[]) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
-      return this.request<{
-        isSynced: boolean;
-        isSyncRunning: boolean;
-        needsBackfill: boolean;
-        isBackfillRunning: boolean;
-        backfillState: 'active' | 'waiting' | 'delayed' | null;
-        itemCount: number;
-        snapshotCount: number;
-        earliestItemDate: string | null;
-        earliestSnapshotDate: string | null;
-        backfillDays: number | null;
-      }>(`/library/status?${params.toString()}`);
+      for (const id of serverIds) {
+        params.append('serverIds', id);
+      }
+      return this.request<Record<string, LibraryStatusResponse>>(
+        `/library/status?${params.toString()}`
+      );
     },
   };
 

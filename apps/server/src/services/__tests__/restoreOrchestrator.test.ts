@@ -31,6 +31,7 @@ vi.mock('../../serverState.js', () => ({
 
 vi.mock('../settings.js', () => ({
   setSetting: vi.fn().mockResolvedValue(undefined),
+  resetSettingsCache: vi.fn(),
 }));
 
 vi.mock('../../plugins/auth.js', () => ({

@@ -34,6 +34,11 @@ import {
   getActiveRulesV2,
   mergeRecentSessionsForIdentity,
 } from './poller/database.js';
+import {
+  clearDbWriteTracking,
+  recordDbWrite,
+  shouldFlushDbWrite,
+} from './poller/dbWriteThrottle.js';
 import { triggerReconciliationPoll } from './poller/index.js';
 import {
   buildActiveSession,
@@ -512,14 +517,18 @@ async function handleProgress(event: {
       );
     }
 
-    await db
-      .update(sessions)
-      .set({
-        progressMs: notification.viewOffset,
-        lastSeenAt: now, // Update for stale session detection
-        watched,
-      })
-      .where(eq(sessions.id, existingSession.id));
+    const watchedTransition = watched && !existingSession.watched;
+    if (watchedTransition || shouldFlushDbWrite(existingSession.id, now.getTime())) {
+      await db
+        .update(sessions)
+        .set({
+          progressMs: notification.viewOffset,
+          lastSeenAt: now, // Update for stale session detection
+          watched,
+        })
+        .where(eq(sessions.id, existingSession.id));
+      recordDbWrite(existingSession.id, now.getTime());
+    }
 
     if (cacheService) {
       const cached = await cacheService.getSessionById(existingSession.id);
@@ -529,7 +538,7 @@ async function handleProgress(event: {
         await cacheService.updateActiveSession(cached);
 
         // Only broadcast on watched status change (progress events are frequent)
-        if (watched && !existingSession.watched && pubSubService) {
+        if (watchedTransition && pubSubService) {
           await pubSubService.publish('session:updated', cached);
         }
       }
@@ -596,6 +605,7 @@ async function processSessionWriteRetries(): Promise<void> {
 
   for (const retry of retries) {
     if (retry.attempts >= SESSION_WRITE_RETRY.MAX_TOTAL_ATTEMPTS) {
+      clearDbWriteTracking(retry.sessionId);
       await cacheService.removeSessionWriteRetry(retry.sessionId);
       console.error(
         `[SSEProcessor] Max retry attempts (${SESSION_WRITE_RETRY.MAX_TOTAL_ATTEMPTS}) ` +
@@ -614,6 +624,7 @@ async function processSessionWriteRetries(): Promise<void> {
 
     if (!session) {
       // Session no longer exists or already stopped
+      clearDbWriteTracking(retry.sessionId);
       await cacheService.removeSessionWriteRetry(retry.sessionId);
       continue;
     }
@@ -991,6 +1002,8 @@ async function handleMediaChange(
   }
 
   const { stoppedSession, insertedSession, violationResults, wasTerminatedByRule } = result;
+
+  clearDbWriteTracking(stoppedSession.id);
 
   // Update cache for stopped session
   await cacheService.removeActiveSession(stoppedSession.id);
@@ -1465,6 +1478,7 @@ async function confirmPendingSessionAndPersist(
 
   // Handle quality change (rare but possible)
   if (qualityChange) {
+    clearDbWriteTracking(qualityChange.stoppedSession.id);
     await cache.removeActiveSession(qualityChange.stoppedSession.id);
     await cache.removeUserSession(
       qualityChange.stoppedSession.serverUserId,
@@ -1533,6 +1547,8 @@ async function stopSession(existingSession: typeof sessions.$inferSelect): Promi
     session: existingSession,
     stoppedAt: new Date(),
   });
+
+  clearDbWriteTracking(existingSession.id);
 
   if (needsRetry && retryData && cacheService) {
     await cacheService.addSessionWriteRetry(existingSession.id, retryData);

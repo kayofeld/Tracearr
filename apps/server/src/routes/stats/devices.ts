@@ -7,21 +7,43 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { sql } from 'drizzle-orm';
-import { statsQuerySchema } from '@tracearr/shared';
+import { statsQuerySchema, type DeviceCompatibilityMatrix } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import '../../db/schema.js';
 import { resolveDateRange } from './utils.js';
-import {
-  resolveServerIds,
-  buildMultiServerFragment,
-  validateServerAccess,
-  buildServerFilterFragment,
-} from '../../utils/serverFiltering.js';
+import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 
 // Extended schema with minSessions filter
 const deviceCompatibilitySchema = statsQuerySchema.safeExtend({
   minSessions: z.coerce.number().int().min(1).default(5),
 });
+
+interface MatrixDeviceRow {
+  device_type: string;
+  video_codec: string;
+  session_count: number;
+  direct_count: number;
+  direct_pct: number;
+}
+
+function buildDeviceMatrix(rows: MatrixDeviceRow[], codecs: string[]): DeviceCompatibilityMatrix {
+  const deviceMap = new Map<
+    string,
+    { device: string; codecs: Record<string, { sessions: number; directPct: number }> }
+  >();
+
+  for (const row of rows) {
+    if (!deviceMap.has(row.device_type)) {
+      deviceMap.set(row.device_type, { device: row.device_type, codecs: {} });
+    }
+    deviceMap.get(row.device_type)!.codecs[row.video_codec] = {
+      sessions: row.session_count,
+      directPct: row.direct_pct,
+    };
+  }
+
+  return { codecs, devices: Array.from(deviceMap.values()) };
+}
 
 export const devicesRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -139,7 +161,10 @@ export const devicesRoutes: FastifyPluginAsync = async (app) => {
    * Returns a pivoted matrix where rows are devices and columns are video codecs.
    * Each cell shows the direct play percentage for that device+codec combination.
    *
-   * Single-server only - frontend fans this out via useMultiServerQuery.
+   * A single `serverId` (or no server param) returns one matrix object, unchanged
+   * from before. Passing `serverIds[]` batches all requested servers into one
+   * query and returns them keyed by server id, so the frontend no longer needs
+   * to fan out one request per selected server.
    */
   app.get(
     '/device-compatibility/matrix',
@@ -150,39 +175,90 @@ export const devicesRoutes: FastifyPluginAsync = async (app) => {
         return reply.badRequest('Invalid query parameters');
       }
 
-      const { period, startDate, endDate, serverId, minSessions } = query.data;
+      const { period, startDate, endDate, serverId, serverIds, minSessions } = query.data;
       const authUser = request.user;
       const dateRange = resolveDateRange(period, startDate, endDate);
+      const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
 
-      // Validate server access if specific server requested
-      if (serverId) {
-        const error = validateServerAccess(authUser, serverId);
-        if (error) {
-          return reply.forbidden(error);
-        }
-      }
-
-      const serverFilter = buildServerFilterFragment(serverId, authUser);
-
-      // For all-time queries, we need a base WHERE clause
       const baseWhere = dateRange.start
         ? sql`WHERE started_at >= ${dateRange.start}`
         : sql`WHERE true`;
+      const dateFilter = period === 'custom' ? sql`AND started_at < ${dateRange.end}` : sql``;
 
-      // Get unique codecs first
+      if (serverIds) {
+        const targetIds = resolvedIds ?? [];
+        const serverFilter = buildMultiServerFragment(targetIds);
+
+        const codecsResult = await db.execute(sql`
+          SELECT DISTINCT server_id, COALESCE(source_video_codec, 'Unknown') AS codec
+          FROM sessions
+          ${baseWhere}
+          AND source_video_codec IS NOT NULL
+          ${dateFilter}
+          ${serverFilter}
+          ORDER BY server_id, codec
+        `);
+
+        const codecsByServer = new Map<string, string[]>();
+        for (const row of codecsResult.rows as { server_id: string; codec: string }[]) {
+          const list = codecsByServer.get(row.server_id) ?? [];
+          list.push(row.codec);
+          codecsByServer.set(row.server_id, list);
+        }
+
+        const matrixResult = await db.execute(sql`
+          SELECT
+            server_id,
+            COALESCE(platform, 'Unknown') AS device_type,
+            COALESCE(source_video_codec, 'Unknown') AS video_codec,
+            COUNT(*)::int AS session_count,
+            COUNT(*) FILTER (WHERE video_decision != 'transcode')::int AS direct_count,
+            ROUND(100.0 * COUNT(*) FILTER (WHERE video_decision != 'transcode') / NULLIF(COUNT(*), 0), 1) AS direct_pct
+          FROM sessions
+          ${baseWhere}
+          AND source_video_codec IS NOT NULL
+          ${dateFilter}
+          ${serverFilter}
+          GROUP BY server_id, platform, source_video_codec
+          HAVING COUNT(*) >= ${minSessions}
+          ORDER BY server_id, device_type, video_codec
+        `);
+
+        const rowsByServer = new Map<string, MatrixDeviceRow[]>();
+        for (const row of matrixResult.rows as unknown as (MatrixDeviceRow & {
+          server_id: string;
+        })[]) {
+          const list = rowsByServer.get(row.server_id) ?? [];
+          list.push(row);
+          rowsByServer.set(row.server_id, list);
+        }
+
+        const response: Record<string, DeviceCompatibilityMatrix> = {};
+        for (const id of targetIds) {
+          response[id] = buildDeviceMatrix(
+            rowsByServer.get(id) ?? [],
+            codecsByServer.get(id) ?? []
+          );
+        }
+
+        return response;
+      }
+
+      // Single serverId or no server param: unchanged, one combined matrix.
+      const serverFilter = buildMultiServerFragment(resolvedIds);
+
       const codecsResult = await db.execute(sql`
         SELECT DISTINCT COALESCE(source_video_codec, 'Unknown') AS codec
         FROM sessions
         ${baseWhere}
         AND source_video_codec IS NOT NULL
-        ${period === 'custom' ? sql`AND started_at < ${dateRange.end}` : sql``}
+        ${dateFilter}
         ${serverFilter}
         ORDER BY codec
       `);
 
       const codecs = (codecsResult.rows as { codec: string }[]).map((r) => r.codec);
 
-      // Get matrix data grouped by device and codec
       const matrixResult = await db.execute(sql`
         SELECT
           COALESCE(platform, 'Unknown') AS device_type,
@@ -193,42 +269,16 @@ export const devicesRoutes: FastifyPluginAsync = async (app) => {
         FROM sessions
         ${baseWhere}
         AND source_video_codec IS NOT NULL
-        ${period === 'custom' ? sql`AND started_at < ${dateRange.end}` : sql``}
+        ${dateFilter}
         ${serverFilter}
         GROUP BY platform, source_video_codec
         HAVING COUNT(*) >= ${minSessions}
         ORDER BY device_type, video_codec
       `);
 
-      const matrixRows = matrixResult.rows as {
-        device_type: string;
-        video_codec: string;
-        session_count: number;
-        direct_count: number;
-        direct_pct: number;
-      }[];
+      const matrixRows = matrixResult.rows as unknown as MatrixDeviceRow[];
 
-      // Build the matrix: group by device
-      const deviceMap = new Map<
-        string,
-        { device: string; codecs: Record<string, { sessions: number; directPct: number }> }
-      >();
-
-      for (const row of matrixRows) {
-        if (!deviceMap.has(row.device_type)) {
-          deviceMap.set(row.device_type, { device: row.device_type, codecs: {} });
-        }
-        const deviceEntry = deviceMap.get(row.device_type)!;
-        deviceEntry.codecs[row.video_codec] = {
-          sessions: row.session_count,
-          directPct: row.direct_pct,
-        };
-      }
-
-      return {
-        codecs,
-        devices: Array.from(deviceMap.values()),
-      };
+      return buildDeviceMatrix(matrixRows, codecs);
     }
   );
 

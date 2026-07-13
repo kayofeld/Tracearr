@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { MediaType, DeviceCompatibilityMatrix } from '@tracearr/shared';
 import { api, type StatsTimeRange, getBrowserTimezone } from '@/lib/api';
-import { useMultiServerQuery, type MultiServerQueryResult } from '@/hooks/useMultiServerQuery';
 
 // Re-export for backwards compatibility and convenience
 export type { StatsTimeRange };
@@ -183,18 +182,58 @@ export function useDeviceCompatibility(
   });
 }
 
-// Fan-out: calls the single-server matrix endpoint once per selected server.
+export interface DeviceMatrixFanOut {
+  byServer: Map<
+    string,
+    {
+      data?: DeviceCompatibilityMatrix;
+      isLoading: boolean;
+      error: Error | null;
+      refetch: () => Promise<unknown>;
+    }
+  >;
+  isLoading: boolean;
+  isFetching: boolean;
+  error: unknown;
+}
+
+/** Fetch the device compatibility matrix for every selected server in one request. */
 export function useDeviceCompatibilityMatrix(
   serverIds: string[],
   timeRange?: StatsTimeRange,
   minSessions = 5
-): MultiServerQueryResult<DeviceCompatibilityMatrix> {
-  return useMultiServerQuery(serverIds, (id) => ({
-    queryKey: ['stats', 'device-compatibility-matrix', id, timeRange, minSessions],
+): DeviceMatrixFanOut {
+  const serverIdsKey = serverIds.length ? [...serverIds].sort().join(',') : 'all';
+  const query = useQuery({
+    queryKey: ['stats', 'device-compatibility-matrix', serverIdsKey, timeRange, minSessions],
     queryFn: () =>
-      api.stats.deviceCompatibilityMatrix(timeRange ?? { period: 'month' }, id, minSessions),
+      api.stats.deviceCompatibilityMatrixMulti(
+        timeRange ?? { period: 'month' },
+        serverIds,
+        minSessions
+      ),
     staleTime: 1000 * 60 * 5,
-  }));
+    enabled: serverIds.length > 0,
+  });
+
+  const byServer = new Map(
+    serverIds.map((id) => [
+      id,
+      {
+        data: query.data?.[id],
+        isLoading: query.isLoading,
+        error: query.error,
+        refetch: query.refetch,
+      },
+    ])
+  );
+
+  return {
+    byServer,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    error: query.error,
+  };
 }
 
 export function useDeviceHealth(timeRange?: StatsTimeRange, serverIds?: string[]) {

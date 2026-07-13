@@ -23,7 +23,8 @@ export interface CacheService {
   incrementalSyncActiveSessions(
     newSessions: ActiveSession[],
     stoppedSessionIds: string[],
-    updatedSessions: ActiveSession[]
+    updatedSessions: ActiveSession[],
+    watchedTransitionOccurred?: boolean
   ): Promise<void>;
 
   // Dashboard stats
@@ -103,6 +104,9 @@ export interface CacheService {
   // Filter options caching (TTL-based, no active invalidation needed)
   getFilterOptions(userId: string, scopeHash: string): Promise<string | null>;
   setFilterOptions(userId: string, scopeHash: string, data: string): Promise<void>;
+
+  getPlexGeoipCache(ip: string): Promise<string | null>;
+  setPlexGeoipCache(ip: string, data: string, ttlSeconds: number): Promise<void>;
 
   // Health check
   ping(): Promise<boolean>;
@@ -286,7 +290,8 @@ export function createCacheService(redis: Redis): CacheService {
     async incrementalSyncActiveSessions(
       newSessions: ActiveSession[],
       stoppedSessionIds: string[],
-      updatedSessions: ActiveSession[]
+      updatedSessions: ActiveSession[],
+      watchedTransitionOccurred = false
     ): Promise<void> {
       const hasChanges =
         newSessions.length > 0 || stoppedSessionIds.length > 0 || updatedSessions.length > 0;
@@ -329,8 +334,11 @@ export function createCacheService(redis: Redis): CacheService {
       if (!results || results.some(([err]) => err !== null)) {
         console.error('[Cache] incrementalSyncActiveSessions pipeline failed:', results);
       }
-      // Invalidate dashboard stats (uses pattern matching for timezone-specific keys)
-      await invalidateDashboardStats();
+
+      // Progress-only ticks don't change dashboard stats, so skip the SCAN-based invalidation.
+      if (newSessions.length > 0 || stoppedSessionIds.length > 0 || watchedTransitionOccurred) {
+        await invalidateDashboardStats();
+      }
     },
 
     // Dashboard stats
@@ -639,6 +647,13 @@ export function createCacheService(redis: Redis): CacheService {
         CACHE_TTL.FILTER_OPTIONS,
         data
       );
+    },
+
+    async getPlexGeoipCache(ip: string): Promise<string | null> {
+      return redis.get(REDIS_KEYS.PLEX_GEOIP(ip));
+    },
+    async setPlexGeoipCache(ip: string, data: string, ttlSeconds: number): Promise<void> {
+      await redis.setex(REDIS_KEYS.PLEX_GEOIP(ip), ttlSeconds, data);
     },
 
     // Health check

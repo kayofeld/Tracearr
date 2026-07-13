@@ -228,8 +228,12 @@ export interface SessionPauseData {
  */
 export const PLAYBACK_CONFIRM_THRESHOLD_MS = 30_000;
 
-/** Periodic DB flush for progress/lastSeenAt when no state changes. */
-export const DB_WRITE_FLUSH_INTERVAL_MS = 30_000;
+/**
+ * Periodic DB flush for progress/lastSeenAt when no state changes.
+ * Must stay well below STALE_SESSION_TIMEOUT_SECONDS (300s) including the
+ * dbWriteThrottle jitter, or the stale sweep will force-stop live sessions.
+ */
+export const DB_WRITE_FLUSH_INTERVAL_MS = 15_000;
 
 /**
  * Tracking data for playback confirmation (stored in Redis session state)
@@ -313,6 +317,8 @@ export interface ServerProcessingResult {
   stoppedSessionKeys: string[];
   /** Sessions that were updated (state change, progress, etc.) */
   updatedSessions: ActiveSession[];
+  /** Whether any session crossed the watched-completion threshold this tick */
+  watchedTransitionOccurred: boolean;
 }
 
 // ============================================================================

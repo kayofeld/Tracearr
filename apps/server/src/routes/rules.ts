@@ -24,6 +24,7 @@ import { db } from '../db/client.js';
 import { rules, serverUsers, violations, servers, users } from '../db/schema.js';
 import { hasServerAccess } from '../utils/serverFiltering.js';
 import { scheduleInactivityChecks, hasInactivityCondition } from '../jobs/inactivityCheckQueue.js';
+import { invalidateRulesCache } from '../jobs/poller/database.js';
 import { needsMigration, convertLegacyRule, migrateRules } from '../services/rules/migration.js';
 
 /**
@@ -189,6 +190,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
       return reply.internalServerError('Failed to create rule');
     }
 
+    invalidateRulesCache();
+
     // Reschedule inactivity checks if this is an inactivity rule
     if (type === 'account_inactivity') {
       void scheduleInactivityChecks();
@@ -295,6 +298,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
     if (!rule) {
       return reply.internalServerError('Failed to create rule');
     }
+
+    invalidateRulesCache();
 
     // Reschedule inactivity checks if this V2 rule has inactivity conditions
     if (hasInactivityCondition(conditions)) {
@@ -457,6 +462,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
       return reply.internalServerError('Failed to update rule');
     }
 
+    invalidateRulesCache();
+
     // Reschedule inactivity checks if this rule has inactivity conditions
     if (hasInactivityCondition(updatedRule.conditions)) {
       void scheduleInactivityChecks();
@@ -607,6 +614,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
       return reply.internalServerError('Failed to update rule');
     }
 
+    invalidateRulesCache();
+
     // Reschedule inactivity checks if inactivity conditions changed
     const hasInactivity = hasInactivityCondition(updatedRule.conditions);
     if (hadInactivity || hasInactivity) {
@@ -664,6 +673,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
 
     // Delete rule (cascade will handle violations)
     await db.delete(rules).where(eq(rules.id, id));
+
+    invalidateRulesCache();
 
     // Reschedule inactivity checks if this was an inactivity rule
     if (wasInactivityRule) {
@@ -726,6 +737,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
       })
       .where(inArray(rules.id, accessibleIds));
 
+    invalidateRulesCache();
+
     return { success: true, updated: accessibleIds.length };
   });
 
@@ -773,6 +786,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
 
     // Bulk delete (cascade will handle violations)
     await db.delete(rules).where(inArray(rules.id, accessibleIds));
+
+    invalidateRulesCache();
 
     return { success: true, deleted: accessibleIds.length };
   });
@@ -943,6 +958,10 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
       return count;
     });
 
+    if (updatedCount > 0) {
+      invalidateRulesCache();
+    }
+
     return {
       success: true,
       migrated: updatedCount,
@@ -1038,6 +1057,8 @@ export const ruleRoutes: FastifyPluginAsync = async (app) => {
       })
       .where(eq(rules.id, id))
       .returning();
+
+    invalidateRulesCache();
 
     return updated[0];
   });

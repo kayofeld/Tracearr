@@ -26,7 +26,8 @@ import {
 } from './backup.js';
 
 import { closeDatabase, recreatePool, runMigrations } from '../db/client.js';
-import { setSetting } from './settings.js';
+import { setSetting, resetSettingsCache } from './settings.js';
+import { invalidateRulesCache } from '../jobs/poller/database.js';
 import { loadJwtRevokeSettings } from '../plugins/auth.js';
 import { initTimescaleDB } from '../db/timescale.js';
 import { closeAuth } from '../lib/auth.js';
@@ -43,6 +44,8 @@ let lastPhase: Exclude<RestorePhase, 'failed'> = 'creating_restore_point';
 export async function reinitDatabaseConsumers(): Promise<void> {
   await recreatePool();
   await closeAuth();
+  invalidateRulesCache();
+  resetSettingsCache();
 }
 
 function setPhase(phase: RestorePhase, message: string, error?: string): void {

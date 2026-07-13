@@ -1001,6 +1001,12 @@ export const libraryStatsQuerySchema = z.object({
   timezone: timezoneSchema,
 });
 
+// Library status query schema
+export const libraryStatusQuerySchema = z.object({
+  serverId: z.uuid().optional(),
+  serverIds: serverIdsQuerySchema,
+});
+
 // Library growth query schema (time-series)
 export const libraryGrowthQuerySchema = z.object({
   serverId: z.uuid().optional(),
@@ -1145,6 +1151,7 @@ export const topContentQuerySchema = z.object({
 // ============================================================================
 
 export type LibraryStatsQueryInput = z.infer<typeof libraryStatsQuerySchema>;
+export type LibraryStatusQueryInput = z.infer<typeof libraryStatusQuerySchema>;
 export type LibraryGrowthQueryInput = z.infer<typeof libraryGrowthQuerySchema>;
 export type LibraryQualityQueryInput = z.infer<typeof libraryQualityQuerySchema>;
 export type LibraryStorageQueryInput = z.infer<typeof libraryStorageQuerySchema>;

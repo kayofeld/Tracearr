@@ -11,7 +11,6 @@
  * MULTI-SERVER PATH (more than one server in scope):
  *   COUNT(DISTINCT matchKey) deduplication across library_items so the same title
  *   on two servers counts once. Storage is always SUM (physical bytes are never deduped).
- *   byServer map included for per-server breakdowns.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -21,7 +20,6 @@ import {
   CACHE_TTL,
   libraryStatsQuerySchema,
   type LibraryStatsQueryInput,
-  type LibraryStatsServerKpis,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { libraryItems } from '../../db/schema.js';
@@ -43,7 +41,6 @@ interface LibraryStatsResponse {
     countSd: number;
   };
   asOf: string | null;
-  byServer?: Record<string, LibraryStatsServerKpis>;
 }
 
 export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
@@ -195,40 +192,6 @@ export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
             }
           | undefined;
 
-        // Per-server raw counts so the frontend can show server breakdowns.
-        const perServerResult = await db.execute(sql`
-          SELECT
-            li.server_id,
-            COUNT(DISTINCT CASE WHEN li.file_size > 0 OR li.media_type IN ('show', 'season') THEN ${matchKey} END)::int AS total_items,
-            COALESCE(SUM(COALESCE(li.file_size, 0)), 0)::bigint AS total_size_bytes,
-            COUNT(DISTINCT CASE WHEN li.media_type = 'movie' THEN ${matchKey} END)::int AS movie_count,
-            COUNT(DISTINCT CASE WHEN li.media_type = 'episode' THEN ${matchKey} END)::int AS episode_count,
-            COUNT(DISTINCT CASE WHEN li.media_type = 'show' THEN ${matchKey} END)::int AS show_count
-          FROM library_items li
-          WHERE 1=1
-            ${serverFilter}
-            ${libraryFilter}
-          GROUP BY li.server_id
-        `);
-
-        const byServer: Record<string, LibraryStatsServerKpis> = {};
-        for (const r of perServerResult.rows as {
-          server_id: string;
-          total_items: number;
-          total_size_bytes: string;
-          movie_count: number;
-          episode_count: number;
-          show_count: number;
-        }[]) {
-          byServer[r.server_id] = {
-            totalItems: r.total_items,
-            totalSizeBytes: r.total_size_bytes,
-            movieCount: r.movie_count,
-            episodeCount: r.episode_count,
-            showCount: r.show_count,
-          };
-        }
-
         stats = {
           totalItems: row?.total_items ?? 0,
           totalSizeBytes: row?.total_size_bytes ?? '0',
@@ -242,7 +205,6 @@ export const libraryStatsRoute: FastifyPluginAsync = async (app) => {
             countSd: row?.count_sd ?? 0,
           },
           asOf: row?.as_of ?? null,
-          byServer: Object.keys(byServer).length > 0 ? byServer : undefined,
         };
       }
 

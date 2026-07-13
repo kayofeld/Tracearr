@@ -30,7 +30,9 @@ import {
   getBuildDate,
 } from '../utils/buildInfo.js';
 import { getInactivityCheckQueueStats } from '../jobs/inactivityCheckQueue.js';
+import { invalidateRulesCache } from '../jobs/poller/database.js';
 import { getBackupQueueStats } from '../jobs/backupQueue.js';
+import { resetSettingsCache } from '../services/settings.js';
 import { getAllServices } from '../services/serviceTracker.js';
 import {
   sessions,
@@ -515,6 +517,7 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
     // Delete violations first (FK constraint)
     await db.delete(violations);
     const deleted = await db.delete(rules).returning({ id: rules.id });
+    invalidateRulesCache();
     return {
       success: true,
       deleted: deleted.length,
@@ -585,6 +588,9 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
 
     // Reset settings to defaults (KV store — just delete all rows; service uses defaults for missing keys)
     await db.delete(settings);
+
+    invalidateRulesCache();
+    resetSettingsCache();
 
     return {
       success: true,

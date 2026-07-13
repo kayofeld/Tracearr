@@ -10,6 +10,7 @@ import { eq, sql, and, isNull, isNotNull } from 'drizzle-orm';
 import { REDIS_KEYS } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { rules, serverUsers, sessions, ruleActionResults } from '../../db/schema.js';
+import { invalidateRulesCache } from '../../jobs/poller/database.js';
 import { rulesLogger } from '../../utils/logger.js';
 import { recalculateAggregateTrustScore } from '../userService.js';
 import {
@@ -404,6 +405,10 @@ export async function runV1ToV2Migration(): Promise<{
   rulesLogger.info(
     `V1 to V2 migration complete: ${migratedCount} migrated, ${errors.length} errors`
   );
+
+  if (migratedCount > 0) {
+    invalidateRulesCache();
+  }
 
   return { migratedCount, errors };
 }

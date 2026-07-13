@@ -30,6 +30,7 @@ import {
   authAccounts,
   userMergeAudits,
 } from '../db/schema.js';
+import { invalidateRulesCache } from '../jobs/poller/database.js';
 import { getAuth } from '../lib/auth.js';
 import { ServerUserNotFoundError, UserNotFoundError } from './userService.js';
 
@@ -491,6 +492,8 @@ export async function mergeUsers(
       droppedRuleNames,
     };
   });
+
+  invalidateRulesCache();
 
   // recomputeIdentityAggregates wrote the target's columns with raw SQL,
   // which any live session's cached Redis snapshot never sees on its own

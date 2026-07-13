@@ -6,8 +6,10 @@
  * falls back to MaxMind on errors or incomplete results.
  */
 
+import { CACHE_TTL } from '@tracearr/shared';
 import { geoipService, type GeoLocation } from './geoip.js';
 import { geoasnService } from './geoasn.js';
+import { getCacheService } from './cache.js';
 
 const PLEX_GEOIP_URL = 'https://plex.tv/api/v2/geoip';
 const PLEX_GEOIP_TIMEOUT = 5000; // 5 second timeout
@@ -82,6 +84,26 @@ async function lookupPlex(ip: string): Promise<GeoLocation | null> {
   }
 }
 
+async function lookupPlexCached(ip: string): Promise<GeoLocation | null> {
+  const cacheService = getCacheService();
+
+  if (cacheService) {
+    const cached = await cacheService.getPlexGeoipCache(ip).catch(() => undefined);
+    if (cached !== undefined && cached !== null) {
+      return JSON.parse(cached) as GeoLocation | null;
+    }
+  }
+
+  const result = await lookupPlex(ip);
+
+  if (cacheService) {
+    const ttl = result ? CACHE_TTL.PLEX_GEOIP : CACHE_TTL.PLEX_GEOIP_NEGATIVE;
+    await cacheService.setPlexGeoipCache(ip, JSON.stringify(result), ttl).catch(() => undefined);
+  }
+
+  return result;
+}
+
 /**
  * Count non-null fields in a GeoLocation
  */
@@ -129,7 +151,7 @@ export async function lookupGeoIP(ip: string, usePlexGeoip: boolean): Promise<Ge
   }
 
   // Try Plex first
-  const plexResult = await lookupPlex(ip);
+  const plexResult = await lookupPlexCached(ip);
 
   // If Plex failed completely, use MaxMind
   if (!plexResult) {

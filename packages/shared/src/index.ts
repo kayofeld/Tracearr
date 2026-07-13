@@ -222,7 +222,6 @@ export type {
   BandwidthSummaryServerKpis,
   BandwidthSummary,
   // Library statistics
-  LibraryStatsServerKpis,
   LibraryStatsResponse,
   GrowthDataPoint,
   LibraryGrowthResponse,
@@ -355,6 +354,7 @@ export {
   showsQuerySchema,
   // Library stats
   libraryStatsQuerySchema,
+  libraryStatusQuerySchema,
   libraryGrowthQuerySchema,
   libraryQualityQuerySchema,
   libraryStorageQuerySchema,
@@ -412,6 +412,7 @@ export type {
   ShowsQueryInput,
   // Library stats
   LibraryStatsQueryInput,
+  LibraryStatusQueryInput,
   LibraryGrowthQueryInput,
   LibraryQualityQueryInput,
   LibraryStorageQueryInput,
