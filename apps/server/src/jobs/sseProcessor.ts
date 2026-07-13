@@ -864,27 +864,8 @@ async function createNewSession(
     return;
   }
 
-  // Check if there's already a pending session for this key
-  const existingPending = await cacheService.getPendingSession(serverId, processed.sessionKey);
-  if (existingPending) {
-    console.log(
-      `[SSEProcessor] Pending session already exists for ${processed.sessionKey}, skipping create`
-    );
-    return;
-  }
-
-  // Check if there's already a confirmed session in DB
-  const existingActive = await findActiveSession({
-    serverId,
-    sessionKey: processed.sessionKey,
-    ratingKey: processed.ratingKey,
-  });
-  if (existingActive) {
-    console.log(
-      `[SSEProcessor] Active session already exists for ${processed.sessionKey}, skipping create`
-    );
-    return;
-  }
+  const cache = cacheService;
+  const srv = server;
 
   const now = Date.now();
 
@@ -899,31 +880,64 @@ async function createNewSession(
     liveUuid: liveUuid ?? null,
   };
 
-  // Create pending session data
-  const pendingData: PendingSessionData = {
-    id: sessionId,
-    confirmation: createInitialConfirmationState(now),
-    processed: processedWithLiveUuid,
-    server: { id: server.id, name: server.name, type: server.type },
-    serverUser: userDetail,
-    geo,
-    startedAt: now,
-    lastSeenAt: now,
-    currentState: processedWithLiveUuid.state,
-    pausedDurationMs: 0,
-    lastPausedAt: processedWithLiveUuid.state === 'paused' ? now : null,
-  };
+  // Lock closes the check-then-act gap; only the re-checks and the dedup write live inside it.
+  const pendingData = await cache.withSessionCreateLock(
+    serverId,
+    processed.sessionKey,
+    async () => {
+      const existingPending = await cache.getPendingSession(serverId, processed.sessionKey);
+      if (existingPending) {
+        console.log(
+          `[SSEProcessor] Pending session already exists for ${processed.sessionKey}, skipping create`
+        );
+        return null;
+      }
 
-  // Store in Redis only (not DB yet)
-  await cacheService.setPendingSession(serverId, processed.sessionKey, pendingData);
+      const existingActive = await findActiveSession({
+        serverId,
+        sessionKey: processed.sessionKey,
+        ratingKey: processed.ratingKey,
+      });
+      if (existingActive) {
+        console.log(
+          `[SSEProcessor] Active session already exists for ${processed.sessionKey}, skipping create`
+        );
+        return null;
+      }
+
+      // Create pending session data
+      const data: PendingSessionData = {
+        id: sessionId,
+        confirmation: createInitialConfirmationState(now),
+        processed: processedWithLiveUuid,
+        server: { id: srv.id, name: srv.name, type: srv.type },
+        serverUser: userDetail,
+        geo,
+        startedAt: now,
+        lastSeenAt: now,
+        currentState: processedWithLiveUuid.state,
+        pausedDurationMs: 0,
+        lastPausedAt: processedWithLiveUuid.state === 'paused' ? now : null,
+      };
+
+      // Store in Redis only (not DB yet)
+      await cache.setPendingSession(serverId, processed.sessionKey, data);
+
+      return data;
+    }
+  );
+
+  if (!pendingData) {
+    return;
+  }
 
   // Build ActiveSession for immediate display in Now Playing dashboard
   // This ensures sessions appear immediately, not after 30s confirmation
   const activeSession = buildPendingActiveSession(pendingData);
 
   // Add to active sessions cache so Now Playing shows it immediately
-  await cacheService.addActiveSession(activeSession);
-  await cacheService.addUserSession(userDetail.id, activeSession.id);
+  await cache.addActiveSession(activeSession);
+  await cache.addUserSession(userDetail.id, activeSession.id);
 
   // Broadcast session:started immediately for real-time UI updates
   // Note: Rules are NOT evaluated yet - that happens after confirmation

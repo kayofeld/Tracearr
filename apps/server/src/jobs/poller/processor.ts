@@ -63,7 +63,13 @@ import {
   shouldForceStopStaleSession,
   shouldWriteToDb,
 } from './stateTracker.js';
-import type { PollerConfig, ServerProcessingResult, ServerWithToken } from './types.js';
+import type {
+  PendingSessionOutcome,
+  PollerConfig,
+  ResolvePendingSessionInput,
+  ServerProcessingResult,
+  ServerWithToken,
+} from './types.js';
 import { broadcastViolations } from './violations.js';
 
 // ============================================================================
@@ -236,6 +242,91 @@ async function sweepGracePeriod(
 // ============================================================================
 // Server Session Processing
 // ============================================================================
+
+/**
+ * Confirm or update a Redis-only pending session. Pending sessions are
+ * invisible to cachedSessionKeys, so both poll branches must call this
+ * before treating a session as new.
+ */
+async function resolvePendingSession(
+  params: ResolvePendingSessionInput
+): Promise<PendingSessionOutcome> {
+  const {
+    cacheService,
+    pubSubService,
+    server,
+    pendingKey,
+    processed,
+    userDetail,
+    activeRulesV2,
+    activeSessions,
+    recentSessions,
+    usePlexGeoip,
+  } = params;
+
+  const pendingSession = await cacheService.getPendingSession(server.id, pendingKey);
+  if (!pendingSession) {
+    return { status: 'not-pending' };
+  }
+
+  const { updatedData, isConfirmed } = updatePendingSession(
+    pendingSession,
+    processed.state,
+    processed.progressMs,
+    Date.now()
+  );
+
+  if (!isConfirmed) {
+    await cacheService.setPendingSession(server.id, pendingKey, updatedData);
+    return { status: 'still-pending', updatedSession: buildPendingActiveSession(updatedData) };
+  }
+
+  const geo: GeoLocation = await lookupGeoIP(processed.ipAddress, usePlexGeoip);
+  const createResult = await cacheService.withSessionCreateLock(
+    server.id,
+    processed.sessionKey,
+    async () =>
+      createSessionWithRulesAtomic({
+        processed,
+        server,
+        serverUser: userDetail,
+        geo,
+        activeRulesV2,
+        activeSessions,
+        recentSessions,
+        preGeneratedId: updatedData.id,
+      })
+  );
+
+  if (!createResult || !('insertedSession' in createResult)) {
+    return { status: 'confirmed', newSession: null };
+  }
+
+  await cacheService.deletePendingSession(server.id, pendingKey);
+  const { insertedSession, violationResults, wasTerminatedByRule } = createResult;
+
+  let newSession: ActiveSession | null = null;
+  if (!wasTerminatedByRule) {
+    newSession = buildActiveSession({
+      session: insertedSession,
+      processed,
+      user: userDetail,
+      geo,
+      server,
+    });
+    recordDbWrite(insertedSession.id, Date.now());
+  }
+
+  if (violationResults.length > 0 && pubSubService) {
+    try {
+      await broadcastViolations(violationResults, insertedSession.id, pubSubService);
+    } catch (err) {
+      console.error('[Poller] Failed to broadcast violations:', err);
+    }
+  }
+
+  return { status: 'confirmed', newSession };
+}
 
 /**
  * Process a single server's sessions
@@ -557,14 +648,38 @@ async function processServerSessions(
       const isNew = !cachedSessionKeys.has(sessionKey);
 
       if (isNew) {
-        // Get GeoIP location (uses Plex API if enabled, falls back to MaxMind)
-        const geo: GeoLocation = await lookupGeoIP(processed.ipAddress, usePlexGeoip);
-
         // Distributed lock prevents race condition with SSE
         if (!cacheService) {
           console.warn('[Poller] Cache service not available, skipping session creation');
           continue;
         }
+
+        // cachedSessionKeys only tracks confirmed sessions, so an SSE-created pending one still reads as new.
+        const pendingKey = server.type === 'plex' ? processed.sessionKey : sessionKey;
+        const pendingOutcome = await resolvePendingSession({
+          cacheService,
+          pubSubService,
+          server: { id: server.id, name: server.name, type: server.type },
+          pendingKey,
+          processed,
+          userDetail,
+          activeRulesV2,
+          activeSessions,
+          recentSessions: recentSessionsMap.get(serverUserId) ?? [],
+          usePlexGeoip,
+        });
+
+        if (pendingOutcome.status === 'confirmed') {
+          if (pendingOutcome.newSession) newSessions.push(pendingOutcome.newSession);
+          continue;
+        }
+        if (pendingOutcome.status === 'still-pending') {
+          updatedSessions.push(pendingOutcome.updatedSession);
+          continue;
+        }
+
+        // Get GeoIP location (uses Plex API if enabled, falls back to MaxMind)
+        const geo: GeoLocation = await lookupGeoIP(processed.ipAddress, usePlexGeoip);
 
         const recentSessions = recentSessionsMap.get(serverUserId) ?? [];
 
@@ -572,6 +687,16 @@ async function processServerSessions(
           server.id,
           processed.sessionKey,
           async () => {
+            if (cacheService) {
+              const stillPending = await cacheService.getPendingSession(server.id, pendingKey);
+              if (stillPending) {
+                console.log(
+                  `[Poller] Pending session appeared for ${processed.sessionKey} while acquiring the create lock, deferring to next tick`
+                );
+                return null;
+              }
+            }
+
             const existingWithSameKey = await findActiveSession({
               serverId: server.id,
               sessionKey: processed.sessionKey,
@@ -765,60 +890,25 @@ async function processServerSessions(
         // Pending session check (cache-first for JF/Emby, SSE for Plex)
         if (cacheService) {
           const pendingKey = server.type === 'plex' ? processed.sessionKey : sessionKey;
-          const pendingSession = await cacheService.getPendingSession(server.id, pendingKey);
-          if (pendingSession) {
-            const { updatedData, isConfirmed } = updatePendingSession(
-              pendingSession,
-              processed.state,
-              processed.progressMs,
-              Date.now()
-            );
+          const outcome = await resolvePendingSession({
+            cacheService,
+            pubSubService,
+            server: { id: server.id, name: server.name, type: server.type },
+            pendingKey,
+            processed,
+            userDetail,
+            activeRulesV2,
+            activeSessions,
+            recentSessions: recentSessionsMap.get(serverUserId) ?? [],
+            usePlexGeoip,
+          });
 
-            if (isConfirmed) {
-              const geo: GeoLocation = await lookupGeoIP(processed.ipAddress, usePlexGeoip);
-              const recentSessions = recentSessionsMap.get(serverUserId) ?? [];
-              const createResult = await cacheService.withSessionCreateLock(
-                server.id,
-                processed.sessionKey,
-                async () =>
-                  createSessionWithRulesAtomic({
-                    processed,
-                    server: { id: server.id, name: server.name, type: server.type },
-                    serverUser: userDetail,
-                    geo,
-                    activeRulesV2,
-                    activeSessions,
-                    recentSessions,
-                    preGeneratedId: updatedData.id,
-                  })
-              );
-              if (createResult && 'insertedSession' in createResult) {
-                await cacheService.deletePendingSession(server.id, pendingKey);
-                const { insertedSession, violationResults, wasTerminatedByRule } = createResult;
-                if (!wasTerminatedByRule) {
-                  const activeSession = buildActiveSession({
-                    session: insertedSession,
-                    processed,
-                    user: userDetail,
-                    geo,
-                    server,
-                  });
-                  newSessions.push(activeSession);
-                  recordDbWrite(insertedSession.id, Date.now());
-                }
-                if (violationResults.length > 0 && pubSubService) {
-                  try {
-                    await broadcastViolations(violationResults, insertedSession.id, pubSubService);
-                  } catch (err) {
-                    console.error('[Poller] Failed to broadcast violations:', err);
-                  }
-                }
-              }
-            } else {
-              await cacheService.setPendingSession(server.id, pendingKey, updatedData);
-              const activeSession = buildPendingActiveSession(updatedData);
-              updatedSessions.push(activeSession);
-            }
+          if (outcome.status === 'confirmed') {
+            if (outcome.newSession) newSessions.push(outcome.newSession);
+            continue;
+          }
+          if (outcome.status === 'still-pending') {
+            updatedSessions.push(outcome.updatedSession);
             continue;
           }
         }

@@ -15,6 +15,7 @@ import type {
   StreamDetailFields,
 } from '@tracearr/shared';
 import type { sessions } from '../../db/schema.js';
+import type { CacheService, PubSubService } from '../../services/cache.js';
 import type { GeoLocation } from '../../services/geoip.js';
 import type { ViolationInsertResult } from './violations.js';
 
@@ -399,6 +400,41 @@ export interface SessionCreationResult {
    */
   wasTerminatedByRule: boolean;
 }
+
+// ============================================================================
+// Pending Session Resolution Types
+// ============================================================================
+
+/**
+ * Input for resolving a Redis-only pending session before a poll branch
+ * commits to treating a session as new. Shared by the isNew and not-new
+ * branches so both defer to the same pending session for a given key.
+ */
+export interface ResolvePendingSessionInput {
+  cacheService: CacheService;
+  pubSubService: PubSubService | null;
+  /** Server info */
+  server: { id: string; name: string; type: 'plex' | 'jellyfin' | 'emby' };
+  /** Redis key for the pending session lookup (sessionKey for Plex, composite key otherwise) */
+  pendingKey: string;
+  /** Processed session data from media server */
+  processed: ProcessedSession;
+  /** Server user info (matches SessionCreationInput.serverUser) */
+  userDetail: SessionCreationInput['serverUser'];
+  /** Active V2 rules to evaluate on confirmation */
+  activeRulesV2: RuleV2[];
+  /** Active sessions for rule context (e.g., concurrent streams) */
+  activeSessions: ActiveSession[];
+  /** Recent sessions for rule evaluation context */
+  recentSessions: Session[];
+  usePlexGeoip: boolean;
+}
+
+/** Outcome of checking Redis for a pending session tracked under a given key. */
+export type PendingSessionOutcome =
+  | { status: 'not-pending' }
+  | { status: 'confirmed'; newSession: ActiveSession | null }
+  | { status: 'still-pending'; updatedSession: ActiveSession };
 
 /**
  * Input for stopping a session
