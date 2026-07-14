@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@types/node": "^24.10.15",
+    "@types/node": "^24.13.3",
     "@types/react": "19.2.17",
     "@vitest/coverage-v8": "^4.1.5",
     "eslint": "^9.39.5",
@@ -50,18 +50,18 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.3.0",
     "husky": "^9.1.7",
-    "lint-staged": "^16.2.7",
+    "lint-staged": "^17.0.8",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "shadcn": "^4.0.8",
-    "turbo": "^2.9.18",
+    "turbo": "^2.10.5",
     "typescript": "^6.0.0",
     "typescript-eslint": "^8.56.1",
     "vitest": "^4.1.5"
   },
-  "packageManager": "pnpm@11.10.0+sha512.0b7f8b98060031904c017e3a41eb187a16d40eeb829b95c4f8cb03681761fc4ab53dd219115b9b447f4dce1a05a214764461e7d3703392a9f32f9511ce8c86c8",
+  "packageManager": "pnpm@11.11.0+sha512.4463f65fd80ed80d69bc1d4bf163ee94f605c7380fc318bb5b2ebe15f8cd12d49c51a4d59e951b401e764d3b6ca751cbf51bc50ed7001a6bcb4935e684c34882",
   "engines": {
-    "node": ">=20.19.4",
+    "node": ">=22.22.1",
     "pnpm": ">=11.8.0"
   }
 }
