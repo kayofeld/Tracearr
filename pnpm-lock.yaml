@@ -120,7 +120,7 @@ importers:
         version: 7.3.8(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
       '@shopify/react-native-skia':
         specifier: ^2.6.2
-        version: 2.6.9(react-native-reanimated@4.5.1(react-native-worklets@0.10.2(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
+        version: 2.7.0(react-native-reanimated@4.5.1(react-native-worklets@0.10.2(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
       '@tanstack/react-query':
         specifier: ^5.100.9
         version: 5.101.2(react@19.2.7)
@@ -267,7 +267,7 @@ importers:
         version: 3.6.0
       victory-native:
         specifier: 41.26.0
-        version: 41.26.0(cdace61425b6881a9f3111c614913c83)
+        version: 41.26.0(1dfdad0ef77c9f2d62987af7d3a23a30)
       zustand:
         specifier: ^5.0.13
         version: 5.0.13(@types/react@19.2.17)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
@@ -3460,8 +3460,8 @@ packages:
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
 
-  '@shopify/react-native-skia@2.6.9':
-    resolution: {integrity: sha512-x+16pwmnW9ZQKy4/B7Npc1b5Qli9vZCAiWn9uU58tLylJity8qV+fUb4gf6Qolqsw/u6FPaNTaAnHVCvu3LnRw==}
+  '@shopify/react-native-skia@2.7.0':
+    resolution: {integrity: sha512-OFwol02rm07pVHusOHddCXHfOCYozwzQ4cRV5lxn/0HJkHcbYOFVDIGxAaB8JxKWxcG2oWmdBezIpi2obfLlkQ==}
     hasBin: true
     peerDependencies:
       react: 19.2.7
@@ -12560,7 +12560,7 @@ snapshots:
 
   '@sec-ant/readable-stream@0.4.1': {}
 
-  '@shopify/react-native-skia@2.6.9(react-native-reanimated@4.5.1(react-native-worklets@0.10.2(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)':
+  '@shopify/react-native-skia@2.7.0(react-native-reanimated@4.5.1(react-native-worklets@0.10.2(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)':
     dependencies:
       canvaskit-wasm: 0.41.0
       react: 19.2.7
@@ -19460,9 +19460,9 @@ snapshots:
       - '@types/react'
       - '@types/react-dom'
 
-  victory-native@41.26.0(cdace61425b6881a9f3111c614913c83):
+  victory-native@41.26.0(1dfdad0ef77c9f2d62987af7d3a23a30):
     dependencies:
-      '@shopify/react-native-skia': 2.6.9(react-native-reanimated@4.5.1(react-native-worklets@0.10.2(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
+      '@shopify/react-native-skia': 2.7.0(react-native-reanimated@4.5.1(react-native-worklets@0.10.2(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.86.0(@babel/core@8.0.1)(@react-native/metro-config@0.86.0(@babel/core@8.0.1))(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
       d3-scale: 4.0.2
       d3-shape: 3.2.0
       d3-zoom: 3.0.0
