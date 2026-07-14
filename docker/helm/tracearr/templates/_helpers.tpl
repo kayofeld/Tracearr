@@ -98,5 +98,10 @@ app.kubernetes.io/part-of: {{ include "tracearr.name" . }}
 {{- end }}
 
 {{- define "tracearr.image" -}}
-{{- printf "%s:%s" .Values.tracearr.image.repository (default .Chart.AppVersion .Values.tracearr.image.tag) }}
+{{- $tag := default .Chart.AppVersion .Values.tracearr.image.tag }}
+{{- if or (hasPrefix "@" $tag) (contains "@sha256:" $tag) }}
+{{- printf "%s%s" .Values.tracearr.image.repository $tag }}
+{{- else }}
+{{- printf "%s:%s" .Values.tracearr.image.repository $tag }}
+{{- end }}
 {{- end }}

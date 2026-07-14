@@ -456,6 +456,14 @@
       "labels": ["dep-deploy"]
     },
 
+    // The chart's own image tracks .Chart.AppVersion by leaving tag empty —
+    // never let Renovate pin it to a frozen digest.
+    {
+      "matchManagers": ["helm-values"],
+      "matchPackageNames": ["ghcr.io/connorgallopo/tracearr"],
+      "enabled": false
+    },
+
     // Assign and tag all majors.
     {
       "matchUpdateTypes": ["major"],
