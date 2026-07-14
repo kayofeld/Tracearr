@@ -10,7 +10,7 @@ These items go at the top of the release notes, in this order.
    - `docker exec tracearr node apps/server/dist/scripts/cli.js reset-password` (works even when the account has no existing password), or
    - Plex login, when a Plex account is linked.
 2. **All web users must log in once after upgrading.** Legacy web sessions are not carried over.
-3. **Mobile devices paired after upgrading use a 30-day rolling session** (any use within 30 days extends it); a device idle for more than 30 days re-pairs. Devices paired before the upgrade keep working on their existing tokens until they are re-paired; nothing expires them at 30 days.
+3. **Mobile devices paired after upgrading use a 90-day rolling session** (any use within 90 days extends it, since the refresh token outlives and re-mints the underlying 30-day session); a device idle for more than 90 days re-pairs. Devices paired before the upgrade keep working on their existing tokens until they are re-paired; nothing expires them at 90 days.
 
 ## Environment variables
 
@@ -64,7 +64,7 @@ The public docs live at `/home/cgallopo/dev/personal/tracearr-docs` (Next.js App
    - Correct the pairing token expiry: the docs say 5 minutes; the actual value is 15 minutes (`TOKEN_EXPIRY_MINUTES = 15` in `apps/server/src/routes/mobile.ts`; verified live, `expiresAt` was 15 minutes after issue). Affects the callout after the QR steps and the "Invalid QR code" troubleshooting entry.
    - Device limit of 5 stays accurate (`MAX_PAIRED_DEVICES = 5`).
    - The `trr_mob_...` token prefix stays accurate (verified live on `/mobile/pair-token`).
-   - Add device session expiry, scoped by pairing date: devices paired after this release use a 30-day rolling window extended by use (Better Auth `session.expiresIn` 30 days with daily `updateAge`, `apps/server/src/lib/auth.ts`), so 30 idle days means re-pairing. Devices paired before this release stay on the legacy token shim, which refreshes on use with a database fallback and does not expire at 30 days (`apps/server/src/routes/mobile.ts` legacy refresh path); they keep working until re-paired.
+   - Add device session expiry, scoped by pairing date: devices paired after this release use a 90-day rolling window extended by use (the 30-day Better Auth session, `session.expiresIn` in `apps/server/src/lib/auth.ts`, is re-minted by the refresh token, `MOBILE_REFRESH_TTL` 90 days in `apps/server/src/routes/mobile.ts`), so 90 idle days means re-pairing. Devices paired before this release stay on the legacy token shim, which refreshes on use with a database fallback and does not expire on idle; they keep working until re-paired.
 
 6. `app/faq/page.mdx` (password reset entry)
    - The recovery scripts now ship compiled in the image (`apps/server/dist/scripts/`); the canonical commands are `docker exec -it tracearr node apps/server/dist/scripts/reset-password.js` and `docker exec tracearr node apps/server/dist/scripts/cli.js <command>` with commands `reset-password [username] [--generate]`, `set-username`, `set-email`, `list-users`, `enable-local-login` (source `apps/server/scripts/cli.ts`; verified under plain node against the compiled output and a live database: `list-users` printed the owner with its login methods, and `reset-password --generate` completed end to end). Update every documented command to the `dist/scripts/*.js` path, including the Proxmox variants (`node /opt/tracearr/apps/server/dist/scripts/reset-password.js`). The old raw invocations (`node apps/server/scripts/reset-password.ts`) still work inside the image via Node's type stripping, so stale copies of the docs do not strand anyone, but the compiled path is the one to publish since it works in every install shape.
@@ -77,7 +77,7 @@ The public docs live at `/home/cgallopo/dev/personal/tracearr-docs` (Next.js App
 
 8. Release note (Jellyfin removal): the site has no changelog or release-notes page at all. Either add a release-notes section to `app/upgrading/page.mdx` or create a new page (plus `_meta.ts` and `app/sitemap.ts` entries). Use the release-notes draft above; the three items in that order, Jellyfin removal first.
 
-9. `app/upgrading/page.mdx`: add this release's upgrade callouts regardless of where the full notes land: run migrations before starting the new version, all web users log in once, newly paired devices use a 30-day rolling session (pre-upgrade pairings keep working unchanged), Jellyfin login removed with the recovery paths.
+9. `app/upgrading/page.mdx`: add this release's upgrade callouts regardless of where the full notes land: run migrations before starting the new version, all web users log in once, newly paired devices use a 90-day rolling session (pre-upgrade pairings keep working unchanged), Jellyfin login removed with the recovery paths.
 
 10. `app/getting-started/installation/supervised/page.mdx`: no content change required; confirm the "secrets are generated automatically on first boot" claim still holds (it does: the supervised entrypoint generates and persists `JWT_SECRET`, `docker/entrypoint-supervised.sh`, and `BETTER_AUTH_SECRET` derivation keeps those installs zero-config).
 

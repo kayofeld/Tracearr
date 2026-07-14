@@ -135,12 +135,19 @@ jobs:
         run: |
           echo "Downloading latest GeoLite2-City database..."
           curl -sSL "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=${{ secrets.MAXMIND_LICENSE_KEY }}&suffix=tar.gz" \
-            -o /tmp/geolite2.tar.gz && \
-          tar -xzf /tmp/geolite2.tar.gz -C /tmp && \
+            -o /tmp/geolite2-city.tar.gz && \
+          tar -xzf /tmp/geolite2-city.tar.gz -C /tmp && \
           mv /tmp/GeoLite2-City_*/GeoLite2-City.mmdb data/GeoLite2-City.mmdb && \
           echo "Successfully updated GeoLite2-City.mmdb" || \
           echo "Download failed, using existing database as fallback"
-          ls -la data/GeoLite2-City.mmdb
+          echo "Downloading latest GeoLite2-ASN database..."
+          curl -sSL "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-ASN&license_key=${{ secrets.MAXMIND_LICENSE_KEY }}&suffix=tar.gz" \
+            -o /tmp/geolite2-asn.tar.gz && \
+          tar -xzf /tmp/geolite2-asn.tar.gz -C /tmp && \
+          mv /tmp/GeoLite2-ASN_*/GeoLite2-ASN.mmdb data/GeoLite2-ASN.mmdb && \
+          echo "Successfully updated GeoLite2-ASN.mmdb" || \
+          echo "Download failed, using existing database as fallback"
+          ls -la data/GeoLite2-City.mmdb data/GeoLite2-ASN.mmdb
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
