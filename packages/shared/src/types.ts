@@ -431,6 +431,8 @@ export interface ActiveSession extends Session {
   server: Pick<Server, 'id' | 'name' | 'type'>;
   /** Whether this session can be terminated (some clients like Plexamp don't support termination) */
   canTerminate: boolean;
+  /** True while the session is an unconfirmed pending entry; absent once confirmed. */
+  pending?: boolean;
 }
 
 export interface SessionSegment {
