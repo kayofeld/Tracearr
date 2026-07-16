@@ -966,9 +966,9 @@ export async function createSessionWithRulesAtomic(
               target: action.target ?? 'triggering',
               triggeringSession: context.session,
               serverUserId: context.serverUser.id,
-              activeSessions: context.activeSessions.some((s) => s.id === context.session.id)
-                ? context.activeSessions
-                : [...context.activeSessions, context.session],
+              // context.activeSessions is buildRuleContextSessions's output, which
+              // already guarantees context.session is present.
+              activeSessions: context.activeSessions,
               identityServerUserIds: rule.enforceAcrossServers
                 ? context.identityServerUserIds
                 : undefined,

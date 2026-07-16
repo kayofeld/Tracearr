@@ -737,11 +737,28 @@ describe('SSE Processor - Pending Session Flow', () => {
         url: 'http://localhost:32400',
         token: 'test-token',
       };
-      // Mock db.select().from(servers).where().limit() to return server
+      const mockServerUserRow = {
+        id: 'server-user-123',
+        userId: 'identity-123',
+        username: 'testuser',
+        thumbUrl: null,
+        identityName: 'Test User',
+        trustScore: 100,
+        sessionCount: 10,
+        lastActivityAt: new Date(),
+        createdAt: new Date(),
+      };
+      // fetchFullSession: db.select().from(servers).where().limit()
+      // createNewSession: db.select({...}).from(serverUsers).innerJoin(users).where().limit()
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
             limit: vi.fn().mockResolvedValue([mockServer]),
+          }),
+          innerJoin: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([mockServerUserRow]),
+            }),
           }),
         }),
       });
@@ -804,6 +821,24 @@ describe('SSE Processor - Pending Session Flow', () => {
         null,
         undefined
       );
+
+      // Should have created a fresh pending session for the new media, not
+      // silently dropped it after discarding the old one.
+      await vi.waitFor(() => {
+        expect(mockCacheService.setPendingSession).toHaveBeenCalledWith(
+          'server-123',
+          'test-session-key',
+          expect.objectContaining({
+            processed: expect.objectContaining({ ratingKey: 'new-rating-key' }),
+          })
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(mockCacheService.addActiveSession).toHaveBeenCalledWith(
+          expect.objectContaining({ mediaTitle: 'Episode 2', pending: true })
+        );
+      });
     });
 
     it('updates pending session normally when media has not changed', async () => {

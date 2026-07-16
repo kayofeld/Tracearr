@@ -10,8 +10,6 @@ import {
   TIME_MS,
   SESSION_LIMITS,
   type Session,
-  type Rule,
-  type RuleParams,
   type RuleV2,
   type RuleConditions,
   type RuleActions,
@@ -183,37 +181,6 @@ export async function batchGetIdentityServerUserIds(
 // ============================================================================
 // Rule Loading
 // ============================================================================
-
-/**
- * Get all active legacy (V1) rules for evaluation
- *
- * Only returns rules with type and params set (legacy format).
- * V2 rules using conditions/actions are evaluated by a separate system.
- *
- * @returns Array of active Rule objects
- *
- * @example
- * const rules = await getActiveRules();
- * // Evaluate each session against these rules
- */
-export async function getActiveRules(): Promise<Rule[]> {
-  // Filter for legacy rules that have type set (V2 rules have type=null)
-  const activeRules = await db
-    .select()
-    .from(rules)
-    .where(and(eq(rules.isActive, true), isNotNull(rules.type)));
-
-  return activeRules.map((r) => ({
-    id: r.id,
-    name: r.name,
-    type: r.type!,
-    params: r.params as unknown as RuleParams,
-    serverUserId: r.serverUserId,
-    isActive: r.isActive,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  }));
-}
 
 // TTL fallback for multi-instance deployments: another instance's invalidation isn't visible here, so a rule change can take up to this long to apply.
 const RULES_CACHE_TTL_MS = 10_000;
