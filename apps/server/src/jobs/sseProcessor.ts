@@ -61,7 +61,7 @@ import {
   isPlaybackConfirmed,
   updateConfirmationState,
 } from './poller/stateTracker.js';
-import type { PendingSessionData } from './poller/types.js';
+import { PENDING_STOP_PERSIST_MIN_PROGRESS_MS, type PendingSessionData } from './poller/types.js';
 import { excludeUncountableSessions } from './poller/utils.js';
 import { broadcastViolations } from './poller/violations.js';
 
@@ -422,7 +422,8 @@ async function handlePaused(event: {
 
 /**
  * Handle stopped event
- * If session is still pending (< 30s), discard it silently (phantom session).
+ * If session is still pending and unconfirmed, discard it unless it showed real
+ * progress (a short resume near the end of a file), in which case persist it.
  * If session is confirmed, stop it normally.
  */
 async function handleStopped(event: {
@@ -433,10 +434,35 @@ async function handleStopped(event: {
 
   try {
     // First check for a pending session (Redis-only, not yet confirmed)
-    // If found and not confirmed, this is a phantom session - discard it
     if (cacheService) {
       const pendingData = await cacheService.getPendingSession(serverId, notification.sessionKey);
       if (pendingData) {
+        const { maxViewOffset, initialViewOffset } = pendingData.confirmation;
+        const progress = maxViewOffset - (initialViewOffset ?? maxViewOffset);
+
+        if (progress >= PENDING_STOP_PERSIST_MIN_PROGRESS_MS) {
+          // Real playback happened; a short resume near the end of a file must
+          // still reach history and flip watched-state. Age-based confirmation
+          // was never reached, so the observed progress is the evidence here.
+          const persisted = await confirmPendingSessionAndPersist(
+            serverId,
+            notification.sessionKey,
+            {
+              ...pendingData,
+              confirmation: { ...pendingData.confirmation, confirmedPlayback: true },
+            }
+          );
+          if (persisted) {
+            const sessionRow = await findActiveSession({
+              serverId,
+              sessionKey: notification.sessionKey,
+              ratingKey: pendingData.processed.ratingKey,
+            });
+            if (sessionRow) await stopSession(sessionRow);
+          }
+          return;
+        }
+
         await discardPendingSession(serverId, notification.sessionKey, pendingData);
         console.log(
           `[SSEProcessor] Discarded phantom session ${notification.sessionKey} (id: ${pendingData.id}) ` +
@@ -1450,13 +1476,14 @@ async function updatePendingSession(
  * @param serverId Server ID
  * @param sessionKey Session key
  * @param pendingData Final pending session data (includes pre-generated UUID)
+ * @returns true if a session row now sits active in the DB/cache for this identity
  */
 async function confirmPendingSessionAndPersist(
   serverId: string,
   sessionKey: string,
   pendingData: PendingSessionData
-): Promise<void> {
-  if (!cacheService) return;
+): Promise<boolean> {
+  if (!cacheService) return false;
 
   // Capture for closure - avoids non-null assertion in callback
   const cache = cacheService;
@@ -1499,7 +1526,7 @@ async function confirmPendingSessionAndPersist(
   });
 
   if (!result) {
-    return;
+    return false;
   }
 
   const { insertedSession, violationResults, qualityChange, wasTerminatedByRule } = result;
@@ -1537,7 +1564,7 @@ async function confirmPendingSessionAndPersist(
     console.log(
       `[SSEProcessor] Confirmed session ${sessionId} was terminated by rule, removed from cache`
     );
-    return;
+    return false;
   }
 
   // Build the confirmed active session with full DB data
@@ -1563,6 +1590,7 @@ async function confirmPendingSessionAndPersist(
   console.log(
     `[SSEProcessor] Confirmed and persisted session ${sessionId} for ${pendingData.processed.mediaTitle}`
   );
+  return true;
 }
 
 /**

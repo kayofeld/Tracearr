@@ -236,6 +236,9 @@ export const PLAYBACK_CONFIRM_THRESHOLD_MS = 30_000;
  */
 export const DB_WRITE_FLUSH_INTERVAL_MS = 15_000;
 
+/** A pending session that dies unconfirmed still persists when it showed this much real progress. */
+export const PENDING_STOP_PERSIST_MIN_PROGRESS_MS = 15_000;
+
 /**
  * Tracking data for playback confirmation (stored in Redis session state)
  */
@@ -248,6 +251,8 @@ export interface PlaybackConfirmationState {
   firstSeenAt: number;
   /** Highest viewOffset seen (tracks max progress) */
   maxViewOffset: number;
+  /** First observed viewOffset; progress is measured relative to this, not absolute position. */
+  initialViewOffset: number | null;
 }
 
 /**

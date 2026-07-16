@@ -59,6 +59,7 @@ const {
       confirmedPlayback: false,
       firstSeenAt: Date.now(),
       maxViewOffset: 0,
+      initialViewOffset: null,
     }),
     mockUpdateConfirmationState: vi.fn().mockImplementation((state) => state),
     mockDetectMediaChange: vi.fn().mockReturnValue(false),
@@ -209,6 +210,7 @@ function createMockPendingSession(overrides: Partial<PendingSessionData> = {}): 
       confirmedPlayback: false,
       firstSeenAt: now,
       maxViewOffset: 0,
+      initialViewOffset: null,
     },
     processed: {
       sessionKey: 'test-session-key',
@@ -331,6 +333,99 @@ describe('SSE Processor - Pending Session Flow', () => {
       });
 
       // Should NOT have tried to stop a DB session
+      expect(mockFindActiveSessionsAll).not.toHaveBeenCalled();
+      expect(mockStopSessionAtomic).not.toHaveBeenCalled();
+    });
+
+    it('persists a pending session with >= 15s of observed progress instead of discarding it', async () => {
+      const pendingSession = createMockPendingSession({
+        confirmation: {
+          rulesEvaluated: false,
+          confirmedPlayback: false,
+          firstSeenAt: Date.now(),
+          maxViewOffset: 20000,
+          initialViewOffset: 2000,
+        },
+      });
+      mockCacheService.getPendingSession.mockResolvedValueOnce(pendingSession);
+
+      mockConfirmAndPersistSession.mockResolvedValueOnce({
+        insertedSession: {
+          id: pendingSession.id,
+          serverId: 'server-123',
+          serverUserId: 'server-user-123',
+          sessionKey: 'test-session-key',
+          startedAt: new Date(),
+          state: 'playing',
+        },
+        violationResults: [],
+        qualityChange: null,
+        referenceId: null,
+        wasTerminatedByRule: false,
+      });
+
+      mockBuildActiveSession.mockReturnValueOnce({
+        id: pendingSession.id,
+        serverId: 'server-123',
+        serverUserId: 'server-user-123',
+        sessionKey: 'test-session-key',
+      });
+
+      const activeRow = {
+        id: pendingSession.id,
+        serverId: 'server-123',
+        sessionKey: 'test-session-key',
+        serverUserId: 'server-user-123',
+      };
+      // First call is confirmPendingSessionAndPersist's own race check (no
+      // active session yet), second is handleStopped's post-persist lookup.
+      mockFindActiveSession.mockResolvedValueOnce(null).mockResolvedValueOnce(activeRow);
+
+      // Emit stopped event
+      mockSseManager.emit('plex:session:stopped', {
+        serverId: 'server-123',
+        notification: { sessionKey: 'test-session-key', viewOffset: 20000 },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockConfirmAndPersistSession).toHaveBeenCalled();
+      });
+
+      // Should have finalized the just-persisted session, not discarded it as a phantom
+      await vi.waitFor(() => {
+        expect(mockStopSessionAtomic).toHaveBeenCalledWith({
+          session: activeRow,
+          stoppedAt: expect.any(Date),
+        });
+      });
+    });
+
+    it('discards a pending session with < 15s of observed progress when stopped', async () => {
+      const pendingSession = createMockPendingSession({
+        confirmation: {
+          rulesEvaluated: false,
+          confirmedPlayback: false,
+          firstSeenAt: Date.now(),
+          maxViewOffset: 10000,
+          initialViewOffset: 2000,
+        },
+      });
+      mockCacheService.getPendingSession.mockResolvedValueOnce(pendingSession);
+
+      // Emit stopped event
+      mockSseManager.emit('plex:session:stopped', {
+        serverId: 'server-123',
+        notification: { sessionKey: 'test-session-key', viewOffset: 10000 },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockCacheService.deletePendingSession).toHaveBeenCalledWith(
+          'server-123',
+          'test-session-key'
+        );
+      });
+
+      expect(mockConfirmAndPersistSession).not.toHaveBeenCalled();
       expect(mockFindActiveSessionsAll).not.toHaveBeenCalled();
       expect(mockStopSessionAtomic).not.toHaveBeenCalled();
     });

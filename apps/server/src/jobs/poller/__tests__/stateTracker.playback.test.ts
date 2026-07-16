@@ -12,25 +12,12 @@ describe('isPlaybackConfirmed', () => {
     confirmedPlayback: false,
     firstSeenAt: Date.now(),
     maxViewOffset: 0,
+    initialViewOffset: null,
   };
 
   it('returns true if already confirmed', () => {
     const state = { ...baseState, confirmedPlayback: true };
     expect(isPlaybackConfirmed(state, 0, 'playing', Date.now())).toBe(true);
-  });
-
-  it('returns true if viewOffset exceeds threshold', () => {
-    const state = { ...baseState };
-    expect(
-      isPlaybackConfirmed(state, PLAYBACK_CONFIRM_THRESHOLD_MS + 1, 'playing', Date.now())
-    ).toBe(true);
-  });
-
-  it('returns false if viewOffset equals threshold', () => {
-    const state = { ...baseState };
-    expect(isPlaybackConfirmed(state, PLAYBACK_CONFIRM_THRESHOLD_MS, 'playing', Date.now())).toBe(
-      false
-    );
   });
 
   it('returns true if active duration exceeds threshold while playing', () => {
@@ -71,18 +58,14 @@ describe('isPlaybackConfirmed', () => {
     expect(isPlaybackConfirmed(state, 0, 'playing', twentyNineSeconds)).toBe(false);
   });
 
-  it('should confirm playback at 31s viewOffset (30s threshold)', () => {
-    const state = createInitialConfirmationState(Date.now());
-    const thirtyOneSecondsOffset = 31_000;
-
-    expect(isPlaybackConfirmed(state, thirtyOneSecondsOffset, 'playing', Date.now())).toBe(true);
+  it('does not confirm on absolute position alone (resumed items start past 30s)', () => {
+    const state = createInitialConfirmationState(1_000);
+    expect(isPlaybackConfirmed(state, 91_000, 'playing', 2_000)).toBe(false);
   });
 
-  it('should not confirm at 29s viewOffset (30s threshold)', () => {
-    const state = createInitialConfirmationState(Date.now());
-    const twentyNineSecondsOffset = 29_000;
-
-    expect(isPlaybackConfirmed(state, twentyNineSecondsOffset, 'playing', Date.now())).toBe(false);
+  it('confirms after 30s of session age regardless of position', () => {
+    const state = createInitialConfirmationState(1_000);
+    expect(isPlaybackConfirmed(state, 91_000, 'playing', 32_000)).toBe(true);
   });
 
   it('uses PLAYBACK_CONFIRM_THRESHOLD_MS (30s), not CONTINUED_SESSION_THRESHOLD_MS (60s)', () => {
@@ -107,6 +90,7 @@ describe('createInitialConfirmationState', () => {
       confirmedPlayback: false,
       firstSeenAt: now,
       maxViewOffset: 0,
+      initialViewOffset: null,
     });
   });
 });
@@ -118,6 +102,7 @@ describe('updateConfirmationState', () => {
       confirmedPlayback: false,
       firstSeenAt: Date.now(),
       maxViewOffset: 1000,
+      initialViewOffset: 1000,
     };
     const updated = updateConfirmationState(state, 5000);
     expect(updated.maxViewOffset).toBe(5000);
@@ -129,8 +114,33 @@ describe('updateConfirmationState', () => {
       confirmedPlayback: false,
       firstSeenAt: Date.now(),
       maxViewOffset: 5000,
+      initialViewOffset: 1000,
     };
     const updated = updateConfirmationState(state, 1000);
     expect(updated.maxViewOffset).toBe(5000);
+  });
+
+  it('sets initialViewOffset from the first observed offset', () => {
+    const state = {
+      rulesEvaluated: false,
+      confirmedPlayback: false,
+      firstSeenAt: Date.now(),
+      maxViewOffset: 0,
+      initialViewOffset: null,
+    };
+    const updated = updateConfirmationState(state, 92_000);
+    expect(updated.initialViewOffset).toBe(92_000);
+  });
+
+  it('does not overwrite initialViewOffset once set', () => {
+    const state = {
+      rulesEvaluated: false,
+      confirmedPlayback: false,
+      firstSeenAt: Date.now(),
+      maxViewOffset: 92_000,
+      initialViewOffset: 92_000,
+    };
+    const updated = updateConfirmationState(state, 95_000);
+    expect(updated.initialViewOffset).toBe(92_000);
   });
 });

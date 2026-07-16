@@ -152,6 +152,7 @@ function createPendingSessionData(): PendingSessionData {
       confirmedPlayback: false,
       firstSeenAt: now - 31000,
       maxViewOffset: 31000,
+      initialViewOffset: 1000,
     },
     processed: {
       sessionKey: 'test-session-key',

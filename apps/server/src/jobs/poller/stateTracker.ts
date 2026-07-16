@@ -379,22 +379,20 @@ export function shouldGroupWithPreviousSession(
  *
  * A session is confirmed when ANY of these conditions are met:
  * 1. Already marked as confirmed (idempotent)
- * 2. Progress (viewOffset) exceeds 30 seconds
- * 3. Session has been active for 30+ seconds (any state)
+ * 2. Session has been active for 30+ seconds (any state)
  */
 export function isPlaybackConfirmed(
   state: PlaybackConfirmationState,
-  currentViewOffset: number,
+  _currentViewOffset: number,
   _currentState: string,
   now: number
 ): boolean {
   if (state.confirmedPlayback) return true;
-  if (currentViewOffset > PLAYBACK_CONFIRM_THRESHOLD_MS) return true;
-  const activeDuration = now - state.firstSeenAt;
-  if (activeDuration > PLAYBACK_CONFIRM_THRESHOLD_MS) {
-    return true;
-  }
-  return false;
+  // Absolute position must not confirm: a resumed item reports its saved
+  // position on first sight, which let rules evaluate against a cache that
+  // still contained the session the user switched away from. Age is the
+  // only confirmation signal; 30s is enough for the stale twin to sweep.
+  return now - state.firstSeenAt > PLAYBACK_CONFIRM_THRESHOLD_MS;
 }
 
 /**
@@ -406,6 +404,7 @@ export function createInitialConfirmationState(now: number): PlaybackConfirmatio
     confirmedPlayback: false,
     firstSeenAt: now,
     maxViewOffset: 0,
+    initialViewOffset: null,
   };
 }
 
@@ -418,6 +417,8 @@ export function updateConfirmationState(
 ): PlaybackConfirmationState {
   return {
     ...state,
+    // Redis blobs from before this field default null here, first update fills it.
+    initialViewOffset: state.initialViewOffset ?? viewOffset,
     maxViewOffset: Math.max(state.maxViewOffset, viewOffset),
   };
 }
