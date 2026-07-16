@@ -702,6 +702,30 @@ describe('SSE Processor - Pending Session Flow', () => {
       expect(confirmedSession?.pending).toBeUndefined();
     });
 
+    it('leaves the pending entry in Redis when the create lock is contended', async () => {
+      const pendingSession = createMockPendingSession();
+      mockCacheService.getPendingSession.mockResolvedValueOnce(pendingSession);
+
+      mockIsPlaybackConfirmed.mockReturnValueOnce(true);
+
+      // Lock contended: another caller holds it, so the lock body never runs.
+      mockCacheService.withSessionCreateLock.mockResolvedValueOnce(null);
+
+      mockSseManager.emit('plex:session:progress', {
+        serverId: 'server-123',
+        notification: { sessionKey: 'test-session-key', viewOffset: 35000 },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockCacheService.withSessionCreateLock).toHaveBeenCalled();
+      });
+
+      // Lock body never ran, so nothing was persisted and the pending entry
+      // must still exist in Redis for a later caller to confirm.
+      expect(mockConfirmAndPersistSession).not.toHaveBeenCalled();
+      expect(mockCacheService.deletePendingSession).not.toHaveBeenCalled();
+    });
+
     it('keeps session pending when viewOffset below threshold', async () => {
       const pendingSession = createMockPendingSession();
       mockCacheService.getPendingSession.mockResolvedValueOnce(pendingSession);

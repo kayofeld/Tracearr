@@ -1522,10 +1522,10 @@ async function confirmPendingSessionAndPersist(
   // The session ID is stable - pre-generated when pending session was created
   const sessionId = pendingData.id;
 
-  // Delete from pending session tracking
-  await cache.deletePendingSession(serverId, sessionKey);
-
-  // Use lock to prevent race conditions
+  // Delete only after the row is confirmed to exist (persisted here, or already
+  // persisted by a concurrent caller), never before the lock. A contended lock
+  // must leave the pending entry in Redis for the next confirming caller instead
+  // of losing the session with no DB row written.
   const result = await cache.withSessionCreateLock(serverId, sessionKey, async () => {
     // Double-check no active session was created while we were confirming
     const existingActive = await findActiveSession({
@@ -1535,6 +1535,7 @@ async function confirmPendingSessionAndPersist(
     });
     if (existingActive) {
       console.log(`[SSEProcessor] Active session created while confirming ${sessionKey}, skipping`);
+      await cache.deletePendingSession(serverId, sessionKey);
       return null;
     }
 
@@ -1548,12 +1549,15 @@ async function confirmPendingSessionAndPersist(
       pendingData.serverUser.identityServerUserIds
     );
 
-    return confirmAndPersistSession({
+    const persisted = await confirmAndPersistSession({
       pendingData,
       activeRulesV2,
       activeSessions,
       recentSessions,
     });
+
+    await cache.deletePendingSession(serverId, sessionKey);
+    return persisted;
   });
 
   if (!result) {
