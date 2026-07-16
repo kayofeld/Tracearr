@@ -8,6 +8,76 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import type { Session } from '@tracearr/shared';
+
+function createMockSession(overrides: Partial<Session> = {}): Session {
+  return {
+    id: 'session-1',
+    serverId: 'server-1',
+    serverUserId: 'user-1',
+    sessionKey: 'sk-1',
+    state: 'playing',
+    mediaType: 'movie',
+    mediaTitle: 'Test Movie',
+    grandparentTitle: null,
+    seasonNumber: null,
+    episodeNumber: null,
+    year: 2024,
+    thumbPath: null,
+    ratingKey: 'rk-1',
+    externalSessionId: 'ext-1',
+    startedAt: new Date(),
+    stoppedAt: null,
+    durationMs: null,
+    totalDurationMs: 7200000,
+    progressMs: 0,
+    lastPausedAt: null,
+    pausedDurationMs: 0,
+    referenceId: null,
+    watched: false,
+    ipAddress: '192.168.1.100',
+    geoCity: 'New York',
+    geoRegion: 'NY',
+    geoCountry: 'US',
+    geoContinent: 'NA',
+    geoPostal: '10001',
+    geoLat: 40.7128,
+    geoLon: -74.006,
+    geoAsnNumber: 7922,
+    geoAsnOrganization: 'Comcast',
+    playerName: 'Player 1',
+    deviceId: 'device-1',
+    product: 'Plex Web',
+    device: 'Chrome',
+    platform: 'Web',
+    quality: '1080p',
+    isTranscode: false,
+    videoDecision: 'directplay',
+    audioDecision: 'directplay',
+    bitrate: 20000,
+    channelTitle: null,
+    channelIdentifier: null,
+    channelThumb: null,
+    artistName: null,
+    albumName: null,
+    trackNumber: null,
+    discNumber: null,
+    sourceVideoCodec: 'hevc',
+    sourceAudioCodec: 'ac3',
+    sourceAudioChannels: 6,
+    sourceVideoWidth: 1920,
+    sourceVideoHeight: 1080,
+    sourceVideoDetails: null,
+    sourceAudioDetails: null,
+    streamVideoCodec: null,
+    streamAudioCodec: null,
+    streamVideoDetails: null,
+    streamAudioDetails: null,
+    transcodeInfo: null,
+    subtitleInfo: null,
+    ...overrides,
+  };
+}
 
 // ============================================================================
 // 1. Distributed Lock Tests (withSessionCreateLock)
@@ -601,5 +671,70 @@ describe('wasTerminatedByRule detection logic (Issue #357)', () => {
 
     const wasTerminatedByRule = sessionsToKill.some((s) => s.id === insertedSessionId);
     expect(wasTerminatedByRule).toBe(false);
+  });
+});
+
+// ============================================================================
+// 7. buildRuleContextSessions (twin exclusion)
+// ============================================================================
+
+describe('buildRuleContextSessions', () => {
+  it('excludes the stopped twin from the active session list', async () => {
+    const { buildRuleContextSessions } = await import('../sessionLifecycle.js');
+
+    const twin = createMockSession({ id: 'twin-id' });
+    const other = createMockSession({ id: 'other-id' });
+    const triggering = createMockSession({ id: 'triggering-id' });
+
+    const result = buildRuleContextSessions([twin, other, triggering], triggering, twin.id);
+
+    expect(result.map((s) => s.id)).toEqual(['other-id', 'triggering-id']);
+  });
+
+  it('appends the triggering session when not already present', async () => {
+    const { buildRuleContextSessions } = await import('../sessionLifecycle.js');
+
+    const other = createMockSession({ id: 'other-id' });
+    const triggering = createMockSession({ id: 'triggering-id' });
+
+    const result = buildRuleContextSessions([other], triggering, null);
+
+    expect(result.map((s) => s.id)).toEqual(['other-id', 'triggering-id']);
+  });
+
+  it('does not duplicate the triggering session when already present', async () => {
+    const { buildRuleContextSessions } = await import('../sessionLifecycle.js');
+
+    const other = createMockSession({ id: 'other-id' });
+    const triggering = createMockSession({ id: 'triggering-id' });
+
+    const result = buildRuleContextSessions([other, triggering], triggering, null);
+
+    expect(result.map((s) => s.id)).toEqual(['other-id', 'triggering-id']);
+  });
+
+  it('is a no-op filter when stoppedTwinId is null or undefined', async () => {
+    const { buildRuleContextSessions } = await import('../sessionLifecycle.js');
+
+    const other = createMockSession({ id: 'other-id' });
+    const triggering = createMockSession({ id: 'triggering-id' });
+
+    const resultNull = buildRuleContextSessions([other, triggering], triggering, null);
+    const resultUndefined = buildRuleContextSessions([other, triggering], triggering, undefined);
+
+    expect(resultNull.map((s) => s.id)).toEqual(['other-id', 'triggering-id']);
+    expect(resultUndefined.map((s) => s.id)).toEqual(['other-id', 'triggering-id']);
+  });
+
+  it('excludes the twin and appends the triggering session in the combined case', async () => {
+    const { buildRuleContextSessions } = await import('../sessionLifecycle.js');
+
+    const twin = createMockSession({ id: 'twin-id' });
+    const other = createMockSession({ id: 'other-id' });
+    const triggering = createMockSession({ id: 'triggering-id' });
+
+    const result = buildRuleContextSessions([twin, other], triggering, twin.id);
+
+    expect(result.map((s) => s.id)).toEqual(['other-id', 'triggering-id']);
   });
 });

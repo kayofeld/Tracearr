@@ -533,6 +533,27 @@ export async function batchFindActiveSessionsByComposite(
 // ============================================================================
 
 /**
+ * Build the session list used for rule evaluation context.
+ *
+ * Excludes stoppedTwinId (the quality-change twin stopped earlier in the
+ * same operation but still present in the caller's cache snapshot) and
+ * appends triggeringSession unless a session with that id is already
+ * present.
+ */
+export function buildRuleContextSessions(
+  activeSessions: Session[],
+  triggeringSession: Session,
+  stoppedTwinId: string | null | undefined
+): Session[] {
+  const countableSessions = stoppedTwinId
+    ? activeSessions.filter((s) => s.id !== stoppedTwinId)
+    : activeSessions;
+  return countableSessions.some((s) => s.id === triggeringSession.id)
+    ? countableSessions
+    : [...countableSessions, triggeringSession];
+}
+
+/**
  * Create a session with atomic rule evaluation and violation creation.
  * Handles quality change detection, resume tracking, and rule violations.
  */
@@ -827,13 +848,11 @@ export async function createSessionWithRulesAtomic(
 
           // The quality-change twin was stopped in STEP 1 but still sits in the
           // caller's cache snapshot; counting it doubles this viewer.
-          const stoppedTwinId = qualityChange?.stoppedSession.id;
-          const countableSessions = stoppedTwinId
-            ? activeSessions.filter((s) => s.id !== stoppedTwinId)
-            : activeSessions;
-          const activeSessionsWithNew = countableSessions.some((s) => s.id === session.id)
-            ? countableSessions
-            : [...countableSessions, session];
+          const activeSessionsWithNew = buildRuleContextSessions(
+            activeSessions,
+            session,
+            qualityChange?.stoppedSession.id
+          );
 
           const baseContext: Omit<EvaluationContext, 'rule'> = {
             session,
