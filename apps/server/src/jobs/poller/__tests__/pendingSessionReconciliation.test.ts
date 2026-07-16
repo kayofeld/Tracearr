@@ -312,4 +312,30 @@ describe('poller isNew branch defers to a pending session', () => {
     expect(mockCreateSessionWithRulesAtomic).not.toHaveBeenCalled();
     expect(mockProcessPollResults).not.toHaveBeenCalled();
   });
+
+  it("bails out cleanly when the pending session is confirmed by another process inside resolvePendingSession's own lock", async () => {
+    // First read (before the lock) sees the pending session and confirms it.
+    // SSE fully confirms and creates the same session in the gap before the
+    // lock is acquired, so the re-check inside the lock finds it gone.
+    mockUpdatePendingSession.mockReturnValue({
+      updatedData: createPendingSessionData(),
+      isConfirmed: true,
+    });
+
+    let getPendingSessionCalls = 0;
+    cacheService.getPendingSession = vi.fn(async (_serverId: string, key: string) => {
+      if (key !== 'test-session-key') return null;
+      getPendingSessionCalls++;
+      return getPendingSessionCalls === 1 ? createPendingSessionData() : null;
+    });
+
+    await expect(triggerServerPoll('server-1')).resolves.not.toThrow();
+
+    expect(getPendingSessionCalls).toBeGreaterThanOrEqual(2);
+    expect(mockCreateSessionWithRulesAtomic).not.toHaveBeenCalled();
+    expect(cacheService.deletePendingSession).not.toHaveBeenCalled();
+    // Nothing new/updated/stopped for this session this tick, so processPollResults
+    // is skipped entirely (same as the sibling "confirmed by other" path above).
+    expect(mockProcessPollResults).not.toHaveBeenCalled();
+  });
 });

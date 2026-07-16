@@ -295,8 +295,23 @@ async function resolvePendingSession(
   const createResult = await cacheService.withSessionCreateLock(
     server.id,
     processed.sessionKey,
-    async () =>
-      createSessionWithRulesAtomic({
+    async () => {
+      // Re-check inside the lock: SSE can confirm and create this same session
+      // (same preGeneratedId) between the read above and acquiring this lock.
+      // Two checks because the pending entry is only deleted after SSE's own
+      // lock is released, so a narrow window exists where it's not yet gone
+      // but the row already exists.
+      const stillPending = await cacheService.getPendingSession(server.id, pendingKey);
+      if (!stillPending) return null;
+
+      const [existingById] = await db
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(and(eq(sessions.id, updatedData.id), isNull(sessions.stoppedAt)))
+        .limit(1);
+      if (existingById) return null;
+
+      return createSessionWithRulesAtomic({
         processed,
         server,
         serverUser: userDetail,
@@ -305,7 +320,8 @@ async function resolvePendingSession(
         activeSessions,
         recentSessions,
         preGeneratedId: updatedData.id,
-      })
+      });
+    }
   );
 
   if (!createResult || !('insertedSession' in createResult)) {
