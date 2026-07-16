@@ -40,6 +40,7 @@ import {
   shouldFlushDbWrite,
 } from './poller/dbWriteThrottle.js';
 import { triggerReconciliationPoll } from './poller/index.js';
+import { gracePeriodSessionIds } from './poller/processor.js';
 import {
   buildActiveSession,
   buildPendingActiveSession,
@@ -61,6 +62,7 @@ import {
   updateConfirmationState,
 } from './poller/stateTracker.js';
 import type { PendingSessionData } from './poller/types.js';
+import { excludeUncountableSessions } from './poller/utils.js';
 import { broadcastViolations } from './poller/violations.js';
 
 let cacheService: CacheService | null = null;
@@ -993,7 +995,10 @@ async function handleMediaChange(
   }
 
   const activeRulesV2 = await getActiveRulesV2();
-  const activeSessions = await cacheService.getAllActiveSessions();
+  const activeSessions = excludeUncountableSessions(
+    await cacheService.getAllActiveSessions(),
+    gracePeriodSessionIds()
+  );
   const identityServerUserIds = await resolveIdentityServerUserIds(
     serverUser.userId,
     'media change'
@@ -1166,7 +1171,10 @@ async function updateExistingSession(
 
           const server = serverRows[0];
           if (server) {
-            const activeSessions = await cacheService.getAllActiveSessions();
+            const activeSessions = excludeUncountableSessions(
+              await cacheService.getAllActiveSessions(),
+              gracePeriodSessionIds()
+            );
             const identityServerUserIds = await resolveIdentityServerUserIds(
               serverUserDetail.userId,
               'transcode re-eval'
@@ -1233,7 +1241,10 @@ async function updateExistingSession(
 
           const server = serverRows[0];
           if (server) {
-            const activeSessions = await cacheService.getAllActiveSessions();
+            const activeSessions = excludeUncountableSessions(
+              await cacheService.getAllActiveSessions(),
+              gracePeriodSessionIds()
+            );
             const identityServerUserIds = await resolveIdentityServerUserIds(
               serverUserDetail.userId,
               'pause re-eval'
@@ -1470,7 +1481,10 @@ async function confirmPendingSessionAndPersist(
     }
 
     const activeRulesV2 = await getActiveRulesV2();
-    const activeSessions = await cache.getAllActiveSessions();
+    const activeSessions = excludeUncountableSessions(
+      await cache.getAllActiveSessions(),
+      gracePeriodSessionIds()
+    );
     const recentSessions = await fetchRecentSessionsForRules(
       pendingData.serverUser.id,
       pendingData.serverUser.identityServerUserIds
