@@ -70,6 +70,7 @@ import type {
   ServerProcessingResult,
   ServerWithToken,
 } from './types.js';
+import { excludeUncountableSessions } from './utils.js';
 import { broadcastViolations } from './violations.js';
 
 // ============================================================================
@@ -119,6 +120,15 @@ const ACTIVE_SESSION_CHUNK_BOUND_MS = 7 * 24 * 60 * 60 * 1000;
 // On the NEXT poll, if still absent, the DB stop is confirmed and notification sent.
 // Key: `serverId:sessionKey`, Value: ActiveSession snapshot for notification on confirmed stop.
 const missedPollTracking = new Map<string, ActiveSession>();
+
+/**
+ * Ids of sessions with at least one confirmed missed poll. Rule evaluation
+ * excludes these; the dashboard keeps showing them until the stop is
+ * confirmed on the next poll.
+ */
+export function gracePeriodSessionIds(): Set<string> {
+  return new Set([...missedPollTracking.values()].map((s) => s.id));
+}
 
 /**
  * Handle first-miss grace period entries for a set of cached session keys.
@@ -594,6 +604,10 @@ async function processServerSessions(
       );
     }
 
+    // Concurrent-stream counting must not see sessions the system already
+    // considers probably stopped, or unconfirmed pendings.
+    const ruleEvalSessions = excludeUncountableSessions(activeSessions, gracePeriodSessionIds());
+
     // Process each session
     for (let i = 0; i < processedSessions.length; i++) {
       const processed = processedSessions[i]!;
@@ -664,7 +678,7 @@ async function processServerSessions(
           processed,
           userDetail,
           activeRulesV2,
-          activeSessions,
+          activeSessions: ruleEvalSessions,
           recentSessions: recentSessionsMap.get(serverUserId) ?? [],
           usePlexGeoip,
         });
@@ -769,7 +783,7 @@ async function processServerSessions(
               serverUser: userDetail,
               geo,
               activeRulesV2,
-              activeSessions,
+              activeSessions: ruleEvalSessions,
               recentSessions,
             });
 
@@ -898,7 +912,7 @@ async function processServerSessions(
             processed,
             userDetail,
             activeRulesV2,
-            activeSessions,
+            activeSessions: ruleEvalSessions,
             recentSessions: recentSessionsMap.get(serverUserId) ?? [],
             usePlexGeoip,
           });
@@ -1040,7 +1054,7 @@ async function processServerSessions(
                 serverUser: userDetail,
                 geo,
                 activeRulesV2,
-                activeSessions,
+                activeSessions: ruleEvalSessions,
                 recentSessions,
               });
             }
@@ -1095,7 +1109,7 @@ async function processServerSessions(
             serverUser: userDetail,
             geo,
             activeRulesV2,
-            activeSessions,
+            activeSessions: ruleEvalSessions,
             recentSessions,
           });
 
@@ -1194,7 +1208,7 @@ async function processServerSessions(
                 server: { id: server.id, name: server.name, type: server.type },
                 serverUser: userDetail,
                 activeRulesV2,
-                activeSessions,
+                activeSessions: ruleEvalSessions,
                 recentSessions,
               });
 
@@ -1268,7 +1282,7 @@ async function processServerSessions(
               server: { id: server.id, name: server.name, type: server.type },
               serverUser: userDetail,
               activeRulesV2,
-              activeSessions,
+              activeSessions: ruleEvalSessions,
               recentSessions,
             });
 
