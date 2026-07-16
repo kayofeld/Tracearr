@@ -296,11 +296,11 @@ async function resolvePendingSession(
     server.id,
     processed.sessionKey,
     async () => {
-      // Re-check inside the lock: SSE can confirm and create this same session
-      // (same preGeneratedId) between the read above and acquiring this lock.
-      // Two checks because the pending entry is only deleted after SSE's own
-      // lock is released, so a narrow window exists where it's not yet gone
-      // but the row already exists.
+      // Two checks, deliberately redundant: the SSE confirm path deletes the
+      // pending entry before taking its own lock, so the stillPending re-read
+      // catches the common interleaving, and the id-existence check covers any
+      // ordering between the delete and the row insert. Neither side may assume
+      // the other's sequencing.
       const stillPending = await cacheService.getPendingSession(server.id, pendingKey);
       if (!stillPending) return null;
 
