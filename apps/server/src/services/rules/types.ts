@@ -19,6 +19,10 @@ export interface EvaluationContext {
    *  Optional so contexts built before a lookup (or in old tests) fall back
    *  to single server_user behavior. */
   identityServerUserIds?: string[];
+  /** Violation this match created, if any. Populated by callers that insert
+   *  the violation before executing actions; kill_stream needs it to attribute
+   *  the eventual queue outcome (killed/skipped/failed) back to the record. */
+  violationId?: string | null;
 }
 
 export interface EvaluatorResult {

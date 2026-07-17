@@ -981,11 +981,16 @@ export async function createSessionWithRulesAtomic(
           }
         }
 
-        const actionResults: ActionResult[] = await executeActions(context, result.actions);
-
-        // Find violation ID if one was created for this rule
+        // Find violation ID if one was created for this rule - kill_stream needs
+        // it before executing so the kill queue can attribute its eventual
+        // outcome (killed/skipped/failed) back to the right violation.
         const violationId =
           violationResults.find((v) => v.rule.id === rule.id)?.violation.id ?? null;
+
+        const actionResults: ActionResult[] = await executeActions(
+          { ...context, violationId },
+          result.actions
+        );
 
         // Store results for UI
         await storeActionResults(violationId, result.ruleId, actionResults);
@@ -1632,7 +1637,11 @@ export async function reEvaluateRulesOnTranscodeChange(
       // a new violation was created. Gating here prevents actions from firing
       // on subsequent re-evaluations where the dedup check returns null.
       if (result.actions.length > 0) {
-        const context: EvaluationContext = { ...baseContext, rule };
+        const context: EvaluationContext = {
+          ...baseContext,
+          rule,
+          violationId: violationResult.id,
+        };
         const actionResults: ActionResult[] = await executeActions(context, result.actions);
         await storeActionResults(violationResult.id, result.ruleId, actionResults);
       }
@@ -1847,7 +1856,11 @@ export async function reEvaluateRulesOnPauseState(
       // a new violation was created. The dedup check returns null on subsequent
       // polls — gating here prevents kill_stream from firing every poll cycle.
       if (result.actions.length > 0) {
-        const context: EvaluationContext = { ...baseContext, rule };
+        const context: EvaluationContext = {
+          ...baseContext,
+          rule,
+          violationId: violationResult.id,
+        };
         const actionResults: ActionResult[] = await executeActions(context, result.actions);
         await storeActionResults(violationResult.id, result.ruleId, actionResults);
       }

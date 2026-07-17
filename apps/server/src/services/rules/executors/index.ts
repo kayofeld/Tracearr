@@ -48,6 +48,8 @@ export interface ActionExecutorDeps {
   terminateSession: (
     sessionId: string,
     serverId: string,
+    ruleId: string,
+    violationId: string | null,
     delay?: number,
     message?: string
   ) => Promise<void>;
@@ -298,6 +300,8 @@ const executeKillStream: ActionExecutor = async (
     await currentDeps.terminateSession(
       targetSession.id,
       targetSession.serverId,
+      rule.id,
+      context.violationId ?? null,
       delaySeconds,
       message
     );

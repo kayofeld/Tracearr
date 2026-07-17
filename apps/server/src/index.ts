@@ -95,6 +95,7 @@ import {
   startNotificationWorker,
   shutdownNotificationQueue,
 } from './jobs/notificationQueue.js';
+import { initKillQueue, startKillWorker, shutdownKillQueue } from './jobs/killQueue.js';
 import { initImportQueue, startImportWorker, shutdownImportQueue } from './jobs/importQueue.js';
 import {
   initMaintenanceQueue,
@@ -503,6 +504,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     stopSSEProcessor();
     stopPluginUpdateChecker();
     await shutdownNotificationQueue();
+    await shutdownKillQueue();
     await shutdownImportQueue();
     await shutdownMaintenanceQueue();
     await shutdownLibrarySyncQueue();
@@ -715,6 +717,8 @@ async function initializeServices(app: FastifyInstance) {
   try {
     initNotificationQueue(redisUrl);
     startNotificationWorker();
+    initKillQueue(redisUrl);
+    startKillWorker();
     pushReceiptInterval = setInterval(
       () => {
         processPushReceipts().catch((err) => {
@@ -1143,6 +1147,7 @@ async function start() {
         stopPoller();
         void tailscaleService.shutdown();
         void shutdownNotificationQueue();
+        void shutdownKillQueue();
         void shutdownImportQueue();
         void shutdownLibrarySyncQueue();
         void shutdownVersionCheckQueue();
@@ -1178,6 +1183,7 @@ async function start() {
         // Shut down BullMQ workers/queues (closes their internal Redis connections)
         void Promise.all([
           shutdownNotificationQueue(),
+          shutdownKillQueue(),
           shutdownImportQueue(),
           shutdownMaintenanceQueue(),
           shutdownLibrarySyncQueue(),

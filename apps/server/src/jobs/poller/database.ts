@@ -204,18 +204,13 @@ export function invalidateRulesCache(): void {
  * const rulesV2 = await getActiveRulesV2();
  * // Evaluate session events against these rules
  */
-export async function getActiveRulesV2(): Promise<RuleV2[]> {
-  const now = Date.now();
-  if (rulesCache && rulesCache.expiresAt > now) {
-    return rulesCache.data;
-  }
-
-  const activeRules = await db
-    .select()
-    .from(rules)
-    .where(and(eq(rules.isActive, true), isNotNull(rules.conditions)));
-
-  const mapped = activeRules.map((r) => ({
+/**
+ * Map a raw `rules` table row (V2 columns) to the shared RuleV2 shape.
+ * Shared by getActiveRulesV2 and the kill-queue reverify path so both build
+ * an identical RuleV2 from the same row.
+ */
+export function mapRuleRowToRuleV2(r: typeof rules.$inferSelect): RuleV2 {
+  return {
     id: r.id,
     name: r.name,
     description: r.description,
@@ -229,7 +224,21 @@ export async function getActiveRulesV2(): Promise<RuleV2[]> {
     actions: r.actions as RuleActions,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
-  }));
+  };
+}
+
+export async function getActiveRulesV2(): Promise<RuleV2[]> {
+  const now = Date.now();
+  if (rulesCache && rulesCache.expiresAt > now) {
+    return rulesCache.data;
+  }
+
+  const activeRules = await db
+    .select()
+    .from(rules)
+    .where(and(eq(rules.isActive, true), isNotNull(rules.conditions)));
+
+  const mapped = activeRules.map(mapRuleRowToRuleV2);
 
   rulesCache = { data: mapped, expiresAt: now + RULES_CACHE_TTL_MS };
   return mapped;

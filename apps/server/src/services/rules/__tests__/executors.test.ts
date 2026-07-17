@@ -351,6 +351,8 @@ describe('Action Executor Registry', () => {
         expect(mockDeps.terminateSession).toHaveBeenCalledWith(
           context.session.id,
           context.server.id,
+          context.rule.id,
+          null,
           0,
           undefined
         );
@@ -365,6 +367,8 @@ describe('Action Executor Registry', () => {
         expect(mockDeps.terminateSession).toHaveBeenCalledWith(
           context.session.id,
           context.server.id,
+          context.rule.id,
+          null,
           30,
           undefined
         );
@@ -383,6 +387,8 @@ describe('Action Executor Registry', () => {
         expect(mockDeps.terminateSession).toHaveBeenCalledWith(
           context.session.id,
           context.server.id,
+          context.rule.id,
+          null,
           0,
           'You violated the concurrent streams policy'
         );
@@ -401,6 +407,8 @@ describe('Action Executor Registry', () => {
         expect(mockDeps.terminateSession).toHaveBeenCalledWith(
           context.session.id,
           context.server.id,
+          context.rule.id,
+          null,
           15,
           'Stream will be terminated in 15 seconds'
         );
@@ -426,6 +434,8 @@ describe('Action Executor Registry', () => {
           expect(mockDeps.terminateSession).toHaveBeenCalledWith(
             'triggering',
             context.server.id,
+            context.rule.id,
+            null,
             0,
             undefined
           );
@@ -455,6 +465,8 @@ describe('Action Executor Registry', () => {
           expect(mockDeps.terminateSession).toHaveBeenCalledWith(
             'oldest',
             context.server.id,
+            context.rule.id,
+            null,
             0,
             undefined
           );
@@ -489,12 +501,16 @@ describe('Action Executor Registry', () => {
           expect(mockDeps.terminateSession).toHaveBeenCalledWith(
             's2',
             context.server.id,
+            context.rule.id,
+            null,
             0,
             undefined
           );
           expect(mockDeps.terminateSession).toHaveBeenCalledWith(
             's3',
             context.server.id,
+            context.rule.id,
+            null,
             0,
             undefined
           );
@@ -517,17 +533,23 @@ describe('Action Executor Registry', () => {
           expect(mockDeps.terminateSession).toHaveBeenCalledWith(
             's1',
             context.server.id,
+            context.rule.id,
+            null,
             0,
             undefined
           );
           expect(mockDeps.terminateSession).toHaveBeenCalledWith(
             's2',
             context.server.id,
+            context.rule.id,
+            null,
             0,
             undefined
           );
           expect(mockDeps.terminateSession).not.toHaveBeenCalledWith(
             'other',
+            expect.anything(),
+            expect.anything(),
             expect.anything(),
             expect.anything(),
             expect.anything()

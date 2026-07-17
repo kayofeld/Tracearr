@@ -207,32 +207,25 @@ export function createActionExecutorDeps(redis: Redis): ActionExecutorDeps {
     },
 
     /**
-     * Terminate a session using the termination service.
+     * Enqueue termination through the kill queue rather than terminating inline.
+     * delay_seconds becomes the sustain window: the worker waits, re-verifies
+     * the match against current state, and only then calls termination.ts.
      */
-    terminateSession: async (sessionId, serverId, delay, message) => {
+    terminateSession: async (sessionId, serverId, ruleId, violationId, delay, message) => {
       // Dynamic import to avoid circular dependency
-      const { terminateSession: terminate } = await import('../termination.js');
+      const { enqueueKill } = await import('../../jobs/killQueue.js');
 
-      // If there's a delay, we'd need to schedule this. For now, execute immediately.
-      // A future enhancement could use BullMQ delayed jobs.
-      if (delay && delay > 0) {
-        rulesLogger.debug(`Termination delayed by ${delay}s (executing immediately for now)`, {
-          sessionId,
-          delay,
-        });
-      }
+      const delaySeconds = delay && delay > 0 ? delay : 0;
 
-      const result = await terminate({
+      await enqueueKill({ sessionId, serverId, ruleId, violationId, message }, delaySeconds);
+
+      rulesLogger.debug('Kill enqueued', {
         sessionId,
-        trigger: 'rule',
-        reason: message,
+        serverId,
+        ruleId,
+        violationId,
+        delaySeconds,
       });
-
-      if (!result.success) {
-        throw new Error(result.error ?? 'Failed to terminate session');
-      }
-
-      rulesLogger.info('Session terminated', { sessionId, serverId, message });
     },
 
     /**
