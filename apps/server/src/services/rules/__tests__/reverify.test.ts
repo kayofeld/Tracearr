@@ -315,11 +315,14 @@ describe('reverifyKillCondition', () => {
     expect(context.identityServerUserIds).toEqual([sessionRow.serverUserId, siblingServerUserId]);
   });
 
-  it('does not widen recentSessions for rules without enforceAcrossServers', async () => {
+  it('still derives identity for rules without enforceAcrossServers, but does not widen a single-account identity', async () => {
     const sessionRow = makeSessionRow();
     mockSessionFindFirst.mockResolvedValue(sessionRow);
     const ruleRow = makeRuleRow({ enforceAcrossServers: false });
     mockRuleSelect(ruleRow);
+    mockBatchGetIdentityServerUserIds.mockResolvedValue(
+      new Map([[sessionRow.serverUser.userId, [sessionRow.serverUserId]]])
+    );
     mockEvaluateRulesAsync.mockResolvedValue([
       {
         ruleId: ruleRow.id,
@@ -341,8 +344,79 @@ describe('reverifyKillCondition', () => {
       ruleId: ruleRow.id,
     });
 
-    expect(mockBatchGetIdentityServerUserIds).not.toHaveBeenCalled();
+    // The lookup itself is unconditional - only widening past a single
+    // server_user id is skipped, since there's nothing to widen.
+    expect(mockBatchGetIdentityServerUserIds).toHaveBeenCalledWith([sessionRow.serverUser.userId]);
     expect(mockBatchGetRecentUserSessions).toHaveBeenCalledWith([sessionRow.serverUserId]);
+  });
+
+  it('kills a merged-identity user under a rule without enforceAcrossServers when both accounts together clear the condition', async () => {
+    const actualEngine = await vi.importActual<typeof import('../engine.js')>('../engine.js');
+    mockEvaluateRulesAsync.mockImplementation(actualEngine.evaluateRulesAsync);
+
+    const sessionRow = makeSessionRow();
+    mockSessionFindFirst.mockResolvedValue(sessionRow);
+
+    const ruleRow = makeRuleRow({
+      enforceAcrossServers: false,
+      conditions: {
+        groups: [{ conditions: [{ field: 'concurrent_streams', operator: 'eq', value: 2 }] }],
+      },
+    });
+    mockRuleSelect(ruleRow);
+
+    const siblingServerUserId = randomUUID();
+    mockBatchGetIdentityServerUserIds.mockResolvedValue(
+      new Map([[sessionRow.serverUser.userId, [sessionRow.serverUserId, siblingServerUserId]]])
+    );
+    mockBatchGetRecentUserSessions.mockImplementation(async (ids: string[]) => {
+      const map = new Map<string, Session[]>();
+      for (const id of ids) map.set(id, []);
+      return map;
+    });
+
+    const triggeringActiveSession = {
+      id: sessionRow.id,
+      serverUserId: sessionRow.serverUserId,
+      deviceId: 'device-a',
+      ipAddress: '10.0.0.1',
+    } as Session;
+    const siblingActiveSession = {
+      id: 'sibling-active-session',
+      serverUserId: siblingServerUserId,
+      deviceId: 'device-b',
+      ipAddress: '10.0.0.2',
+    } as Session;
+    mockGetCacheService.mockReturnValue({
+      getAllActiveSessions: vi
+        .fn()
+        .mockResolvedValue([triggeringActiveSession, siblingActiveSession]),
+    } as never);
+
+    mockTerminateSession.mockResolvedValue({
+      success: true,
+      terminationLogId: randomUUID(),
+      outcome: 'terminated',
+    });
+
+    // Without unconditional identity aggregation, only the triggering
+    // account's session is counted (1), the concurrent_streams == 2
+    // condition clears, and this would wrongly abort as
+    // skipped_condition_cleared even though live evaluation (which never
+    // gates this on enforceAcrossServers) matched both accounts together.
+    const result = await reverifyKillCondition({
+      sessionId: sessionRow.id,
+      serverId: sessionRow.serverId,
+      ruleId: ruleRow.id,
+    });
+
+    expect(result.outcome).toBe('killed');
+    expect(mockTerminateSession).toHaveBeenCalledWith({
+      sessionId: sessionRow.id,
+      trigger: 'rule',
+      ruleId: ruleRow.id,
+      reason: undefined,
+    });
   });
 
   it('returns failed when termination reports failure', async () => {

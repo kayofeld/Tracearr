@@ -79,17 +79,18 @@ export async function reverifyKillCondition(
   const cachedSessions = cacheService ? await cacheService.getAllActiveSessions() : [];
   const activeSessions = excludeUncountableSessions(cachedSessions, gracePeriodSessionIds());
 
-  // Only rules opted into cross-server enforcement need the sibling
-  // server_user lookup - the overwhelming majority evaluate single-account.
-  // Always re-derived here from the DB rather than trusting the
-  // identityServerUserIds snapshot the enqueue payload carries from match
-  // time: identity membership (server merges/unmerges) can change during the
-  // delay window between match and this re-check.
-  let identityServerUserIds: string[] | undefined;
-  if (rule.enforceAcrossServers) {
-    const identityMap = await batchGetIdentityServerUserIds([sessionRow.serverUser.userId]);
-    identityServerUserIds = identityMap.get(sessionRow.serverUser.userId);
-  }
+  // Identity aggregation runs unconditionally here, mirroring the live poller
+  // (processor.ts) - detection-side identity counting is NOT gated by
+  // enforceAcrossServers, that flag only controls whether a MATCHED rule's
+  // actions reach sessions beyond the triggering one. Gating this lookup on
+  // the flag would let a kill matched under live evaluation's identity-wide
+  // count re-verify with single-account context and wrongly self-abort as
+  // skipped_condition_cleared. Always re-derived here from the DB rather than
+  // trusting the identityServerUserIds snapshot the enqueue payload carries
+  // from match time: identity membership (server merges/unmerges) can change
+  // during the delay window between match and this re-check.
+  const identityMap = await batchGetIdentityServerUserIds([sessionRow.serverUser.userId]);
+  const identityServerUserIds = identityMap.get(sessionRow.serverUser.userId);
 
   const recentSessionsUserIds =
     identityServerUserIds && identityServerUserIds.length > 1
