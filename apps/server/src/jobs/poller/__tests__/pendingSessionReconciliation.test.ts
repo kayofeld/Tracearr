@@ -19,6 +19,7 @@ const {
   mockBuildActiveSession,
   mockFindActiveSession,
   mockProcessPollResults,
+  mockHandleQualityChangeFallout,
   mockDb,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -76,6 +77,7 @@ const {
     mockBuildActiveSession: vi.fn(),
     mockFindActiveSession: vi.fn().mockResolvedValue(null),
     mockProcessPollResults: vi.fn().mockResolvedValue(undefined),
+    mockHandleQualityChangeFallout: vi.fn().mockResolvedValue(undefined),
     mockDb: {
       // Server lookup calls select() with no column argument. The server-user
       // join query and the plex duplicate-content check both pass columns, so
@@ -130,6 +132,7 @@ vi.mock('../sessionLifecycle.js', () => ({
   findActiveSession: mockFindActiveSession,
   findActiveSessionByComposite: vi.fn().mockResolvedValue(null),
   handleMediaChangeAtomic: vi.fn(),
+  handleQualityChangeFallout: mockHandleQualityChangeFallout,
   processPollResults: mockProcessPollResults,
   reEvaluateRulesOnPauseState: vi.fn(),
   reEvaluateRulesOnTranscodeChange: vi.fn(),
@@ -281,6 +284,46 @@ describe('poller isNew branch defers to a pending session', () => {
     const call = mockProcessPollResults.mock.calls[0]?.[0];
     expect(call.newSessions).toHaveLength(1);
     expect(call.newSessions[0].id).toBe('pending-uuid-123');
+  });
+
+  it('runs quality-change fallout for the stopped twin when confirming a pending session', async () => {
+    mockUpdatePendingSession.mockReturnValue({
+      updatedData: createPendingSessionData(),
+      isConfirmed: true,
+    });
+
+    const qualityChange = {
+      stoppedSession: {
+        id: 'twin-session-id',
+        serverUserId: 'server-user-1',
+        sessionKey: 'twin-session-key',
+        deviceId: 'device-1',
+        ratingKey: '12345',
+      },
+      referenceId: 'twin-session-id',
+    };
+
+    mockCreateSessionWithRulesAtomic.mockResolvedValue({
+      insertedSession: { id: 'pending-uuid-123', sessionKey: 'test-session-key' },
+      violationResults: [],
+      qualityChange,
+      referenceId: 'twin-session-id',
+      wasTerminatedByRule: false,
+    });
+
+    mockBuildActiveSession.mockReturnValue({
+      id: 'pending-uuid-123',
+      serverId: 'server-1',
+      sessionKey: 'test-session-key',
+    });
+
+    await triggerServerPoll('server-1');
+
+    expect(mockHandleQualityChangeFallout).toHaveBeenCalledWith(
+      qualityChange,
+      cacheService,
+      expect.objectContaining({ publish: expect.any(Function) })
+    );
   });
 
   it('keeps the session pending and does not create anything when still below threshold', async () => {

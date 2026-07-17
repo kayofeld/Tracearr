@@ -49,6 +49,7 @@ import {
   findActiveSession,
   findActiveSessionByComposite,
   handleMediaChangeAtomic,
+  handleQualityChangeFallout,
   processPollResults,
   reEvaluateRulesOnPauseState,
   reEvaluateRulesOnTranscodeChange,
@@ -256,9 +257,12 @@ async function sweepGracePeriod(
             })
           : await findActiveSession({ serverId, sessionKey: snapshot.sessionKey });
       if (session) {
+        // session.lastSeenAt is the last poll that confirmed this session
+        // alive - it vanished 1-2 polls before this sweep, so `new Date()`
+        // would bill the grace-period gap itself as watch time.
         const { wasUpdated, durationMs, needsRetry, retryData } = await stopSessionAtomic({
           session,
-          stoppedAt: new Date(),
+          stoppedAt: session.lastSeenAt,
         });
         clearDbWriteTracking(session.id);
         if (needsRetry && retryData && cacheService) {
@@ -424,7 +428,11 @@ async function resolvePendingSession(
   }
 
   await cacheService.deletePendingSession(server.id, pendingKey);
-  const { insertedSession, violationResults, wasTerminatedByRule } = createResult;
+  const { insertedSession, violationResults, qualityChange, wasTerminatedByRule } = createResult;
+
+  if (qualityChange) {
+    await handleQualityChangeFallout(qualityChange, cacheService, pubSubService);
+  }
 
   let newSession: ActiveSession | null = null;
   if (!wasTerminatedByRule) {
@@ -910,14 +918,7 @@ async function processServerSessions(
 
               if (result.qualityChange) {
                 const { stoppedSession } = result.qualityChange;
-
-                if (cacheService) {
-                  await cacheService.removeActiveSession(stoppedSession.id);
-                }
-
-                if (pubSubService) {
-                  await pubSubService.publish('session:stopped', stoppedSession.id);
-                }
+                await handleQualityChangeFallout(result.qualityChange, cacheService, pubSubService);
 
                 // Prevent "stale" detection for this session
                 const stoppedKey = buildCompositeKey({
@@ -1188,7 +1189,12 @@ async function processServerSessions(
             );
 
             if (createResult) {
-              const { insertedSession, violationResults, wasTerminatedByRule } = createResult;
+              const { insertedSession, violationResults, qualityChange, wasTerminatedByRule } =
+                createResult;
+
+              if (qualityChange) {
+                await handleQualityChangeFallout(qualityChange, cacheService, pubSubService);
+              }
 
               if (wasTerminatedByRule) {
                 console.log(

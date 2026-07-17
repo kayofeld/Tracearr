@@ -27,6 +27,7 @@ import {
 import { executeActions, type ActionResult } from '../../services/rules/executors/index.js';
 import type { EvaluationContext, EvaluationResult } from '../../services/rules/types.js';
 import { storeActionResults } from '../../services/rules/v2Integration.js';
+import { clearDbWriteTracking } from './dbWriteThrottle.js';
 import { pickStreamDetailFields } from './sessionMapper.js';
 import {
   calculateStopDuration,
@@ -571,6 +572,29 @@ export function wasTriggeringSessionTargetedForKill(
       result.action.type === 'kill_stream' &&
       result.enqueuedSessionIds?.includes(triggeringSessionId)
   );
+}
+
+/**
+ * Clean up the twin stopped by createSessionWithRulesAtomic's quality-change
+ * detection (STEP 1): clear its DB-write throttle tracking, remove it from
+ * the active-session cache, and publish its stop. Every caller of
+ * createSessionWithRulesAtomic/confirmAndPersistSession that can receive a
+ * non-null `qualityChange` must run this, or the twin lingers in the cache
+ * until TTL with a stale throttle entry and no stop broadcast.
+ */
+export async function handleQualityChangeFallout(
+  qualityChange: QualityChangeResult,
+  cacheService: { removeActiveSession: (sessionId: string) => Promise<void> } | null,
+  pubSubService: { publish: (event: string, data: unknown) => Promise<void> } | null
+): Promise<void> {
+  const { stoppedSession } = qualityChange;
+  clearDbWriteTracking(stoppedSession.id);
+  if (cacheService) {
+    await cacheService.removeActiveSession(stoppedSession.id);
+  }
+  if (pubSubService) {
+    await pubSubService.publish('session:stopped', stoppedSession.id);
+  }
 }
 
 /**
