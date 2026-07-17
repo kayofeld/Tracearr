@@ -341,6 +341,22 @@ describe('Action Executor Registry', () => {
     });
 
     describe('kill_stream', () => {
+      it('should record the interim result as queued, not a false success', async () => {
+        const context = createMockContext();
+        const action: KillStreamAction = { type: 'kill_stream' };
+
+        const result = await executeAction(context, action);
+
+        // The kill worker inserts the authoritative outcome (killed/skipped_*/failed)
+        // later; this interim row must not claim success/skipped:false.
+        expect(result).toEqual({
+          action,
+          success: true,
+          skipped: true,
+          skipReason: 'queued',
+        });
+      });
+
       it('should terminate session silently when no message provided', async () => {
         const context = createMockContext();
         const action: KillStreamAction = { type: 'kill_stream' };

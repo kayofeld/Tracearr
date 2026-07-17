@@ -427,6 +427,18 @@ export async function executeAction(
       await currentDeps.setCooldown(rule.id, targetId, cooldownMinutes);
     }
 
+    // kill_stream only enqueues here; the kill worker's later insert
+    // (killed/skipped_condition_cleared/failed) is the authoritative outcome,
+    // so this interim row must read as skipped rather than a false success.
+    if (action.type === 'kill_stream') {
+      return {
+        action,
+        success: true,
+        skipped: true,
+        skipReason: 'queued',
+      };
+    }
+
     return {
       action,
       success: true,

@@ -109,6 +109,41 @@ describe('killQueue', () => {
       expect(opts.jobId).toBe(`kill:${violationId}:${sessionId}`);
     });
 
+    it('builds jobId from ruleId and sessionId when violationId is null', async () => {
+      mockQueueAdd.mockResolvedValue({ id: 'job-3b' });
+
+      const sessionId = randomUUID();
+      const ruleId = randomUUID();
+
+      await enqueueKill({ sessionId, serverId: randomUUID(), ruleId, violationId: null }, 10);
+
+      const [, , opts] = mockQueueAdd.mock.calls[0]!;
+      expect(opts.jobId).toBe(`kill:rule:${ruleId}:${sessionId}`);
+    });
+
+    it('gives distinct jobIds to distinct rules matching the same session when violationId is null', async () => {
+      mockQueueAdd.mockResolvedValue({ id: 'job-3c' });
+
+      const sessionId = randomUUID();
+      const ruleIdA = randomUUID();
+      const ruleIdB = randomUUID();
+
+      await enqueueKill(
+        { sessionId, serverId: randomUUID(), ruleId: ruleIdA, violationId: null },
+        10
+      );
+      await enqueueKill(
+        { sessionId, serverId: randomUUID(), ruleId: ruleIdB, violationId: null },
+        10
+      );
+
+      const jobIdA = mockQueueAdd.mock.calls[0]![2].jobId;
+      const jobIdB = mockQueueAdd.mock.calls[1]![2].jobId;
+      expect(jobIdA).not.toBe(jobIdB);
+      expect(jobIdA).toBe(`kill:rule:${ruleIdA}:${sessionId}`);
+      expect(jobIdB).toBe(`kill:rule:${ruleIdB}:${sessionId}`);
+    });
+
     it('does not double-enqueue a duplicate jobId', async () => {
       mockQueueAdd.mockRejectedValue(new Error('Job with id kill:abc:def already exists'));
 

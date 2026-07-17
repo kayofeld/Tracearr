@@ -138,8 +138,11 @@ export async function processKillJob(job: Job<KillJobData>): Promise<void> {
   await storeActionResults(violationId, ruleId, [outcomeToActionResult(result)]);
 }
 
-function buildJobId(violationId: string | null, sessionId: string): string {
-  return `kill:${violationId}:${sessionId}`;
+function buildJobId(violationId: string | null, sessionId: string, ruleId: string): string {
+  // Without a violationId, two different rule matches on the same session
+  // would otherwise collide on `kill:null:<sessionId>` and dedupe each other.
+  if (violationId) return `kill:${violationId}:${sessionId}`;
+  return `kill:rule:${ruleId}:${sessionId}`;
 }
 
 /**
@@ -155,7 +158,7 @@ export async function enqueueKill(
     return undefined;
   }
 
-  const jobId = buildJobId(data.violationId, data.sessionId);
+  const jobId = buildJobId(data.violationId, data.sessionId, data.ruleId);
 
   try {
     const job = await killQueue.add('kill', data, {
