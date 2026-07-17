@@ -875,7 +875,7 @@ async function processServerSessions(
 
               if (existingWithSameKey) {
                 cachedSessionKeys.add(sessionKey);
-                // Clear any grace period tracking — session is confirmed active
+                // Clear any grace period tracking - session is confirmed active
                 missedPollTracking.delete(sessionKey);
                 console.log(
                   `[Poller] Recovering active session ${processed.sessionKey} into cache`
@@ -973,7 +973,7 @@ async function processServerSessions(
             continue;
           }
 
-          // Handle rediscovered session — existing active session found in DB but missing from cache.
+          // Handle rediscovered session - existing active session found in DB but missing from cache.
           // This happens on server restart or after a grace period recovery.
           if ('rediscovered' in createResult && createResult.rediscovered) {
             const existing = createResult.rediscovered;
@@ -1555,7 +1555,7 @@ async function processServerSessions(
     );
     await sweepGracePeriod(keysToSweep, server.id, sTypeMap, currentSessionKeys);
 
-    // stoppedSessionKeys intentionally empty — grace period handles stops inline.
+    // stoppedSessionKeys intentionally empty - grace period handles stops inline.
     // processPollResults still processes newSessions and updatedSessions normally.
     return {
       success: true,
@@ -1793,7 +1793,7 @@ async function pollServers(): Promise<void> {
     // This catches sessions where server went down or SSE missed the stop event
     await sweepStaleSessions();
   } catch (error) {
-    // Suppress DB errors during maintenance — the in-flight poll was already
+    // Suppress DB errors during maintenance - the in-flight poll was already
     // running when the DB went down and stopPoller() can't abort an active await.
     if (!isMaintenance()) {
       console.error('Polling error:', error);

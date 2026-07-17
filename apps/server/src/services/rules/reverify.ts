@@ -9,6 +9,15 @@
  * rule evaluation uses (excludeUncountableSessions, gracePeriodSessionIds,
  * evaluateRulesAsync) so re-verification and live evaluation can never
  * disagree about what counts as an active session.
+ *
+ * The cache is not a faithful stand-in for "current state" for the
+ * triggering session specifically: createSessionWithRulesAtomic skips
+ * re-adding it to the cache once a kill job is enqueued for it
+ * (wasTerminatedByRule), so at delay_seconds 0 this can run before any poll
+ * tick rediscovers it. buildRuleContextSessions (shared with live
+ * evaluation) appends sessionRow back in when the cache list doesn't already
+ * carry its id, the same way it appends a freshly-inserted session in
+ * createSessionWithRulesAtomic.
  */
 
 import { eq } from 'drizzle-orm';
@@ -23,6 +32,7 @@ import {
 } from '../../jobs/poller/database.js';
 import { excludeUncountableSessions } from '../../jobs/poller/utils.js';
 import { gracePeriodSessionIds } from '../../jobs/poller/processor.js';
+import { buildRuleContextSessions } from '../../jobs/poller/sessionLifecycle.js';
 import { terminateSession } from '../termination.js';
 import { rulesLogger } from '../../utils/logger.js';
 import { evaluateRulesAsync } from './engine.js';
@@ -95,7 +105,22 @@ export async function reverifyKillCondition(
 
   const cacheService = getCacheService();
   const cachedSessions = cacheService ? await cacheService.getAllActiveSessions() : [];
-  const activeSessions = excludeUncountableSessions(cachedSessions, gracePeriodSessionIds());
+  const countableCachedSessions = excludeUncountableSessions(
+    cachedSessions,
+    gracePeriodSessionIds()
+  );
+  // sessionRow is missing from countableCachedSessions exactly when this kill
+  // was enqueued for the triggering session (see module header) - append it
+  // back so conditions like concurrent_streams count the session being
+  // re-verified instead of undercounting it by one and self-aborting.
+  //
+  // KNOWN RESIDUAL: this only restores the triggering session. For
+  // target: 'oldest'/'all_except_one' a kill can also target some OTHER
+  // session that itself raced into existence after the last cache write; that
+  // session is not sessionRow, so this fix doesn't reach it and a delay-0
+  // re-check for those targets can still race rediscovery by milliseconds.
+  // Accepted follow-up, not fixed here.
+  const activeSessions = buildRuleContextSessions(countableCachedSessions, sessionRow, null);
 
   // Identity aggregation runs unconditionally here, mirroring the live poller
   // (processor.ts) - detection-side identity counting is NOT gated by

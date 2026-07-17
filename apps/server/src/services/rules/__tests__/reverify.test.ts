@@ -428,12 +428,9 @@ describe('reverifyKillCondition', () => {
       return map;
     });
 
-    const triggeringActiveSession = {
-      id: sessionRow.id,
-      serverUserId: sessionRow.serverUserId,
-      deviceId: 'device-a',
-      ipAddress: '10.0.0.1',
-    } as Session;
+    // The triggering session is NOT in the cache here: this is the true
+    // post-enqueue production state (wasTerminatedByRule skips adding it),
+    // not a stand-in for it. Only the sibling identity account is cached.
     const siblingActiveSession = {
       id: 'sibling-active-session',
       serverUserId: siblingServerUserId,
@@ -441,9 +438,7 @@ describe('reverifyKillCondition', () => {
       ipAddress: '10.0.0.2',
     } as Session;
     mockGetCacheService.mockReturnValue({
-      getAllActiveSessions: vi
-        .fn()
-        .mockResolvedValue([triggeringActiveSession, siblingActiveSession]),
+      getAllActiveSessions: vi.fn().mockResolvedValue([siblingActiveSession]),
     } as never);
 
     mockTerminateSession.mockResolvedValue({
@@ -452,11 +447,68 @@ describe('reverifyKillCondition', () => {
       outcome: 'terminated',
     });
 
-    // Without unconditional identity aggregation, only the triggering
-    // account's session is counted (1), the concurrent_streams == 2
-    // condition clears, and this would wrongly abort as
-    // skipped_condition_cleared even though live evaluation (which never
-    // gates this on enforceAcrossServers) matched both accounts together.
+    // Without unconditional identity aggregation, only the sibling account's
+    // session is counted (1), the concurrent_streams == 2 condition clears,
+    // and this would wrongly abort as skipped_condition_cleared even though
+    // live evaluation (which never gates this on enforceAcrossServers)
+    // matched both accounts together.
+    const result = await reverifyKillCondition({
+      sessionId: sessionRow.id,
+      serverId: sessionRow.serverId,
+      ruleId: ruleRow.id,
+    });
+
+    expect(result.outcome).toBe('killed');
+    expect(mockTerminateSession).toHaveBeenCalledWith({
+      sessionId: sessionRow.id,
+      trigger: 'rule',
+      ruleId: ruleRow.id,
+      reason: undefined,
+    });
+  });
+
+  it('kills the triggering session when it is absent from the cache and only it plus one other session clear concurrent_streams', async () => {
+    // This is the actual state reverify runs against at delay_seconds 0 for
+    // target: triggering - createSessionWithRulesAtomic's wasTerminatedByRule
+    // check keeps the triggering session out of the active-session cache once
+    // its kill job is enqueued, so nothing has re-added it by fire time.
+    const actualEngine = await vi.importActual<typeof EngineModule>('../engine.js');
+    mockEvaluateRulesAsync.mockImplementation(actualEngine.evaluateRulesAsync);
+
+    const sessionRow = makeSessionRow();
+    mockSessionFindFirst.mockResolvedValue(sessionRow);
+
+    const ruleRow = makeRuleRow({
+      enforceAcrossServers: false,
+      conditions: {
+        groups: [{ conditions: [{ field: 'concurrent_streams', operator: 'gte', value: 2 }] }],
+      },
+    });
+    mockRuleSelect(ruleRow);
+
+    // No identity widening in play - a single-account identity.
+    mockBatchGetIdentityServerUserIds.mockResolvedValue(new Map());
+    mockBatchGetRecentUserSessions.mockResolvedValue(new Map());
+
+    const otherActiveSession = {
+      id: 'other-active-session',
+      serverUserId: sessionRow.serverUserId,
+      deviceId: 'device-other',
+      ipAddress: '10.0.0.9',
+    } as Session;
+    mockGetCacheService.mockReturnValue({
+      getAllActiveSessions: vi.fn().mockResolvedValue([otherActiveSession]),
+    } as never);
+
+    mockTerminateSession.mockResolvedValue({
+      success: true,
+      terminationLogId: randomUUID(),
+      outcome: 'terminated',
+    });
+
+    // Cache alone only has the one other session. Unless the triggering
+    // session is appended back into the evaluation context, concurrent_streams
+    // sees a count of 1 against >= 2 and self-aborts.
     const result = await reverifyKillCondition({
       sessionId: sessionRow.id,
       serverId: sessionRow.serverId,
