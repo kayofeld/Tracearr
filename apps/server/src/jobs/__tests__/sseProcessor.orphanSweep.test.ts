@@ -81,4 +81,40 @@ describe('sweepOrphanedPendingSessions', () => {
     // Nothing was swept, so the deferred flush must not fire
     expect(mockCacheService.invalidateDashboardStatsCache).not.toHaveBeenCalled();
   });
+
+  it('resolves instead of rejecting when getAllPendingSessionKeys throws', async () => {
+    const mockCacheService = {
+      getAllPendingSessionKeys: vi.fn().mockRejectedValue(new Error('redis down')),
+      getPendingSession: vi.fn(),
+      deletePendingSession: vi.fn(),
+      removeActiveSession: vi.fn(),
+      invalidateDashboardStatsCache: vi.fn(),
+    } as unknown as CacheService;
+
+    const { sweepOrphanedPendingSessions } = await import('../sseProcessor.js');
+
+    // A Redis outage at a 30s reconciliation tick must degrade to a logged
+    // error, not a rejected promise that surfaces as an unhandledRejection.
+    await expect(sweepOrphanedPendingSessions(mockCacheService)).resolves.toBeUndefined();
+  });
+
+  it('resolves instead of rejecting when the deferred dashboard flush throws', async () => {
+    const mockCacheService = {
+      getAllPendingSessionKeys: vi
+        .fn()
+        .mockResolvedValue([{ serverId: 'server-1', sessionKey: 'old-session' }]),
+      getPendingSession: vi.fn().mockResolvedValue({
+        id: 'session-id-old',
+        lastSeenAt: Date.now() - 3 * 60 * 1000,
+        serverUser: { id: 'user-1' },
+      }),
+      deletePendingSession: vi.fn(),
+      removeActiveSession: vi.fn(),
+      invalidateDashboardStatsCache: vi.fn().mockRejectedValue(new Error('redis down')),
+    } as unknown as CacheService;
+
+    const { sweepOrphanedPendingSessions } = await import('../sseProcessor.js');
+
+    await expect(sweepOrphanedPendingSessions(mockCacheService)).resolves.toBeUndefined();
+  });
 });

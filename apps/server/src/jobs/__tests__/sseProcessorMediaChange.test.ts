@@ -29,6 +29,7 @@ const {
   mockBuildActiveSession,
   mockGetActiveRulesV2,
   mockBatchGetRecentUserSessions,
+  mockGetServerUserIdByExternalId,
   mockBroadcastViolations,
   mockCreateMediaServerClient,
   mockDb,
@@ -45,6 +46,7 @@ const {
     mockBuildActiveSession: vi.fn(),
     mockGetActiveRulesV2: vi.fn().mockResolvedValue([]),
     mockBatchGetRecentUserSessions: vi.fn().mockResolvedValue(new Map()),
+    mockGetServerUserIdByExternalId: vi.fn().mockResolvedValue('server-user-1'),
     mockBroadcastViolations: vi.fn(),
     mockCreateMediaServerClient: vi.fn(),
     mockDb: {
@@ -119,6 +121,7 @@ vi.mock('../poller/stateTracker.js', async () => {
 vi.mock('../poller/database.js', () => ({
   getActiveRulesV2: mockGetActiveRulesV2,
   batchGetRecentUserSessions: mockBatchGetRecentUserSessions,
+  getServerUserIdByExternalId: mockGetServerUserIdByExternalId,
   mergeRecentSessionsForIdentity: (map: Map<string, unknown[]>, ids: string[]) =>
     ids.flatMap((id) => map.get(id) ?? []),
 }));
@@ -360,6 +363,9 @@ describe('SSE Processor - Media Change Detection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSseManager.removeAllListeners();
+    // clearAllMocks wipes call history but not implementations, so restore the
+    // matching-user default here; the sessionKey-reuse tests override it.
+    mockGetServerUserIdByExternalId.mockResolvedValue('server-user-1');
 
     initializeSSEProcessor(mockCacheService as never, mockPubSubService as never);
     startSSEProcessor();
@@ -544,6 +550,63 @@ describe('SSE Processor - Media Change Detection', () => {
     expect(mockCacheService.removeActiveSession).not.toHaveBeenCalled();
     expect(mockCacheService.addActiveSession).not.toHaveBeenCalled();
     expect(mockPubSubService.publish).not.toHaveBeenCalled();
+  });
+
+  it('does not route a different user through media change when Plex reuses a stale sessionKey', async () => {
+    // Plex resets sessionKey counters on PMS restart, so a stale open row from
+    // user A can carry the same sessionKey a new play from user B now uses.
+    // Different ratingKey would otherwise route to a cross-user media change
+    // that attributes B's play to A.
+    const staleRowUserA = {
+      ...mockExistingSession,
+      serverUserId: 'server-user-A',
+      ratingKey: '1001',
+    };
+    setupFetchFullSession(mockProcessedSession); // ratingKey 1002, externalUserId plex-user-1
+    stubFaithfulFindActiveSession(staleRowUserA);
+    mockGetServerUserIdByExternalId.mockResolvedValue('server-user-B');
+
+    mockSseManager.emit('plex:session:playing', {
+      serverId: SERVER_ID,
+      notification: { sessionKey: '42', viewOffset: 0 },
+    });
+
+    await vi.waitFor(
+      () => {
+        expect(mockGetServerUserIdByExternalId).toHaveBeenCalled();
+      },
+      { timeout: 2000 }
+    );
+
+    expect(mockHandleMediaChangeAtomic).not.toHaveBeenCalled();
+  });
+
+  it('does not write a different user into a stale same-content row on sessionKey reuse', async () => {
+    const staleRowUserA = {
+      ...mockExistingSession,
+      serverUserId: 'server-user-A',
+      ratingKey: '1001',
+    };
+    // Same ratingKey as the stale row: without the guard this writes B's
+    // progress/state into A's row through updateExistingSession.
+    setupFetchFullSession({ ...mockProcessedSession, ratingKey: '1001' });
+    stubFaithfulFindActiveSession(staleRowUserA);
+    mockGetServerUserIdByExternalId.mockResolvedValue('server-user-B');
+
+    mockSseManager.emit('plex:session:playing', {
+      serverId: SERVER_ID,
+      notification: { sessionKey: '42', viewOffset: 5000 },
+    });
+
+    await vi.waitFor(
+      () => {
+        expect(mockGetServerUserIdByExternalId).toHaveBeenCalled();
+      },
+      { timeout: 2000 }
+    );
+
+    expect(mockHandleMediaChangeAtomic).not.toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
   });
 
   it('cleans up the quality-change twin when the media change lands on already-tracked content', async () => {

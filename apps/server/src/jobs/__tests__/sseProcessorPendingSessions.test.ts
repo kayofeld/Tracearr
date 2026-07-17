@@ -391,7 +391,12 @@ describe('SSE Processor - Pending Session Flow', () => {
   describe('handleStopped - Phantom Session Detection', () => {
     it('discards pending session when stopped before confirmation (phantom session)', async () => {
       const pendingSession = createMockPendingSession();
-      mockCacheService.getPendingSession.mockResolvedValueOnce(pendingSession);
+      // First call is handleStopped's own pending check; second is the in-lock
+      // recheck inside discardPendingSession. Both see the entry present so the
+      // discard removes it as a phantom.
+      mockCacheService.getPendingSession
+        .mockResolvedValueOnce(pendingSession)
+        .mockResolvedValueOnce(pendingSession);
 
       // Emit stopped event
       mockSseManager.emit('plex:session:stopped', {
@@ -578,6 +583,58 @@ describe('SSE Processor - Pending Session Flow', () => {
       });
     });
 
+    it('closes the persisted row through the stop path when a discard loses the race to a concurrent confirm', async () => {
+      // Age > 30s but observed progress < 15s: a progress event can confirm+
+      // persist this session while a concurrent stopped event tries to discard
+      // it as a phantom. The discard must not evict the just-confirmed session.
+      const pendingSession = createMockPendingSession({
+        confirmation: {
+          confirmedPlayback: false,
+          firstSeenAt: Date.now(),
+          maxViewOffset: 10000,
+          initialViewOffset: 2000,
+        },
+      });
+
+      // handleStopped's own pending check still sees the entry (progress < 15s
+      // routes it to discardPendingSession). By the time the discard takes the
+      // lock and rechecks, a concurrent confirm has already persisted the row
+      // and deleted the pending entry.
+      mockCacheService.getPendingSession
+        .mockResolvedValueOnce(pendingSession)
+        .mockResolvedValueOnce(null);
+
+      const persistedRow = {
+        id: pendingSession.id,
+        serverId: 'server-123',
+        sessionKey: 'test-session-key',
+        serverUserId: 'server-user-123',
+      };
+      mockFindActiveSessionsAll.mockResolvedValueOnce([persistedRow]);
+
+      mockSseManager.emit('plex:session:stopped', {
+        serverId: 'server-123',
+        notification: { sessionKey: 'test-session-key', viewOffset: 10000 },
+      });
+
+      // The discard found no pending entry, so it must fall through to the
+      // normal stop path and close the concurrently-persisted row instead of
+      // bare-evicting the freshly confirmed session.
+      await vi.waitFor(() => {
+        expect(mockFindActiveSessionsAll).toHaveBeenCalledWith({
+          serverId: 'server-123',
+          sessionKey: 'test-session-key',
+        });
+      });
+
+      await vi.waitFor(() => {
+        expect(mockStopSessionAtomic).toHaveBeenCalledWith({
+          session: persistedRow,
+          stoppedAt: expect.any(Date),
+        });
+      });
+    });
+
     it('discards a pending session with < 15s of observed progress when stopped', async () => {
       const pendingSession = createMockPendingSession({
         confirmation: {
@@ -587,7 +644,12 @@ describe('SSE Processor - Pending Session Flow', () => {
           initialViewOffset: 2000,
         },
       });
-      mockCacheService.getPendingSession.mockResolvedValueOnce(pendingSession);
+      // First call is handleStopped's own pending check; second is the in-lock
+      // recheck inside discardPendingSession. Both see the entry present so the
+      // discard removes it as a phantom.
+      mockCacheService.getPendingSession
+        .mockResolvedValueOnce(pendingSession)
+        .mockResolvedValueOnce(pendingSession);
 
       // Emit stopped event
       mockSseManager.emit('plex:session:stopped', {
@@ -908,7 +970,11 @@ describe('SSE Processor - Pending Session Flow', () => {
           mediaTitle: 'Episode 1',
         },
       });
-      mockCacheService.getPendingSession.mockResolvedValueOnce(pendingSession);
+      // First call is handlePlaying's own pending check; second is the in-lock
+      // recheck inside discardPendingSession when the media-change discard runs.
+      mockCacheService.getPendingSession
+        .mockResolvedValueOnce(pendingSession)
+        .mockResolvedValueOnce(pendingSession);
 
       // Setup db to return server
       setupDbForFetchSession();

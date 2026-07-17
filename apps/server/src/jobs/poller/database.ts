@@ -178,6 +178,28 @@ export async function batchGetIdentityServerUserIds(
   return result;
 }
 
+/**
+ * Resolve the local server_user id for an external account id on a server.
+ * Returns null when no matching server user exists.
+ *
+ * Used to verify that an active session row belongs to the user of an incoming
+ * event before reusing it: Plex resets sessionKey counters on PMS restart, so a
+ * stale open row can carry the same sessionKey a different user's new play now
+ * uses.
+ */
+export async function getServerUserIdByExternalId(
+  serverId: string,
+  externalId: string
+): Promise<string | null> {
+  const rows = await db
+    .select({ id: serverUsers.id })
+    .from(serverUsers)
+    .where(and(eq(serverUsers.serverId, serverId), eq(serverUsers.externalId, externalId)))
+    .limit(1);
+
+  return rows[0]?.id ?? null;
+}
+
 // ============================================================================
 // Rule Loading
 // ============================================================================

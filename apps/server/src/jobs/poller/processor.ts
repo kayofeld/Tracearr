@@ -1094,7 +1094,7 @@ async function processServerSessions(
           // incoming ratingKey here would drop the still-active old row on a
           // real media change (same sessionKey, new ratingKey) and leave the
           // detectMediaChange branch below unreachable.
-          const existingSession =
+          const existingRow =
             server.type === 'plex'
               ? (plexActiveBatch.get(processed.sessionKey)?.[0] ?? null)
               : ((
@@ -1102,6 +1102,16 @@ async function processServerSessions(
                 ).find((r) =>
                   processed.deviceId ? r.deviceId === processed.deviceId : r.deviceId === null
                 ) ?? null);
+
+          // Plex reuses sessionKey counters across PMS restarts, so a stale open
+          // row matched by sessionKey alone can belong to a different user than
+          // this play. Only reuse the row when its server user matches;
+          // otherwise treat it as no match so the stale row falls to the
+          // stale-sweep and this play creates fresh under the correct user. The
+          // composite (JF/Emby) key already includes userDetail.id, so this is a
+          // no-op there.
+          const existingSession =
+            existingRow && existingRow.serverUserId !== userDetail.id ? null : existingRow;
 
           // Skip the GeoIP lookup when the IP matches the existing row - reuse its geo data.
           const geo: GeoLocation =

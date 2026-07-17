@@ -320,6 +320,20 @@ describe('poller routes a real next-episode transition through the media-change 
     expect(mockCreateSessionWithRulesAtomic).not.toHaveBeenCalled();
   });
 
+  it('does not route a different user through media change when a stale row reuses the sessionKey', async () => {
+    // Plex resets sessionKey counters on PMS restart, so the batched lookup can
+    // return an open row that belongs to a different user than the current
+    // play. Matching by sessionKey alone would stop that user's row and
+    // reattribute the new play.
+    const staleUserRow = { ...oldSessionRow, serverUserId: 'su-STALE' };
+    mockBatchFindActiveSessionsByKey.mockResolvedValue(new Map([['sk-42', [staleUserRow]]]));
+
+    await triggerPoll();
+
+    expect(mockHandleMediaChangeAtomic).not.toHaveBeenCalled();
+    expect(cacheService.removeActiveSession).not.toHaveBeenCalledWith('old-id');
+  });
+
   it('takes the normal update path (no media change) when the ratingKey is unchanged', async () => {
     mockCreateMediaServerClient.mockReturnValue({
       getSessions: vi.fn().mockResolvedValue([createMockProcessedSession({ ratingKey: 'rk-old' })]),

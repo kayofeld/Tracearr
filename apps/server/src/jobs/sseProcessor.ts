@@ -32,6 +32,7 @@ import { enqueueNotification } from './notificationQueue.js';
 import {
   batchGetRecentUserSessions,
   getActiveRulesV2,
+  getServerUserIdByExternalId,
   mergeRecentSessionsForIdentity,
 } from './poller/database.js';
 import {
@@ -147,7 +148,10 @@ const wrappedHandlers = {
   paused: (e: SessionEvent) => void handlePaused(e),
   stopped: (e: SessionEvent) => void handleStopped(e),
   progress: (e: SessionEvent) => void handleProgress(e),
-  reconciliation: () => void handleReconciliation(),
+  reconciliation: () =>
+    void handleReconciliation().catch((err: unknown) =>
+      console.error('[SSEProcessor] Error in reconciliation handler:', err)
+    ),
   fallbackActivated: (e: FallbackEvent) => handleFallbackActivated(e),
   fallbackDeactivated: (e: FallbackEvent) =>
     void handleFallbackDeactivated(e).catch((err: unknown) =>
@@ -358,10 +362,27 @@ async function handlePlaying(event: {
     // Look up by sessionKey alone. Passing the incoming ratingKey would filter
     // out the still-active old row on a real media change (same sessionKey, new
     // ratingKey), leaving detectMediaChange below unreachable.
-    const existingSession = await findActiveSession({
+    const existingRow = await findActiveSession({
       serverId,
       sessionKey: notification.sessionKey,
     });
+
+    // Plex resets sessionKey counters on PMS restart, so within the
+    // reconciliation window a stale open row from one user can carry the same
+    // sessionKey a different user's new play now uses. Only reuse the row when
+    // its server user matches this event's user; otherwise treat it as no match
+    // so the stale row falls to its own cleanup and this play creates fresh
+    // under the correct user.
+    let existingSession = existingRow;
+    if (existingRow) {
+      const incomingServerUserId = await getServerUserIdByExternalId(
+        serverId,
+        session.externalUserId
+      );
+      if (incomingServerUserId !== existingRow.serverUserId) {
+        existingSession = null;
+      }
+    }
 
     if (existingSession) {
       // DB doesn't store liveUuid; reuse incoming if mediaType is 'live'
@@ -640,7 +661,6 @@ export async function sweepOrphanedPendingSessions(cache?: CacheService | null):
   const svc = cache ?? cacheService;
   if (!svc) return;
 
-  const pendingKeys = await svc.getAllPendingSessionKeys();
   const now = Date.now();
   let sweptCount = 0;
   let zombieCount = 0;
@@ -649,7 +669,11 @@ export async function sweepOrphanedPendingSessions(cache?: CacheService | null):
   // flag must survive a mid-loop throw, hence the try/finally.
   let dashboardStatsDirty = false;
 
+  // This runs on the 30s reconciliation tick. A Redis or Postgres outage here
+  // must degrade to a logged error, not a rejected promise that surfaces as an
+  // unhandledRejection and crashes the process.
   try {
+    const pendingKeys = await svc.getAllPendingSessionKeys();
     for (const { serverId, sessionKey } of pendingKeys) {
       const pendingData = await svc.getPendingSession(serverId, sessionKey);
       if (!pendingData) {
@@ -672,9 +696,18 @@ export async function sweepOrphanedPendingSessions(cache?: CacheService | null):
         sweptCount++;
       }
     }
+  } catch (error) {
+    console.error('[SSEProcessor] Error sweeping orphaned pending sessions:', error);
   } finally {
     if (dashboardStatsDirty) {
-      await svc.invalidateDashboardStatsCache();
+      try {
+        await svc.invalidateDashboardStatsCache();
+      } catch (error) {
+        console.error(
+          '[SSEProcessor] Error invalidating dashboard stats after orphan sweep:',
+          error
+        );
+      }
     }
   }
 
@@ -693,46 +726,64 @@ export async function sweepOrphanedPendingSessions(cache?: CacheService | null):
  */
 async function processSessionWriteRetries(): Promise<void> {
   if (!cacheService) return;
+  const cache = cacheService;
 
-  const retries = await cacheService.getSessionWriteRetries();
+  // Runs on the reconciliation tick; a Redis/Postgres outage must degrade to a
+  // logged error rather than reject up into the unhandled handler.
+  let retries;
+  try {
+    retries = await cache.getSessionWriteRetries();
+  } catch (error) {
+    console.error('[SSEProcessor] Error loading session write retries:', error);
+    return;
+  }
 
   for (const retry of retries) {
-    if (retry.attempts >= SESSION_WRITE_RETRY.MAX_TOTAL_ATTEMPTS) {
-      clearDbWriteTracking(retry.sessionId);
-      await cacheService.removeSessionWriteRetry(retry.sessionId);
+    // Isolated per retry: a transient error on one entry must not abandon the
+    // rest of the queue for this tick.
+    try {
+      if (retry.attempts >= SESSION_WRITE_RETRY.MAX_TOTAL_ATTEMPTS) {
+        clearDbWriteTracking(retry.sessionId);
+        await cache.removeSessionWriteRetry(retry.sessionId);
+        console.error(
+          `[SSEProcessor] Max retry attempts (${SESSION_WRITE_RETRY.MAX_TOTAL_ATTEMPTS}) ` +
+            `reached for session ${retry.sessionId}, abandoning`
+        );
+        continue;
+      }
+
+      // Attempt to find the session
+      const session = await db
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.id, retry.sessionId), isNull(sessions.stoppedAt)))
+        .limit(1)
+        .then((rows) => rows[0]);
+
+      if (!session) {
+        // Session no longer exists or already stopped
+        clearDbWriteTracking(retry.sessionId);
+        await cache.removeSessionWriteRetry(retry.sessionId);
+        continue;
+      }
+
+      const result = await stopSessionAtomic({
+        session,
+        stoppedAt: new Date(retry.stopData.stoppedAt),
+        forceStopped: retry.stopData.forceStopped,
+      });
+
+      if (result.wasUpdated || !result.needsRetry) {
+        await cache.removeSessionWriteRetry(retry.sessionId);
+        console.log(`[SSEProcessor] Retry succeeded for session ${retry.sessionId}`);
+      } else {
+        await cache.incrementSessionWriteRetry(retry.sessionId);
+      }
+    } catch (error) {
       console.error(
-        `[SSEProcessor] Max retry attempts (${SESSION_WRITE_RETRY.MAX_TOTAL_ATTEMPTS}) ` +
-          `reached for session ${retry.sessionId}, abandoning`
+        `[SSEProcessor] Error processing session write retry for ${retry.sessionId}:`,
+        error
       );
-      continue;
-    }
-
-    // Attempt to find the session
-    const session = await db
-      .select()
-      .from(sessions)
-      .where(and(eq(sessions.id, retry.sessionId), isNull(sessions.stoppedAt)))
-      .limit(1)
-      .then((rows) => rows[0]);
-
-    if (!session) {
-      // Session no longer exists or already stopped
-      clearDbWriteTracking(retry.sessionId);
-      await cacheService.removeSessionWriteRetry(retry.sessionId);
-      continue;
-    }
-
-    const result = await stopSessionAtomic({
-      session,
-      stoppedAt: new Date(retry.stopData.stoppedAt),
-      forceStopped: retry.stopData.forceStopped,
-    });
-
-    if (result.wasUpdated || !result.needsRetry) {
-      await cacheService.removeSessionWriteRetry(retry.sessionId);
-      console.log(`[SSEProcessor] Retry succeeded for session ${retry.sessionId}`);
-    } else {
-      await cacheService.incrementSessionWriteRetry(retry.sessionId);
     }
   }
 }
@@ -1446,16 +1497,39 @@ async function discardPendingSession(
   pendingData: PendingSessionData
 ): Promise<void> {
   if (!cacheService) return;
-
+  const cache = cacheService;
   const sessionId = pendingData.id;
 
-  // Clean up from all caches
-  await cacheService.deletePendingSession(serverId, sessionKey);
-  await cacheService.removeActiveSession(sessionId);
+  // Take the same lock the confirm path uses and re-read the pending entry.
+  // A concurrent confirm can persist this session and delete the pending entry
+  // before this lock-free discard runs; without the recheck the discard would
+  // evict the freshly confirmed session and leave its DB row open until the
+  // stale sweep.
+  const outcome = await cache.withSessionCreateLock(serverId, sessionKey, async () => {
+    const stillPending = await cache.getPendingSession(serverId, sessionKey);
+    if (!stillPending) {
+      return 'confirmed-elsewhere' as const;
+    }
+    await cache.deletePendingSession(serverId, sessionKey);
+    await cache.removeActiveSession(sessionId);
+    return 'discarded' as const;
+  });
 
-  // Broadcast session:stopped so UI removes it
-  if (pubSubService) {
-    await pubSubService.publish('session:stopped', sessionId);
+  if (outcome === 'discarded') {
+    // Broadcast session:stopped so UI removes the phantom.
+    if (pubSubService) {
+      await pubSubService.publish('session:stopped', sessionId);
+    }
+    return;
+  }
+
+  // A confirm won the race: the pending entry was already persisted ('confirmed
+  // -elsewhere') or the confirm still holds the lock (null). Either way the
+  // pending entry is not this discard's to remove. Close any persisted row
+  // through the normal stop path instead of evicting a live session.
+  const persisted = await findActiveSessionsAll({ serverId, sessionKey });
+  for (const row of persisted) {
+    await stopSession(row);
   }
 }
 

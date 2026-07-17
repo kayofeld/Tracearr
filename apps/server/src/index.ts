@@ -1240,4 +1240,14 @@ async function start() {
   }
 }
 
+// Last-resort safety net. Individual handlers (SSE processor, poller, queues)
+// already catch their own errors; this only catches rejections that slipped
+// every local boundary. It logs loudly and keeps the process alive so a single
+// transient Redis/Postgres blip on a background tick cannot take the server
+// down. Tradeoff: a genuinely fatal rejection no longer crashes the process, so
+// a latent bug can be masked - the loud log is the signal to investigate.
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled promise rejection (kept alive):', reason);
+});
+
 void start();
