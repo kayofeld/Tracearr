@@ -126,7 +126,7 @@ vi.mock('../poller/sessionLifecycle.js', async () => {
   // handleQualityChangeFallout is left as the real implementation so the
   // media-change-onto-tracked-content test can observe its actual throttle/
   // cache/publish effects on the twin, not just that it was called.
-  const actual = await vi.importActual<typeof import('../poller/sessionLifecycle.js')>(
+  const actual = await vi.importActual<typeof SessionLifecycleModule>(
     '../poller/sessionLifecycle.js'
   );
   return {
@@ -146,6 +146,7 @@ vi.mock('../poller/sessionLifecycle.js', async () => {
 // ============================================================================
 
 import { initializeSSEProcessor, startSSEProcessor, stopSSEProcessor } from '../sseProcessor.js';
+import type * as SessionLifecycleModule from '../poller/sessionLifecycle.js';
 
 // ============================================================================
 // Test fixtures

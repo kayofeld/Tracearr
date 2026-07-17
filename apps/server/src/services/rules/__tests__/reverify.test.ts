@@ -44,6 +44,7 @@ import { getCacheService } from '../../cache.js';
 import { terminateSession } from '../../termination.js';
 import { evaluateRulesAsync } from '../engine.js';
 import { reverifyKillCondition } from '../reverify.js';
+import type * as EngineModule from '../engine.js';
 import {
   batchGetIdentityServerUserIds,
   batchGetRecentUserSessions,
@@ -403,7 +404,7 @@ describe('reverifyKillCondition', () => {
   });
 
   it('kills a merged-identity user under a rule without enforceAcrossServers when both accounts together clear the condition', async () => {
-    const actualEngine = await vi.importActual<typeof import('../engine.js')>('../engine.js');
+    const actualEngine = await vi.importActual<typeof EngineModule>('../engine.js');
     mockEvaluateRulesAsync.mockImplementation(actualEngine.evaluateRulesAsync);
 
     const sessionRow = makeSessionRow();

@@ -116,7 +116,7 @@ vi.mock('../sessionLifecycle.js', () => ({
 }));
 
 vi.mock('../stateTracker.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../stateTracker.js')>();
+  const actual = await importOriginal<typeof StateTrackerModule>();
   return {
     ...actual,
     detectMediaChange: (...args: Parameters<typeof actual.detectMediaChange>) =>
@@ -134,6 +134,7 @@ vi.mock('../sessionMapper.js', () => ({
 }));
 
 import { servers, serverUsers, sessions as sessionsTable } from '../../../db/schema.js';
+import type * as StateTrackerModule from '../stateTracker.js';
 import {
   gracePeriodSessionIds,
   initializePoller,
