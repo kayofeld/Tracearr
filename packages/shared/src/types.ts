@@ -706,6 +706,7 @@ export interface ResetTrustAction {
 
 export interface KillStreamAction {
   type: 'kill_stream';
+  /** Seconds to wait before killing. The kill only fires if the rule condition still holds after the wait; 0 (default) still re-checks once before killing. */
   delay_seconds?: number;
   require_confirmation?: boolean;
   cooldown_minutes?: number;
