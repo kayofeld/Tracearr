@@ -828,6 +828,29 @@ describe('CacheService', () => {
       // Should not throw
       await expect(cache.removeActiveSession('non-existent')).resolves.not.toThrow();
     });
+
+    it('skips dashboard invalidation when skipDashboardInvalidation is set', async () => {
+      const session = createTestActiveSession('session-1');
+      await cache.addActiveSession(session);
+      (redis.scan as any).mockClear();
+
+      await cache.removeActiveSession('session-1', { skipDashboardInvalidation: true });
+
+      expect(redis.scan).not.toHaveBeenCalled();
+      // Set membership removal still happens immediately.
+      const ids = await redis.smembers('tracearr:sessions:active:ids');
+      expect(ids).not.toContain('session-1');
+    });
+
+    it('still invalidates dashboard stats when skipDashboardInvalidation is false', async () => {
+      const session = createTestActiveSession('session-1');
+      await cache.addActiveSession(session);
+      (redis.scan as any).mockClear();
+
+      await cache.removeActiveSession('session-1', { skipDashboardInvalidation: false });
+
+      expect(redis.scan).toHaveBeenCalled();
+    });
   });
 
   describe('getAllActiveSessions', () => {

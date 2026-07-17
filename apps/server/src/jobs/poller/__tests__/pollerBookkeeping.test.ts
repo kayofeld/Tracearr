@@ -255,7 +255,7 @@ describe('(a) missedPollTracking pruning for servers no longer polled', () => {
     expect(mockEnqueueNotification.mock.calls.some(([arg]) => arg.type === 'session_stopped')).toBe(
       false
     );
-    expect(cacheService.removeActiveSession).not.toHaveBeenCalledWith('active-1-id');
+    expect(cacheService.removeActiveSession).not.toHaveBeenCalled();
     expect(pubSubService.publish).not.toHaveBeenCalledWith('session:stopped', 'active-1-id');
   });
 
@@ -281,7 +281,10 @@ describe('(a) missedPollTracking pruning for servers no longer polled', () => {
     );
     expect(stopNotification).toBeDefined();
     expect(stopNotification![0].payload.id).toBe('active-2-id');
-    expect(cacheService.removeActiveSession).toHaveBeenCalledWith('active-2-id');
+    expect(cacheService.removeActiveSession).toHaveBeenCalledWith('active-2-id', {
+      skipDashboardInvalidation: true,
+    });
+    expect(cacheService.invalidateDashboardStatsCache).toHaveBeenCalled();
     expect(pubSubService.publish).toHaveBeenCalledWith('session:stopped', 'active-2-id');
   });
 });
@@ -406,7 +409,10 @@ describe('(d) allServers empty (last server deleted)', () => {
     );
     expect(stopNotification).toBeDefined();
     expect(stopNotification![0].payload.id).toBe('active-1-id');
-    expect(cacheService.removeActiveSession).toHaveBeenCalledWith('active-1-id');
+    expect(cacheService.removeActiveSession).toHaveBeenCalledWith('active-1-id', {
+      skipDashboardInvalidation: true,
+    });
+    expect(cacheService.invalidateDashboardStatsCache).toHaveBeenCalled();
     expect(pubSubService.publish).toHaveBeenCalledWith('session:stopped', 'active-1-id');
   });
 });

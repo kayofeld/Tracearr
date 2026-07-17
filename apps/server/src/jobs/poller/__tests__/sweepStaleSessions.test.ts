@@ -170,4 +170,36 @@ describe('sweepStaleSessions notifications', () => {
 
     expect(mockEnqueueNotification).not.toHaveBeenCalled();
   });
+
+  it('removes the cache entry without invalidating per-session, then invalidates dashboard stats once', async () => {
+    mockDbSequence([staleSessionRow], [serverRow], [serverUserRow]);
+    mockStopSessionAtomic.mockResolvedValue({
+      durationMs: 456000,
+      watched: true,
+      shortSession: false,
+      wasUpdated: true,
+    });
+
+    await sweepStaleSessions();
+
+    expect(cacheService.removeActiveSession).toHaveBeenCalledWith('session-1', {
+      skipDashboardInvalidation: true,
+    });
+    expect(cacheService.invalidateDashboardStatsCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not invalidate dashboard stats when no session was actually force-stopped', async () => {
+    mockDbSequence([staleSessionRow], [serverRow], [serverUserRow]);
+    mockStopSessionAtomic.mockResolvedValue({
+      durationMs: null,
+      watched: false,
+      shortSession: false,
+      wasUpdated: false,
+    });
+
+    await sweepStaleSessions();
+
+    expect(cacheService.removeActiveSession).not.toHaveBeenCalled();
+    expect(cacheService.invalidateDashboardStatsCache).not.toHaveBeenCalled();
+  });
 });

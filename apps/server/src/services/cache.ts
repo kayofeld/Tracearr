@@ -16,7 +16,13 @@ export interface CacheService {
 
   // Active sessions (atomic SET-based operations)
   addActiveSession(session: ActiveSession): Promise<void>;
-  removeActiveSession(sessionId: string): Promise<void>;
+  // skipDashboardInvalidation: for callers removing many sessions in one wave
+  // (grace/stale sweeps) - they invalidate once after the loop instead of
+  // paying a SCAN per removal.
+  removeActiveSession(
+    sessionId: string,
+    opts?: { skipDashboardInvalidation?: boolean }
+  ): Promise<void>;
   getActiveSessionIds(): Promise<string[]>;
   getAllActiveSessions(): Promise<ActiveSession[]>;
   updateActiveSession(session: ActiveSession): Promise<void>;
@@ -187,7 +193,10 @@ export function createCacheService(redis: Redis): CacheService {
       await invalidateDashboardStats();
     },
 
-    async removeActiveSession(sessionId: string): Promise<void> {
+    async removeActiveSession(
+      sessionId: string,
+      opts?: { skipDashboardInvalidation?: boolean }
+    ): Promise<void> {
       const pipeline = redis.multi();
       // Remove from active sessions SET (atomic)
       pipeline.srem(REDIS_KEYS.ACTIVE_SESSION_IDS, sessionId);
@@ -197,8 +206,10 @@ export function createCacheService(redis: Redis): CacheService {
       if (!results || results.some(([err]) => err !== null)) {
         console.error('[Cache] removeActiveSession pipeline failed:', results);
       }
-      // Invalidate dashboard stats (uses pattern matching for timezone-specific keys)
-      await invalidateDashboardStats();
+      if (!opts?.skipDashboardInvalidation) {
+        // Invalidate dashboard stats (uses pattern matching for timezone-specific keys)
+        await invalidateDashboardStats();
+      }
     },
 
     async getActiveSessionIds(): Promise<string[]> {

@@ -236,59 +236,72 @@ async function sweepGracePeriod(
   serverTypeMap: Map<string, string>,
   currentSessionKeys?: Set<string>
 ): Promise<void> {
-  for (const key of keysToSweep) {
-    if (currentSessionKeys?.has(key)) continue; // Reappeared
+  // Dashboard invalidation is deferred to one call after the loop (instead of
+  // one SCAN per removed session) - the flag must survive a mid-loop throw,
+  // hence the outer try/finally rather than folding this into the return path.
+  let dashboardStatsDirty = false;
+  try {
+    for (const key of keysToSweep) {
+      if (currentSessionKeys?.has(key)) continue; // Reappeared
 
-    try {
-      const snapshot = missedPollTracking.get(key);
-      if (!snapshot) {
-        missedPollTracking.delete(key);
+      try {
+        const snapshot = missedPollTracking.get(key);
+        if (!snapshot) {
+          missedPollTracking.delete(key);
+          continue;
+        }
+
+        const serverType = serverTypeMap.get(serverId);
+        const session =
+          serverType && serverType !== 'plex'
+            ? await findActiveSessionByComposite({
+                serverId,
+                serverUserId: snapshot.serverUserId,
+                deviceId: snapshot.deviceId || null,
+                ratingKey: snapshot.ratingKey ?? '',
+              })
+            : await findActiveSession({ serverId, sessionKey: snapshot.sessionKey });
+        if (session) {
+          // session.lastSeenAt is the last poll that confirmed this session
+          // alive - it vanished 1-2 polls before this sweep, so `new Date()`
+          // would bill the grace-period gap itself as watch time.
+          const { wasUpdated, durationMs, needsRetry, retryData } = await stopSessionAtomic({
+            session,
+            stoppedAt: session.lastSeenAt,
+          });
+          clearDbWriteTracking(session.id);
+          if (needsRetry && retryData && cacheService) {
+            await cacheService.addSessionWriteRetry(session.id, retryData);
+          }
+          if (wasUpdated) {
+            await sendGracePeriodStopNotification(key, snapshot, durationMs);
+          }
+        } else {
+          console.log(
+            `[Poller] Grace period: session for ${key} already stopped by another process`
+          );
+        }
+
+        // Confirmed miss: now remove from cache and broadcast the stop. This was
+        // deferred from handleFirstMisses so a one-off bad poll can't flush the
+        // dashboard before the grace period confirms the session really ended.
+        if (cacheService) {
+          await cacheService.removeActiveSession(snapshot.id, { skipDashboardInvalidation: true });
+          dashboardStatsDirty = true;
+        }
+        if (pubSubService) {
+          await pubSubService.publish('session:stopped', snapshot.id);
+        }
+      } catch (err) {
+        console.error(`[Poller] Grace period sweep failed for ${key}, will retry next poll:`, err);
         continue;
       }
-
-      const serverType = serverTypeMap.get(serverId);
-      const session =
-        serverType && serverType !== 'plex'
-          ? await findActiveSessionByComposite({
-              serverId,
-              serverUserId: snapshot.serverUserId,
-              deviceId: snapshot.deviceId || null,
-              ratingKey: snapshot.ratingKey ?? '',
-            })
-          : await findActiveSession({ serverId, sessionKey: snapshot.sessionKey });
-      if (session) {
-        // session.lastSeenAt is the last poll that confirmed this session
-        // alive - it vanished 1-2 polls before this sweep, so `new Date()`
-        // would bill the grace-period gap itself as watch time.
-        const { wasUpdated, durationMs, needsRetry, retryData } = await stopSessionAtomic({
-          session,
-          stoppedAt: session.lastSeenAt,
-        });
-        clearDbWriteTracking(session.id);
-        if (needsRetry && retryData && cacheService) {
-          await cacheService.addSessionWriteRetry(session.id, retryData);
-        }
-        if (wasUpdated) {
-          await sendGracePeriodStopNotification(key, snapshot, durationMs);
-        }
-      } else {
-        console.log(`[Poller] Grace period: session for ${key} already stopped by another process`);
-      }
-
-      // Confirmed miss: now remove from cache and broadcast the stop. This was
-      // deferred from handleFirstMisses so a one-off bad poll can't flush the
-      // dashboard before the grace period confirms the session really ended.
-      if (cacheService) {
-        await cacheService.removeActiveSession(snapshot.id);
-      }
-      if (pubSubService) {
-        await pubSubService.publish('session:stopped', snapshot.id);
-      }
-    } catch (err) {
-      console.error(`[Poller] Grace period sweep failed for ${key}, will retry next poll:`, err);
-      continue;
+      missedPollTracking.delete(key);
     }
-    missedPollTracking.delete(key);
+  } finally {
+    if (dashboardStatsDirty && cacheService) {
+      await cacheService.invalidateDashboardStatsCache();
+    }
   }
 }
 
@@ -318,32 +331,43 @@ async function pruneMissedPollTracking(
   const pollableServerIds = new Set(serversNeedingPoll.map((server) => server.id));
   const existingServerIds = new Set(allServers.map((server) => server.id));
   const now = new Date();
+  // Same deferred-invalidation shape as sweepGracePeriod: one flush after the
+  // loop, kept behind try/finally so a throw partway through still flushes
+  // whatever was already removed.
+  let dashboardStatsDirty = false;
 
-  for (const [key, snapshot] of missedPollTracking) {
-    if (pollableServerIds.has(snapshot.serverId)) continue;
+  try {
+    for (const [key, snapshot] of missedPollTracking) {
+      if (pollableServerIds.has(snapshot.serverId)) continue;
 
-    if (existingServerIds.has(snapshot.serverId)) {
+      if (existingServerIds.has(snapshot.serverId)) {
+        missedPollTracking.delete(key);
+        continue;
+      }
+
+      const { durationMs } = calculateStopDuration(
+        {
+          startedAt: snapshot.startedAt,
+          lastPausedAt: snapshot.lastPausedAt,
+          pausedDurationMs: snapshot.pausedDurationMs ?? 0,
+          progressMs: snapshot.progressMs,
+        },
+        now
+      );
+      await sendGracePeriodStopNotification(key, snapshot, durationMs);
+      if (cacheService) {
+        await cacheService.removeActiveSession(snapshot.id, { skipDashboardInvalidation: true });
+        dashboardStatsDirty = true;
+      }
+      if (pubSubService) {
+        await pubSubService.publish('session:stopped', snapshot.id);
+      }
       missedPollTracking.delete(key);
-      continue;
     }
-
-    const { durationMs } = calculateStopDuration(
-      {
-        startedAt: snapshot.startedAt,
-        lastPausedAt: snapshot.lastPausedAt,
-        pausedDurationMs: snapshot.pausedDurationMs ?? 0,
-        progressMs: snapshot.progressMs,
-      },
-      now
-    );
-    await sendGracePeriodStopNotification(key, snapshot, durationMs);
-    if (cacheService) {
-      await cacheService.removeActiveSession(snapshot.id);
+  } finally {
+    if (dashboardStatsDirty && cacheService) {
+      await cacheService.invalidateDashboardStatsCache();
     }
-    if (pubSubService) {
-      await pubSubService.publish('session:stopped', snapshot.id);
-    }
-    missedPollTracking.delete(key);
   }
 }
 
@@ -1856,61 +1880,69 @@ export async function sweepStaleSessions(): Promise<number> {
     const staleServerById = new Map(staleServerRows.map((row) => [row.id, row]));
     const staleServerUserById = new Map(staleServerUserRows.map((row) => [row.id, row]));
 
-    for (const staleSession of staleSessions) {
-      // Check if session should be force-stopped (using the stateTracker function)
-      if (!shouldForceStopStaleSession(staleSession.lastSeenAt)) {
-        // Shouldn't happen since we already filtered, but double-check
-        continue;
-      }
+    // Dashboard invalidation is deferred to one call after the loop (instead
+    // of one SCAN per force-stopped session); try/finally so the flag still
+    // flushes if a later iteration throws.
+    let dashboardStatsDirty = false;
+    try {
+      for (const staleSession of staleSessions) {
+        // Check if session should be force-stopped (using the stateTracker function)
+        if (!shouldForceStopStaleSession(staleSession.lastSeenAt)) {
+          // Shouldn't happen since we already filtered, but double-check
+          continue;
+        }
 
-      const { wasUpdated, durationMs, needsRetry, retryData } = await stopSessionAtomic({
-        session: staleSession,
-        stoppedAt: now,
-        forceStopped: true,
-      });
-      clearDbWriteTracking(staleSession.id);
-
-      if (needsRetry && retryData && cacheService) {
-        await cacheService.addSessionWriteRetry(staleSession.id, retryData);
-      }
-
-      if (!wasUpdated) {
-        continue;
-      }
-
-      if (cacheService) {
-        await cacheService.removeActiveSession(staleSession.id);
-      }
-
-      if (pubSubService) {
-        await pubSubService.publish('session:stopped', staleSession.id);
-      }
-
-      const server = staleServerById.get(staleSession.serverId);
-      const user = staleServerUserById.get(staleSession.serverUserId);
-      if (server && user) {
-        const snapshot = {
-          ...staleSession,
+        const { wasUpdated, durationMs, needsRetry, retryData } = await stopSessionAtomic({
+          session: staleSession,
           stoppedAt: now,
-          user,
-          server,
-          canTerminate: server.type !== 'plex' || !!staleSession.plexSessionId,
-        } as ActiveSession;
-        await sendGracePeriodStopNotification(
-          `${staleSession.serverId}:${staleSession.sessionKey}`,
-          snapshot,
-          durationMs
-        );
-      } else {
-        console.error(
-          `[Poller] Missing server/user for stale session ${staleSession.id}, skipping stop notification`
-        );
-      }
-    }
+          forceStopped: true,
+        });
+        clearDbWriteTracking(staleSession.id);
 
-    // Invalidate dashboard stats after force-stopping sessions
-    if (cacheService) {
-      await cacheService.invalidateDashboardStatsCache();
+        if (needsRetry && retryData && cacheService) {
+          await cacheService.addSessionWriteRetry(staleSession.id, retryData);
+        }
+
+        if (!wasUpdated) {
+          continue;
+        }
+
+        if (cacheService) {
+          await cacheService.removeActiveSession(staleSession.id, {
+            skipDashboardInvalidation: true,
+          });
+          dashboardStatsDirty = true;
+        }
+
+        if (pubSubService) {
+          await pubSubService.publish('session:stopped', staleSession.id);
+        }
+
+        const server = staleServerById.get(staleSession.serverId);
+        const user = staleServerUserById.get(staleSession.serverUserId);
+        if (server && user) {
+          const snapshot = {
+            ...staleSession,
+            stoppedAt: now,
+            user,
+            server,
+            canTerminate: server.type !== 'plex' || !!staleSession.plexSessionId,
+          } as ActiveSession;
+          await sendGracePeriodStopNotification(
+            `${staleSession.serverId}:${staleSession.sessionKey}`,
+            snapshot,
+            durationMs
+          );
+        } else {
+          console.error(
+            `[Poller] Missing server/user for stale session ${staleSession.id}, skipping stop notification`
+          );
+        }
+      }
+    } finally {
+      if (dashboardStatsDirty && cacheService) {
+        await cacheService.invalidateDashboardStatsCache();
+      }
     }
 
     return staleSessions.length;

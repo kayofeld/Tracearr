@@ -687,6 +687,11 @@ export async function createSessionWithRulesAtomic(
   // STEP 2: Check for resume tracking (recently stopped session with same content)
   if (!referenceId && processed.ratingKey) {
     const oneDayAgo = new Date(Date.now() - TIME_MS.DAY);
+    // Time bound reduces TimescaleDB chunk scanning (mirrors STEP 1 above).
+    // A session stopped within the last 24h (oneDayAgo, checked below) by
+    // definition started within the last 7 days (chunkBound), so this adds
+    // no false negatives.
+    const chunkBound = new Date(Date.now() - ACTIVE_SESSION_CHUNK_BOUND_MS);
     const recentSameContent = await db
       .select()
       .from(sessions)
@@ -695,6 +700,7 @@ export async function createSessionWithRulesAtomic(
           eq(sessions.serverUserId, serverUser.id),
           eq(sessions.ratingKey, processed.ratingKey),
           gte(sessions.stoppedAt, oneDayAgo),
+          gte(sessions.startedAt, chunkBound),
           eq(sessions.watched, false)
         )
       )
