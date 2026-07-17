@@ -524,6 +524,8 @@ export interface MediaChangeResult {
   /** Violations created during session creation */
   violationResults: ViolationInsertResult[];
   wasTerminatedByRule: boolean;
+  /** Set when the new session's content was already tracked as another un-stopped session for this user+device; that twin was stopped and must be run through handleQualityChangeFallout */
+  qualityChange: QualityChangeResult | null;
 }
 
 // ============================================================================

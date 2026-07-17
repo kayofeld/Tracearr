@@ -1282,7 +1282,7 @@ export async function handleMediaChangeAtomic(
   }
 
   // STEP 2: Create new session for the new media
-  const { insertedSession, violationResults, wasTerminatedByRule } =
+  const { insertedSession, violationResults, wasTerminatedByRule, qualityChange } =
     await createSessionWithRulesAtomic({
       processed,
       server,
@@ -1304,6 +1304,7 @@ export async function handleMediaChangeAtomic(
     insertedSession,
     violationResults,
     wasTerminatedByRule,
+    qualityChange,
   };
 }
 

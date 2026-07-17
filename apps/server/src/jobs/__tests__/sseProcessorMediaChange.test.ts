@@ -8,6 +8,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { EventEmitter } from 'events';
+import {
+  clearDbWriteTracking,
+  recordDbWrite,
+  shouldFlushDbWrite,
+} from '../poller/dbWriteThrottle.js';
 
 // ============================================================================
 // Hoisted mocks
@@ -117,15 +122,24 @@ vi.mock('../poller/violations.js', () => ({
   broadcastViolations: mockBroadcastViolations,
 }));
 
-vi.mock('../poller/sessionLifecycle.js', () => ({
-  stopSessionAtomic: vi.fn(),
-  findActiveSession: mockFindActiveSession,
-  findActiveSessionsAll: vi.fn().mockResolvedValue([]),
-  buildActiveSession: mockBuildActiveSession,
-  handleMediaChangeAtomic: mockHandleMediaChangeAtomic,
-  reEvaluateRulesOnTranscodeChange: vi.fn(),
-  confirmAndPersistSession: vi.fn(),
-}));
+vi.mock('../poller/sessionLifecycle.js', async () => {
+  // handleQualityChangeFallout is left as the real implementation so the
+  // media-change-onto-tracked-content test can observe its actual throttle/
+  // cache/publish effects on the twin, not just that it was called.
+  const actual = await vi.importActual<typeof import('../poller/sessionLifecycle.js')>(
+    '../poller/sessionLifecycle.js'
+  );
+  return {
+    ...actual,
+    stopSessionAtomic: vi.fn(),
+    findActiveSession: mockFindActiveSession,
+    findActiveSessionsAll: vi.fn().mockResolvedValue([]),
+    buildActiveSession: mockBuildActiveSession,
+    handleMediaChangeAtomic: mockHandleMediaChangeAtomic,
+    reEvaluateRulesOnTranscodeChange: vi.fn(),
+    confirmAndPersistSession: vi.fn(),
+  };
+});
 
 // ============================================================================
 // Import after mocking
@@ -330,6 +344,7 @@ describe('SSE Processor - Media Change Detection', () => {
 
   afterEach(() => {
     stopSSEProcessor();
+    clearDbWriteTracking('twin-session-1');
   });
 
   it('should detect media change and stop old session + create new', async () => {
@@ -503,5 +518,48 @@ describe('SSE Processor - Media Change Detection', () => {
     expect(mockCacheService.removeActiveSession).not.toHaveBeenCalled();
     expect(mockCacheService.addActiveSession).not.toHaveBeenCalled();
     expect(mockPubSubService.publish).not.toHaveBeenCalled();
+  });
+
+  it('cleans up the quality-change twin when the media change lands on already-tracked content', async () => {
+    const twinId = 'twin-session-1';
+    recordDbWrite(twinId, Date.now());
+    expect(shouldFlushDbWrite(twinId, Date.now())).toBe(false);
+
+    setupServerUserQuery();
+    mockFindActiveSession.mockResolvedValue(mockExistingSession);
+    mockDetectMediaChange.mockReturnValue(true);
+    mockHandleMediaChangeAtomic.mockResolvedValue({
+      stoppedSession: {
+        id: 'session-old',
+        serverUserId: 'server-user-1',
+        sessionKey: '42',
+      },
+      insertedSession: mockNewSession,
+      violationResults: [],
+      wasTerminatedByRule: false,
+      qualityChange: {
+        stoppedSession: {
+          id: twinId,
+          serverUserId: 'server-user-1',
+          sessionKey: 'twin-key',
+          deviceId: 'device-1',
+          ratingKey: '1002',
+        },
+        referenceId: twinId,
+      },
+    });
+    mockBuildActiveSession.mockReturnValue(mockActiveSession);
+
+    mockSseManager.emit('plex:session:playing', {
+      serverId: SERVER_ID,
+      notification: { sessionKey: '42', viewOffset: 0 },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockCacheService.removeActiveSession).toHaveBeenCalledWith(twinId);
+    });
+
+    expect(mockPubSubService.publish).toHaveBeenCalledWith('session:stopped', twinId);
+    expect(shouldFlushDbWrite(twinId, Date.now())).toBe(true);
   });
 });

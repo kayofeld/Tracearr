@@ -1193,7 +1193,19 @@ async function processServerSessions(
                 createResult;
 
               if (qualityChange) {
+                const { stoppedSession } = qualityChange;
                 await handleQualityChangeFallout(qualityChange, cacheService, pubSubService);
+
+                // Prevent "stale" detection for this session
+                const stoppedKey = buildCompositeKey({
+                  serverType: server.type,
+                  serverId: server.id,
+                  externalUserId: stoppedSession.serverUserId,
+                  deviceId: stoppedSession.deviceId,
+                  ratingKey: stoppedSession.ratingKey,
+                  sessionKey: stoppedSession.sessionKey,
+                });
+                cachedSessionKeys.delete(stoppedKey);
               }
 
               if (wasTerminatedByRule) {
@@ -1247,8 +1259,13 @@ async function processServerSessions(
             });
 
             if (mediaChangeResult) {
-              const { stoppedSession, insertedSession, violationResults, wasTerminatedByRule } =
-                mediaChangeResult;
+              const {
+                stoppedSession,
+                insertedSession,
+                violationResults,
+                wasTerminatedByRule,
+                qualityChange,
+              } = mediaChangeResult;
 
               clearDbWriteTracking(stoppedSession.id);
               if (cacheService) {
@@ -1256,6 +1273,10 @@ async function processServerSessions(
               }
               if (pubSubService) {
                 await pubSubService.publish('session:stopped', stoppedSession.id);
+              }
+
+              if (qualityChange) {
+                await handleQualityChangeFallout(qualityChange, cacheService, pubSubService);
               }
 
               // Broadcast violations for new session

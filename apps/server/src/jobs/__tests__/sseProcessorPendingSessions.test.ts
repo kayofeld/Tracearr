@@ -163,6 +163,7 @@ vi.mock('../poller/sessionLifecycle.js', () => ({
   buildActiveSession: mockBuildActiveSession,
   buildPendingActiveSession: mockBuildPendingActiveSession,
   handleMediaChangeAtomic: vi.fn(),
+  handleQualityChangeFallout: vi.fn(),
   reEvaluateRulesOnTranscodeChange: vi.fn(),
   confirmAndPersistSession: mockConfirmAndPersistSession,
 }));

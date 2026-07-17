@@ -48,6 +48,7 @@ import {
   findActiveSession,
   findActiveSessionsAll,
   handleMediaChangeAtomic,
+  handleQualityChangeFallout,
   reEvaluateRulesOnPauseState,
   reEvaluateRulesOnTranscodeChange,
   stopSessionAtomic,
@@ -1086,7 +1087,8 @@ async function handleMediaChange(
     return;
   }
 
-  const { stoppedSession, insertedSession, violationResults, wasTerminatedByRule } = result;
+  const { stoppedSession, insertedSession, violationResults, wasTerminatedByRule, qualityChange } =
+    result;
 
   clearDbWriteTracking(stoppedSession.id);
 
@@ -1101,6 +1103,10 @@ async function handleMediaChange(
     } catch (error) {
       console.error('[SSEProcessor] Error broadcasting violations:', error);
     }
+  }
+
+  if (qualityChange) {
+    await handleQualityChangeFallout(qualityChange, cacheService, pubSubService);
   }
 
   if (wasTerminatedByRule) {
@@ -1598,11 +1604,7 @@ async function confirmPendingSessionAndPersist(
 
   // Handle quality change (rare but possible)
   if (qualityChange) {
-    clearDbWriteTracking(qualityChange.stoppedSession.id);
-    await cache.removeActiveSession(qualityChange.stoppedSession.id);
-    if (pubSubService) {
-      await pubSubService.publish('session:stopped', qualityChange.stoppedSession.id);
-    }
+    await handleQualityChangeFallout(qualityChange, cache, pubSubService);
   }
 
   // Broadcast any violations
