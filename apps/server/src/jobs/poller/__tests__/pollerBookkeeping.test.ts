@@ -109,12 +109,14 @@ vi.mock('../sessionMapper.js', () => ({
 }));
 
 import { servers, serverUsers, sessions as sessionsTable } from '../../../db/schema.js';
+import { findActiveSession, stopSessionAtomic } from '../sessionLifecycle.js';
 import {
   gracePeriodSessionIds,
   initializePoller,
   startPoller,
   stopPoller,
   triggerPoll,
+  triggerReconciliationPoll,
 } from '../processor.js';
 
 const serverRow1 = {
@@ -239,7 +241,7 @@ afterEach(() => {
 });
 
 describe('(a) missedPollTracking pruning for servers no longer polled', () => {
-  it('drops the grace-period entry silently when its server exits fallback to SSE', async () => {
+  it('leaves the grace-period entry for reconciliation when its server exits fallback to SSE', async () => {
     allServersRows = [serverRow1];
     currentCachedSessions = [activeSessionOnServer1];
     mockIsInFallback.mockReturnValue(true);
@@ -247,16 +249,66 @@ describe('(a) missedPollTracking pruning for servers no longer polled', () => {
     await triggerPoll();
     expect(gracePeriodSessionIds().has('active-1-id')).toBe(true);
 
-    // server-1 now has an active SSE connection - the poller no longer polls it.
+    // server-1 now has an active SSE connection - the main poller no longer
+    // polls it, but reconciliation does. The entry must survive so
+    // reconciliation can confirm the stop on its next pass; silently dropping
+    // it here strands the session in cache with no path left to confirm it.
     mockIsInFallback.mockReturnValue(false);
     await triggerPoll();
 
-    expect(gracePeriodSessionIds().has('active-1-id')).toBe(false);
+    expect(gracePeriodSessionIds().has('active-1-id')).toBe(true);
     expect(mockEnqueueNotification.mock.calls.some(([arg]) => arg.type === 'session_stopped')).toBe(
       false
     );
     expect(cacheService.removeActiveSession).not.toHaveBeenCalled();
     expect(pubSubService.publish).not.toHaveBeenCalledWith('session:stopped', 'active-1-id');
+  });
+
+  it('does not prune a reconciliation-created entry before reconciliation can confirm it', async () => {
+    // server-1 is SSE-covered (never in fallback): the main poller skips it,
+    // reconciliation owns its grace entries.
+    allServersRows = [serverRow1];
+    currentCachedSessions = [activeSessionOnServer1];
+    mockIsInFallback.mockReturnValue(false);
+
+    // Reconciliation detects the first missed poll and records the grace entry.
+    await triggerReconciliationPoll();
+    expect(gracePeriodSessionIds().has('active-1-id')).toBe(true);
+
+    // A main tick (3-10s) fires between reconciliation passes. It must not
+    // prune the entry: reconciliation runs every 30s and needs two passes to
+    // confirm, so pruning here makes the confirm step unreachable.
+    await triggerPoll();
+    expect(gracePeriodSessionIds().has('active-1-id')).toBe(true);
+    expect(mockEnqueueNotification.mock.calls.some(([arg]) => arg.type === 'session_stopped')).toBe(
+      false
+    );
+    expect(cacheService.removeActiveSession).not.toHaveBeenCalled();
+
+    // Second reconciliation pass confirms the stop from the surviving entry.
+    vi.mocked(findActiveSession).mockResolvedValue({
+      id: 'active-1-id',
+      sessionKey: 'session-1',
+      lastSeenAt: new Date(),
+    } as unknown as Awaited<ReturnType<typeof findActiveSession>>);
+    vi.mocked(stopSessionAtomic).mockResolvedValue({
+      wasUpdated: true,
+      durationMs: 1000,
+      needsRetry: false,
+    } as unknown as Awaited<ReturnType<typeof stopSessionAtomic>>);
+
+    await triggerReconciliationPoll();
+
+    expect(gracePeriodSessionIds().has('active-1-id')).toBe(false);
+    const stopNotification = mockEnqueueNotification.mock.calls.find(
+      ([arg]) => arg.type === 'session_stopped'
+    );
+    expect(stopNotification).toBeDefined();
+    expect(stopNotification![0].payload.id).toBe('active-1-id');
+    expect(cacheService.removeActiveSession).toHaveBeenCalledWith('active-1-id', {
+      skipDashboardInvalidation: true,
+    });
+    expect(pubSubService.publish).toHaveBeenCalledWith('session:stopped', 'active-1-id');
   });
 
   it('fires the stop notification from the snapshot when its server is removed from the DB', async () => {

@@ -309,9 +309,13 @@ async function sweepGracePeriod(
  * Reconcile grace-period entries for servers no longer in the current poll
  * set. Two different reasons land a server here, and they need different
  * handling:
- *  - Moved from fallback to active SSE coverage: the server still exists,
- *    and SSE self-notifies once it independently detects the same stop, so
- *    the entry is dropped silently here to avoid double-notifying.
+ *  - SSE-covered (exists, not in fallback): reconciliation owns this server's
+ *    grace entries. It created the entry when SSE missed a stop, and its
+ *    two-pass sweep confirms it. The main tick (3-10s) fires between the
+ *    30s reconciliation passes, so it must leave the entry alone; pruning
+ *    here makes the confirm step unreachable and strands the session in
+ *    cache (counted by rules) until the stale sweep. stopSessionAtomic's
+ *    isNull(stoppedAt) guard already prevents any double-notify with SSE.
  *  - Removed from the DB: sessions.server_id is ON DELETE CASCADE, so the
  *    session row is already gone and no other path (sweepStaleSessions
  *    included, since it also reads from that now-deleted row) will ever
@@ -340,10 +344,8 @@ async function pruneMissedPollTracking(
     for (const [key, snapshot] of missedPollTracking) {
       if (pollableServerIds.has(snapshot.serverId)) continue;
 
-      if (existingServerIds.has(snapshot.serverId)) {
-        missedPollTracking.delete(key);
-        continue;
-      }
+      // SSE-covered server still in the DB: leave the entry for reconciliation.
+      if (existingServerIds.has(snapshot.serverId)) continue;
 
       const { durationMs } = calculateStopDuration(
         {
@@ -1385,36 +1387,6 @@ async function processServerSessions(
             Object.assign(updatePayload, pickStreamDetailFields(processed));
           }
 
-          // If transcode state changed, re-evaluate rules that have transcode-related conditions
-          if (transcodeStateChanged) {
-            // Re-evaluate V2 rules that have transcode-related conditions.
-            // At session creation, transcode state might not be known yet (especially Plex SSE),
-            // so rules like "block 4K transcoding" need a second chance when transcode starts.
-            if (activeRulesV2.length > 0) {
-              try {
-                const recentSessions = recentSessionsMap.get(serverUserId) ?? [];
-                const violationResults = await reEvaluateRulesOnTranscodeChange({
-                  existingSession,
-                  processed,
-                  server: { id: server.id, name: server.name, type: server.type },
-                  serverUser: userDetail,
-                  activeRulesV2,
-                  activeSessions: ruleEvalSessions,
-                  recentSessions,
-                });
-
-                if (violationResults.length > 0 && pubSubService) {
-                  await broadcastViolations(violationResults, existingSession.id, pubSubService);
-                }
-              } catch (error) {
-                console.error(
-                  `[Poller] Error re-evaluating rules on transcode change for session ${existingSession.id}:`,
-                  error
-                );
-              }
-            }
-          }
-
           const pauseResult = calculatePauseAccumulation(
             previousState,
             newState,
@@ -1477,6 +1449,38 @@ async function processServerSessions(
 
           if (wasStoppedConcurrently) {
             continue;
+          }
+
+          // If transcode state changed, re-evaluate rules that have transcode-related conditions.
+          // Gated by the wasStoppedConcurrently guard above (like the pause re-eval below) so a
+          // session stopped mid-tick cannot still earn a violation row or a kill enqueue.
+          if (transcodeStateChanged) {
+            // Re-evaluate V2 rules that have transcode-related conditions.
+            // At session creation, transcode state might not be known yet (especially Plex SSE),
+            // so rules like "block 4K transcoding" need a second chance when transcode starts.
+            if (activeRulesV2.length > 0) {
+              try {
+                const recentSessions = recentSessionsMap.get(serverUserId) ?? [];
+                const violationResults = await reEvaluateRulesOnTranscodeChange({
+                  existingSession,
+                  processed,
+                  server: { id: server.id, name: server.name, type: server.type },
+                  serverUser: userDetail,
+                  activeRulesV2,
+                  activeSessions: ruleEvalSessions,
+                  recentSessions,
+                });
+
+                if (violationResults.length > 0 && pubSubService) {
+                  await broadcastViolations(violationResults, existingSession.id, pubSubService);
+                }
+              } catch (error) {
+                console.error(
+                  `[Poller] Error re-evaluating rules on transcode change for session ${existingSession.id}:`,
+                  error
+                );
+              }
+            }
           }
 
           if (newState === 'paused' && activeRulesV2.length > 0) {

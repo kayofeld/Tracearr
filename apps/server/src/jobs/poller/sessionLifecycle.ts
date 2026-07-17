@@ -754,7 +754,12 @@ export async function createSessionWithRulesAtomic(
               serverUserId: serverUser.id,
               sessionKey: processed.sessionKey,
               plexSessionId: processed.plexSessionId || null,
-              ratingKey: processed.ratingKey || null,
+              // Store '' rather than null for an absent media id. Every composite
+              // lookup (batchFindActiveSessionsByComposite, findActiveSessionByComposite)
+              // and buildCompositeKey coerce a missing ratingKey to '', so storing
+              // null here would make each tick's dedup miss the row it wrote last
+              // tick and insert a duplicate until the stale sweep.
+              ratingKey: processed.ratingKey ?? '',
               state: processed.state,
               mediaType: processed.mediaType,
               mediaTitle: processed.mediaTitle,
