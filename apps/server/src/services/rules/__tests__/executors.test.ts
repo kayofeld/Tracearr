@@ -370,6 +370,7 @@ describe('Action Executor Registry', () => {
           context.rule.id,
           null,
           0,
+          undefined,
           undefined
         );
       });
@@ -386,6 +387,7 @@ describe('Action Executor Registry', () => {
           context.rule.id,
           null,
           30,
+          undefined,
           undefined
         );
       });
@@ -406,7 +408,8 @@ describe('Action Executor Registry', () => {
           context.rule.id,
           null,
           0,
-          'You violated the concurrent streams policy'
+          'You violated the concurrent streams policy',
+          undefined
         );
       });
 
@@ -426,7 +429,8 @@ describe('Action Executor Registry', () => {
           context.rule.id,
           null,
           15,
-          'Stream will be terminated in 15 seconds'
+          'Stream will be terminated in 15 seconds',
+          undefined
         );
       });
 
@@ -453,6 +457,7 @@ describe('Action Executor Registry', () => {
             context.rule.id,
             null,
             0,
+            undefined,
             undefined
           );
         });
@@ -484,6 +489,7 @@ describe('Action Executor Registry', () => {
             context.rule.id,
             null,
             0,
+            undefined,
             undefined
           );
         });
@@ -520,6 +526,7 @@ describe('Action Executor Registry', () => {
             context.rule.id,
             null,
             0,
+            undefined,
             undefined
           );
           expect(mockDeps.terminateSession).toHaveBeenCalledWith(
@@ -528,6 +535,7 @@ describe('Action Executor Registry', () => {
             context.rule.id,
             null,
             0,
+            undefined,
             undefined
           );
         });
@@ -552,6 +560,7 @@ describe('Action Executor Registry', () => {
             context.rule.id,
             null,
             0,
+            undefined,
             undefined
           );
           expect(mockDeps.terminateSession).toHaveBeenCalledWith(
@@ -560,6 +569,7 @@ describe('Action Executor Registry', () => {
             context.rule.id,
             null,
             0,
+            undefined,
             undefined
           );
           expect(mockDeps.terminateSession).not.toHaveBeenCalledWith(
@@ -568,7 +578,55 @@ describe('Action Executor Registry', () => {
             expect.anything(),
             expect.anything(),
             expect.anything(),
+            expect.anything(),
             expect.anything()
+          );
+        });
+
+        it('should give each target its own terminateSession call keyed by that session id', async () => {
+          const session1 = createMockSession({ id: 's1', serverUserId: 'user-1' });
+          const session2 = createMockSession({ id: 's2', serverUserId: 'user-1' });
+          const context = createMockContext({
+            session: session1,
+            serverUser: createMockServerUser({ id: 'user-1' }),
+            activeSessions: [session1, session2],
+            violationId: 'violation-1',
+          });
+          const action: KillStreamAction = { type: 'kill_stream', target: 'all_user' };
+
+          await executeAction(context, action);
+
+          const calledSessionIds = (
+            mockDeps.terminateSession as ReturnType<typeof vi.fn>
+          ).mock.calls.map((call) => call[0]);
+          // Multi-target: each resolved session is its own terminateSession call
+          // (and, downstream, its own kill queue job) rather than one call for
+          // the whole target set.
+          expect(calledSessionIds).toEqual(['s1', 's2']);
+          expect(new Set(calledSessionIds).size).toBe(2);
+        });
+
+        it('should carry identityServerUserIds only when the rule enforces across servers', async () => {
+          const session1 = createMockSession({ id: 's1', serverUserId: 'user-1' });
+          const crossServerContext = createMockContext({
+            session: session1,
+            serverUser: createMockServerUser({ id: 'user-1' }),
+            activeSessions: [session1],
+            rule: createMockRule({ enforceAcrossServers: true }),
+            identityServerUserIds: ['user-1', 'user-1-sibling'],
+          });
+          const action: KillStreamAction = { type: 'kill_stream' };
+
+          await executeAction(crossServerContext, action);
+
+          expect(mockDeps.terminateSession).toHaveBeenCalledWith(
+            's1',
+            crossServerContext.server.id,
+            crossServerContext.rule.id,
+            null,
+            0,
+            undefined,
+            ['user-1', 'user-1-sibling']
           );
         });
       });

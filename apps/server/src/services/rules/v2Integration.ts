@@ -211,13 +211,24 @@ export function createActionExecutorDeps(redis: Redis): ActionExecutorDeps {
      * delay_seconds becomes the sustain window: the worker waits, re-verifies
      * the match against current state, and only then calls termination.ts.
      */
-    terminateSession: async (sessionId, serverId, ruleId, violationId, delay, message) => {
+    terminateSession: async (
+      sessionId,
+      serverId,
+      ruleId,
+      violationId,
+      delay,
+      message,
+      identityServerUserIds
+    ) => {
       // Dynamic import to avoid circular dependency
       const { enqueueKill } = await import('../../jobs/killQueue.js');
 
       const delaySeconds = delay && delay > 0 ? delay : 0;
 
-      await enqueueKill({ sessionId, serverId, ruleId, violationId, message }, delaySeconds);
+      await enqueueKill(
+        { sessionId, serverId, ruleId, violationId, message, identityServerUserIds },
+        delaySeconds
+      );
 
       rulesLogger.debug('Kill enqueued', {
         sessionId,
@@ -225,6 +236,7 @@ export function createActionExecutorDeps(redis: Redis): ActionExecutorDeps {
         ruleId,
         violationId,
         delaySeconds,
+        identityServerUserIds,
       });
     },
 

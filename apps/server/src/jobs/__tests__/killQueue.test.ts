@@ -144,6 +144,42 @@ describe('killQueue', () => {
       expect(jobIdB).toBe(`kill:rule:${ruleIdB}:${sessionId}`);
     });
 
+    it('gives distinct jobIds to each session when a multi-target match kills several sessions', async () => {
+      mockQueueAdd.mockResolvedValue({ id: 'job-3d' });
+
+      const violationId = randomUUID();
+      const ruleId = randomUUID();
+      const sessionIdA = randomUUID();
+      const sessionIdB = randomUUID();
+
+      await enqueueKill({ sessionId: sessionIdA, serverId: randomUUID(), ruleId, violationId }, 0);
+      await enqueueKill({ sessionId: sessionIdB, serverId: randomUUID(), ruleId, violationId }, 0);
+
+      expect(mockQueueAdd).toHaveBeenCalledTimes(2);
+      const jobIdA = mockQueueAdd.mock.calls[0]![2].jobId;
+      const jobIdB = mockQueueAdd.mock.calls[1]![2].jobId;
+      expect(jobIdA).not.toBe(jobIdB);
+      expect(jobIdA).toBe(`kill:${violationId}:${sessionIdA}`);
+      expect(jobIdB).toBe(`kill:${violationId}:${sessionIdB}`);
+    });
+
+    it('carries an identityServerUserIds snapshot through to the job payload', async () => {
+      mockQueueAdd.mockResolvedValue({ id: 'job-3e' });
+
+      const data: KillJobData = {
+        sessionId: randomUUID(),
+        serverId: randomUUID(),
+        ruleId: randomUUID(),
+        violationId: randomUUID(),
+        identityServerUserIds: ['su-1', 'su-2'],
+      };
+
+      await enqueueKill(data, 0);
+
+      const [, jobData] = mockQueueAdd.mock.calls[0]!;
+      expect(jobData).toEqual(data);
+    });
+
     it('does not double-enqueue a duplicate jobId', async () => {
       mockQueueAdd.mockRejectedValue(new Error('Job with id kill:abc:def already exists'));
 

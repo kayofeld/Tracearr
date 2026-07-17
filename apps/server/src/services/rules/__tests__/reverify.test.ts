@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import type { Session } from '@tracearr/shared';
 import type * as PollerDatabaseModule from '../../../jobs/poller/database.js';
 
 vi.mock('../../../db/client.js', () => ({
@@ -43,12 +44,18 @@ import { getCacheService } from '../../cache.js';
 import { terminateSession } from '../../termination.js';
 import { evaluateRulesAsync } from '../engine.js';
 import { reverifyKillCondition } from '../reverify.js';
+import {
+  batchGetIdentityServerUserIds,
+  batchGetRecentUserSessions,
+} from '../../../jobs/poller/database.js';
 
 const mockSessionFindFirst = db.query.sessions.findFirst as ReturnType<typeof vi.fn>;
 const mockDbSelect = db.select as ReturnType<typeof vi.fn>;
 const mockTerminateSession = vi.mocked(terminateSession);
 const mockEvaluateRulesAsync = vi.mocked(evaluateRulesAsync);
 const mockGetCacheService = vi.mocked(getCacheService);
+const mockBatchGetIdentityServerUserIds = vi.mocked(batchGetIdentityServerUserIds);
+const mockBatchGetRecentUserSessions = vi.mocked(batchGetRecentUserSessions);
 
 function mockRuleSelect(ruleRow: Record<string, unknown> | undefined) {
   mockDbSelect.mockReturnValue({
@@ -244,6 +251,98 @@ describe('reverifyKillCondition', () => {
       ruleId: ruleRow.id,
       reason: 'Concurrent stream limit exceeded',
     });
+  });
+
+  it('widens recentSessions across the identity for enforceAcrossServers rules', async () => {
+    const sessionRow = makeSessionRow();
+    mockSessionFindFirst.mockResolvedValue(sessionRow);
+    const ruleRow = makeRuleRow({ enforceAcrossServers: true });
+    mockRuleSelect(ruleRow);
+
+    const siblingServerUserId = randomUUID();
+    mockBatchGetIdentityServerUserIds.mockResolvedValue(
+      new Map([[sessionRow.serverUser.userId, [sessionRow.serverUserId, siblingServerUserId]]])
+    );
+
+    const ownSession = { id: 'own-session', serverUserId: sessionRow.serverUserId } as Session;
+    const siblingSession = {
+      id: 'sibling-session',
+      serverUserId: siblingServerUserId,
+    } as Session;
+    mockBatchGetRecentUserSessions.mockImplementation(async (ids: string[]) => {
+      const map = new Map<string, Session[]>();
+      for (const id of ids) {
+        if (id === sessionRow.serverUserId) map.set(id, [ownSession]);
+        else if (id === siblingServerUserId) map.set(id, [siblingSession]);
+        else map.set(id, []);
+      }
+      return map;
+    });
+
+    mockEvaluateRulesAsync.mockResolvedValue([
+      {
+        ruleId: ruleRow.id,
+        ruleName: ruleRow.name,
+        matched: true,
+        matchedGroups: [0],
+        actions: [],
+      },
+    ]);
+    mockTerminateSession.mockResolvedValue({
+      success: true,
+      terminationLogId: randomUUID(),
+      outcome: 'terminated',
+    });
+
+    await reverifyKillCondition({
+      sessionId: sessionRow.id,
+      serverId: sessionRow.serverId,
+      ruleId: ruleRow.id,
+    });
+
+    // The initial fetch already spans the identity, not just the triggering
+    // account, so recentSessions matches what live evaluation matched on.
+    expect(mockBatchGetRecentUserSessions).toHaveBeenCalledWith([
+      sessionRow.serverUserId,
+      siblingServerUserId,
+    ]);
+
+    const [context] = mockEvaluateRulesAsync.mock.calls[0]!;
+    expect((context.recentSessions as Array<{ id: string }>).map((s) => s.id).sort()).toEqual([
+      'own-session',
+      'sibling-session',
+    ]);
+    expect(context.identityServerUserIds).toEqual([sessionRow.serverUserId, siblingServerUserId]);
+  });
+
+  it('does not widen recentSessions for rules without enforceAcrossServers', async () => {
+    const sessionRow = makeSessionRow();
+    mockSessionFindFirst.mockResolvedValue(sessionRow);
+    const ruleRow = makeRuleRow({ enforceAcrossServers: false });
+    mockRuleSelect(ruleRow);
+    mockEvaluateRulesAsync.mockResolvedValue([
+      {
+        ruleId: ruleRow.id,
+        ruleName: ruleRow.name,
+        matched: true,
+        matchedGroups: [0],
+        actions: [],
+      },
+    ]);
+    mockTerminateSession.mockResolvedValue({
+      success: true,
+      terminationLogId: randomUUID(),
+      outcome: 'terminated',
+    });
+
+    await reverifyKillCondition({
+      sessionId: sessionRow.id,
+      serverId: sessionRow.serverId,
+      ruleId: ruleRow.id,
+    });
+
+    expect(mockBatchGetIdentityServerUserIds).not.toHaveBeenCalled();
+    expect(mockBatchGetRecentUserSessions).toHaveBeenCalledWith([sessionRow.serverUserId]);
   });
 
   it('returns failed when termination reports failure', async () => {

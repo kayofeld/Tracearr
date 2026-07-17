@@ -51,7 +51,8 @@ export interface ActionExecutorDeps {
     ruleId: string,
     violationId: string | null,
     delay?: number,
-    message?: string
+    message?: string,
+    identityServerUserIds?: string[]
   ) => Promise<void>;
   sendClientMessage: (sessionId: string, message: string) => Promise<void>;
   checkCooldown: (ruleId: string, targetId: string, cooldownMinutes: number) => Promise<boolean>;
@@ -296,14 +297,18 @@ const executeKillStream: ActionExecutor = async (
 
   for (const targetSession of sessionsToKill) {
     // Use the target session's own serverId, not the triggering session's -
-    // with enforceAcrossServers, these can be different servers.
+    // with enforceAcrossServers, these can be different servers. Each target
+    // session gets its own terminateSession call (and downstream its own kill
+    // queue job, keyed by that session's id), so a multi-target match doesn't
+    // collapse into a single job that only kills one session.
     await currentDeps.terminateSession(
       targetSession.id,
       targetSession.serverId,
       rule.id,
       context.violationId ?? null,
       delaySeconds,
-      message
+      message,
+      rule.enforceAcrossServers ? identityServerUserIds : undefined
     );
   }
 };

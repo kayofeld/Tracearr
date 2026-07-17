@@ -19,6 +19,7 @@ import {
   batchGetIdentityServerUserIds,
   batchGetRecentUserSessions,
   mapRuleRowToRuleV2,
+  widenRecentSessionsForMergedIdentities,
 } from '../../jobs/poller/database.js';
 import { excludeUncountableSessions } from '../../jobs/poller/utils.js';
 import { gracePeriodSessionIds } from '../../jobs/poller/processor.js';
@@ -78,16 +79,37 @@ export async function reverifyKillCondition(
   const cachedSessions = cacheService ? await cacheService.getAllActiveSessions() : [];
   const activeSessions = excludeUncountableSessions(cachedSessions, gracePeriodSessionIds());
 
-  const recentSessionsMap = await batchGetRecentUserSessions([sessionRow.serverUserId]);
-  const recentSessions = recentSessionsMap.get(sessionRow.serverUserId) ?? [];
-
   // Only rules opted into cross-server enforcement need the sibling
   // server_user lookup - the overwhelming majority evaluate single-account.
+  // Always re-derived here from the DB rather than trusting the
+  // identityServerUserIds snapshot the enqueue payload carries from match
+  // time: identity membership (server merges/unmerges) can change during the
+  // delay window between match and this re-check.
   let identityServerUserIds: string[] | undefined;
   if (rule.enforceAcrossServers) {
     const identityMap = await batchGetIdentityServerUserIds([sessionRow.serverUser.userId]);
     identityServerUserIds = identityMap.get(sessionRow.serverUser.userId);
   }
+
+  const recentSessionsUserIds =
+    identityServerUserIds && identityServerUserIds.length > 1
+      ? identityServerUserIds
+      : [sessionRow.serverUserId];
+  const recentSessionsMap = await batchGetRecentUserSessions(recentSessionsUserIds);
+
+  // Widen recentSessions across the identity's server_user ids so windowed
+  // evaluators (unique_ips_in_window, travel_speed_kmh, ...) see the same
+  // cross-server history live evaluation matched on, not just this session's
+  // own account - otherwise a cross-server match can silently fail to
+  // reproduce here and abort as skipped_condition_cleared.
+  if (identityServerUserIds && identityServerUserIds.length > 1) {
+    await widenRecentSessionsForMergedIdentities(
+      recentSessionsMap,
+      new Map([[sessionRow.serverUser.userId, identityServerUserIds]])
+    );
+  }
+
+  const recentSessions = recentSessionsMap.get(sessionRow.serverUserId) ?? [];
 
   const baseContext: Omit<EvaluationContext, 'rule'> = {
     session: sessionRow,

@@ -28,6 +28,13 @@ export interface KillJobData {
   /** Violation the kill_stream match created; null when the match created no violation. */
   violationId: string | null;
   message?: string;
+  /**
+   * Identity's server_user ids as captured at match time (enforceAcrossServers
+   * rules only). Informational/audit only - reverifyKillCondition re-derives
+   * current membership rather than trusting this snapshot, since it can go
+   * stale during the delay window before the job fires.
+   */
+  identityServerUserIds?: string[];
 }
 
 let connectionOptions: ConnectionOptions | null = null;
