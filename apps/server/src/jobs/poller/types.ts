@@ -323,6 +323,12 @@ export interface ServerProcessingResult {
   updatedSessions: ActiveSession[];
   /** Whether any session crossed the watched-completion threshold this tick */
   watchedTransitionOccurred: boolean;
+  /**
+   * IDs (subset of newSessions) that were confirmed from a pending entry.
+   * The pending create already published session:started, so processPollResults
+   * must not publish it again for these.
+   */
+  confirmedFromPendingIds: Set<string>;
 }
 
 // ============================================================================

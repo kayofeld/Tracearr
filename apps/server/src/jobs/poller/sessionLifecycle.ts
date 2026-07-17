@@ -1348,6 +1348,12 @@ export interface PollResultsInput {
   } | null;
   /** Notification enqueue function */
   enqueueNotification: (notification: PollNotification) => Promise<unknown>;
+  /**
+   * IDs (subset of newSessions) confirmed from a pending entry rather than
+   * created fresh. The pending create already published session:started and
+   * enqueued session_started, so both are skipped here for these ids.
+   */
+  confirmedFromPendingIds?: Set<string>;
 }
 
 /**
@@ -1377,6 +1383,7 @@ export async function processPollResults(input: PollResultsInput): Promise<void>
     cacheService,
     pubSubService,
     enqueueNotification,
+    confirmedFromPendingIds,
   } = input;
 
   // Extract stopped session IDs from the key format "serverId:sessionKey"
@@ -1402,6 +1409,10 @@ export async function processPollResults(input: PollResultsInput): Promise<void>
   // Publish events via pub/sub
   if (pubSubService) {
     for (const session of newSessions) {
+      // Sessions confirmed from a pending entry already got both of these
+      // at pending create - re-sending here would double the SSE event and
+      // the user-facing notification.
+      if (confirmedFromPendingIds?.has(session.id)) continue;
       await pubSubService.publish('session:started', session);
       await enqueueNotification({ type: 'session_started', payload: session });
     }

@@ -482,6 +482,7 @@ async function processServerSessions(
   const newSessions: ActiveSession[] = [];
   const updatedSessions: ActiveSession[] = [];
   const currentSessionKeys = new Set<string>();
+  const confirmedFromPendingIds = new Set<string>();
   let watchedTransitionOccurred = false;
 
   // Get GeoIP settings once at the start
@@ -516,6 +517,7 @@ async function processServerSessions(
         stoppedSessionKeys: [],
         updatedSessions: [],
         watchedTransitionOccurred: false,
+        confirmedFromPendingIds: new Set(),
       };
     }
 
@@ -811,7 +813,10 @@ async function processServerSessions(
           });
 
           if (pendingOutcome.status === 'confirmed') {
-            if (pendingOutcome.newSession) newSessions.push(pendingOutcome.newSession);
+            if (pendingOutcome.newSession) {
+              newSessions.push(pendingOutcome.newSession);
+              confirmedFromPendingIds.add(pendingOutcome.newSession.id);
+            }
             continue;
           }
           if (pendingOutcome.status === 'still-pending') {
@@ -1046,7 +1051,10 @@ async function processServerSessions(
             });
 
             if (outcome.status === 'confirmed') {
-              if (outcome.newSession) newSessions.push(outcome.newSession);
+              if (outcome.newSession) {
+                newSessions.push(outcome.newSession);
+                confirmedFromPendingIds.add(outcome.newSession.id);
+              }
               continue;
             }
             if (outcome.status === 'still-pending') {
@@ -1529,6 +1537,7 @@ async function processServerSessions(
       stoppedSessionKeys: [],
       updatedSessions,
       watchedTransitionOccurred,
+      confirmedFromPendingIds,
     };
   } catch (error) {
     console.error(`Error polling server ${server.name}:`, error);
@@ -1538,6 +1547,7 @@ async function processServerSessions(
       stoppedSessionKeys: [],
       updatedSessions: [],
       watchedTransitionOccurred: false,
+      confirmedFromPendingIds: new Set(),
     };
   }
 }
@@ -1631,6 +1641,7 @@ async function pollServers(): Promise<void> {
     const allNewSessions: ActiveSession[] = [];
     const allStoppedKeys: string[] = [];
     const allUpdatedSessions: ActiveSession[] = [];
+    const allConfirmedFromPendingIds = new Set<string>();
     let anyWatchedTransition = false;
 
     // Process each server with health tracking
@@ -1654,6 +1665,7 @@ async function pollServers(): Promise<void> {
           stoppedSessionKeys,
           updatedSessions,
           watchedTransitionOccurred,
+          confirmedFromPendingIds,
         } = await processServerSessions(
           serverWithToken,
           activeRulesV2,
@@ -1697,6 +1709,7 @@ async function pollServers(): Promise<void> {
         allNewSessions.push(...newSessions);
         allStoppedKeys.push(...stoppedSessionKeys);
         allUpdatedSessions.push(...updatedSessions);
+        for (const id of confirmedFromPendingIds) allConfirmedFromPendingIds.add(id);
         if (watchedTransitionOccurred) anyWatchedTransition = true;
       } finally {
         releaseServerLock(server.id);
@@ -1712,6 +1725,7 @@ async function pollServers(): Promise<void> {
       cacheService,
       pubSubService,
       enqueueNotification,
+      confirmedFromPendingIds: allConfirmedFromPendingIds,
     });
 
     if (allNewSessions.length > 0 || allStoppedKeys.length > 0) {
@@ -1817,6 +1831,31 @@ export async function sweepStaleSessions(): Promise<number> {
 
     const now = new Date();
 
+    // The stop notification needs the user/server shape ActiveSession carries,
+    // which the sessions row doesn't have inline - batched once for all stale
+    // sessions rather than joined into the query above (that query's shape is
+    // shared with the stale-session filtering logic and stays untouched).
+    const staleServerIds = [...new Set(staleSessions.map((s) => s.serverId))];
+    const staleServerUserIds = [...new Set(staleSessions.map((s) => s.serverUserId))];
+    const [staleServerRows, staleServerUserRows] = await Promise.all([
+      db
+        .select({ id: servers.id, name: servers.name, type: servers.type })
+        .from(servers)
+        .where(inArray(servers.id, staleServerIds)),
+      db
+        .select({
+          id: serverUsers.id,
+          username: serverUsers.username,
+          thumbUrl: serverUsers.thumbUrl,
+          identityName: users.name,
+        })
+        .from(serverUsers)
+        .innerJoin(users, eq(serverUsers.userId, users.id))
+        .where(inArray(serverUsers.id, staleServerUserIds)),
+    ]);
+    const staleServerById = new Map(staleServerRows.map((row) => [row.id, row]));
+    const staleServerUserById = new Map(staleServerUserRows.map((row) => [row.id, row]));
+
     for (const staleSession of staleSessions) {
       // Check if session should be force-stopped (using the stateTracker function)
       if (!shouldForceStopStaleSession(staleSession.lastSeenAt)) {
@@ -1824,7 +1863,7 @@ export async function sweepStaleSessions(): Promise<number> {
         continue;
       }
 
-      const { wasUpdated, needsRetry, retryData } = await stopSessionAtomic({
+      const { wasUpdated, durationMs, needsRetry, retryData } = await stopSessionAtomic({
         session: staleSession,
         stoppedAt: now,
         forceStopped: true,
@@ -1845,6 +1884,27 @@ export async function sweepStaleSessions(): Promise<number> {
 
       if (pubSubService) {
         await pubSubService.publish('session:stopped', staleSession.id);
+      }
+
+      const server = staleServerById.get(staleSession.serverId);
+      const user = staleServerUserById.get(staleSession.serverUserId);
+      if (server && user) {
+        const snapshot = {
+          ...staleSession,
+          stoppedAt: now,
+          user,
+          server,
+          canTerminate: server.type !== 'plex' || !!staleSession.plexSessionId,
+        } as ActiveSession;
+        await sendGracePeriodStopNotification(
+          `${staleSession.serverId}:${staleSession.sessionKey}`,
+          snapshot,
+          durationMs
+        );
+      } else {
+        console.error(
+          `[Poller] Missing server/user for stale session ${staleSession.id}, skipping stop notification`
+        );
       }
     }
 
@@ -1989,13 +2049,18 @@ export async function triggerServerPoll(serverId: string): Promise<void> {
     );
 
     const activeRulesV2 = await getActiveRulesV2();
-    const { newSessions, stoppedSessionKeys, updatedSessions, watchedTransitionOccurred } =
-      await processServerSessions(
-        server as ServerWithToken,
-        activeRulesV2,
-        cachedSessionKeys,
-        cachedSessions
-      );
+    const {
+      newSessions,
+      stoppedSessionKeys,
+      updatedSessions,
+      watchedTransitionOccurred,
+      confirmedFromPendingIds,
+    } = await processServerSessions(
+      server as ServerWithToken,
+      activeRulesV2,
+      cachedSessionKeys,
+      cachedSessions
+    );
 
     if (newSessions.length > 0 || stoppedSessionKeys.length > 0 || updatedSessions.length > 0) {
       await processPollResults({
@@ -2007,6 +2072,7 @@ export async function triggerServerPoll(serverId: string): Promise<void> {
         cacheService,
         pubSubService,
         enqueueNotification,
+        confirmedFromPendingIds,
       });
     }
   } catch (error) {
@@ -2073,6 +2139,7 @@ export async function triggerReconciliationPoll(): Promise<void> {
     const allNewSessions: ActiveSession[] = [];
     const allStoppedKeys: string[] = [];
     const allUpdatedSessions: ActiveSession[] = [];
+    const allConfirmedFromPendingIds = new Set<string>();
     let anyWatchedTransition = false;
 
     // Process each SSE server and collect results
@@ -2087,16 +2154,22 @@ export async function triggerReconciliationPoll(): Promise<void> {
       }
 
       try {
-        const { newSessions, stoppedSessionKeys, updatedSessions, watchedTransitionOccurred } =
-          await processServerSessions(
-            serverWithToken,
-            activeRulesV2,
-            cachedSessionKeys,
-            cachedSessions
-          );
+        const {
+          newSessions,
+          stoppedSessionKeys,
+          updatedSessions,
+          watchedTransitionOccurred,
+          confirmedFromPendingIds,
+        } = await processServerSessions(
+          serverWithToken,
+          activeRulesV2,
+          cachedSessionKeys,
+          cachedSessions
+        );
         allNewSessions.push(...newSessions);
         allStoppedKeys.push(...stoppedSessionKeys);
         allUpdatedSessions.push(...updatedSessions);
+        for (const id of confirmedFromPendingIds) allConfirmedFromPendingIds.add(id);
         if (watchedTransitionOccurred) anyWatchedTransition = true;
       } finally {
         releaseServerLock(server.id);
@@ -2113,6 +2186,7 @@ export async function triggerReconciliationPoll(): Promise<void> {
         cacheService,
         pubSubService,
         enqueueNotification,
+        confirmedFromPendingIds: allConfirmedFromPendingIds,
       });
 
       console.log(
