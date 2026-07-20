@@ -163,7 +163,10 @@ WorkingDirectory=/opt/Tracearr
 # systemd injects the .env values into the process environment. This is required:
 # the app reads DATABASE_URL/REDIS_URL at startup, so they must be real env vars.
 EnvironmentFile=/opt/Tracearr/.env
-ExecStart=/usr/bin/node apps/server/dist/index.js
+# Use your Node >= 22 binary. `/usr/bin/node` is often an older distro Node that
+# fails at startup (ERR_REQUIRE_ESM); check with `which node` / `node -v` and use
+# that absolute path (commonly /usr/local/bin/node).
+ExecStart=/usr/local/bin/node apps/server/dist/index.js
 Restart=on-failure
 User=tracearr
 
