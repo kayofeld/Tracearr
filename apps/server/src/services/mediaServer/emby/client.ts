@@ -185,8 +185,9 @@ export class EmbyClient extends BaseMediaServerClient {
         message: 'This Emby account is not an administrator.',
       };
     } catch (error) {
-      // 401 means the key was rejected outright. API keys get a 400 here (no user context),
-      // which is expected — fall through to /Auth/Keys.
+      // 401 means the key was rejected outright. API keys (no user context) get a
+      // non-401 error here — observed: 500 on Emby 4.9.5 (Jellyfin returns 400) —
+      // which is expected; fall through to /Auth/Keys.
       if (error instanceof HttpClientError && error.statusCode === 401) {
         return {
           success: false,

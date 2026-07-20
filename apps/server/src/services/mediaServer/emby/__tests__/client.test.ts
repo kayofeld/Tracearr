@@ -83,6 +83,35 @@ describe('EmbyClient.verifyServerAdmin', () => {
     expect(result).toEqual({ success: true });
   });
 
+  it('succeeds for an admin API key when /Users/Me returns 500 (observed Emby 4.9.5 behavior)', async () => {
+    sequence({ resolve: {} }, { reject: httpError(500) }, { resolve: {} });
+
+    const result = await EmbyClient.verifyServerAdmin('key', URL);
+    expect(result).toEqual({ success: true });
+  });
+
+  it('fails closed (NOT_ADMIN) when /Users/Me returns a malformed 200 body', async () => {
+    sequence({ resolve: {} }, { resolve: { unexpected: 'shape' } });
+
+    const result = await EmbyClient.verifyServerAdmin('key', URL);
+    // parseUser defaults isAdmin to false when Policy is missing, so a malformed
+    // 200 body must read as NOT_ADMIN — never as success.
+    expect(result).toMatchObject({
+      success: false,
+      code: EmbyClient.AdminVerifyError.NOT_ADMIN,
+    });
+  });
+
+  it('returns CONNECTION_FAILED when /Auth/Keys gets a proxy-style 502', async () => {
+    sequence({ resolve: {} }, { reject: httpError(400) }, { reject: httpError(502) });
+
+    const result = await EmbyClient.verifyServerAdmin('key', URL);
+    expect(result).toMatchObject({
+      success: false,
+      code: EmbyClient.AdminVerifyError.CONNECTION_FAILED,
+    });
+  });
+
   it('returns INVALID_KEY when /Users/Me responds 401', async () => {
     sequence({ resolve: {} }, { reject: httpError(401) });
 
