@@ -24,7 +24,7 @@ fixed** (X3, image-proxy token leak — merged `c4a8943b`).
 | #   | Finding                                                                                                               | Area          | Impact | Effort | Status             |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ------------- | ------ | ------ | ------------------ |
 | 1   | **X3** Image-proxy token exfiltration + unauth SSRF                                                                   | Security      | HIGH   | S      | ✅ DONE `c4a8943b` |
-| 2   | **F1** Route-level `lazy()` + `manualChunks` to kill the ~500KB monolith bundle                                       | Frontend      | MED    | S      | todo               |
+| 2   | **F1** Route-level `lazy()` + `manualChunks` (initial chunk ~500KB → 152KB / 44KB gzip)                               | Frontend      | MED    | S      | ✅ DONE `0623392a` |
 | 3   | **I1** Split the ~2300-line `processor.ts`; dedupe the twice-repeated create block (~lines 866-1075 & 1169-1300)      | Ingestion     | HIGH   | L      | todo               |
 | 4   | **X2** Central typed `config.ts` (zod) — collapse 202 ad-hoc `process.env` reads, fail-fast at boot                   | Cross-cutting | MED    | M      | todo               |
 | 5   | **X1** Standardize on pino/structured logging; retire 657 `console.*` (do after I1/I2)                                | Cross-cutting | MED    | M      | todo               |
