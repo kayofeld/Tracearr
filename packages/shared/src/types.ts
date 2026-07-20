@@ -1033,6 +1033,8 @@ export interface Settings {
   ntfyAuthToken: string | null;
   pushoverApiToken: string | null;
   pushoverUserKey: string | null;
+  telegramBotToken: string | null;
+  telegramChatId: string | null;
   // Poller settings
   pollerEnabled: boolean;
   pollerIntervalMs: number;

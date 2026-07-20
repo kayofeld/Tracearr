@@ -224,21 +224,38 @@ async function processRuleNotification(
         if (settings.discordWebhookUrl) {
           const discordSettings = {
             ...settings,
-            customWebhookUrl: null, // Don't send to webhook, just discord
+            // Only Discord. Null webhookFormat so no webhook-family agent fires —
+            // ntfy/gotify/apprise/json gate on customWebhookUrl, but pushover and
+            // telegram gate on webhookFormat + their own keys, so nulling the URL
+            // alone is not enough to keep them from cross-firing.
+            webhookFormat: null,
+            customWebhookUrl: null,
           };
           await notificationManager.sendAll(notificationPayload, discordSettings);
         }
         break;
 
-      case 'webhook':
-        if (settings.customWebhookUrl) {
+      case 'webhook': {
+        // The webhook family now includes URL-less members (telegram, pushover),
+        // so a customWebhookUrl check would drop them. Fire when whichever
+        // format is selected is actually configured; shouldSend picks the agent.
+        const webhookConfigured =
+          !!settings.customWebhookUrl ||
+          (settings.webhookFormat === 'telegram' &&
+            !!settings.telegramBotToken &&
+            !!settings.telegramChatId) ||
+          (settings.webhookFormat === 'pushover' &&
+            !!settings.pushoverUserKey &&
+            !!settings.pushoverApiToken);
+        if (webhookConfigured) {
           const webhookSettings = {
             ...settings,
-            discordWebhookUrl: null, // Don't send to discord, just webhook
+            discordWebhookUrl: null, // Only the webhook family, not Discord.
           };
           await notificationManager.sendAll(notificationPayload, webhookSettings);
         }
         break;
+      }
 
       case 'push':
         // Use notifyRuleDirect to bypass user preference filters.
@@ -288,6 +305,8 @@ export async function processNotificationJob(job: Job<NotificationJobData>): Pro
     ntfyAuthToken: routing.webhookEnabled ? settings.ntfyAuthToken : null,
     pushoverUserKey: routing.webhookEnabled ? settings.pushoverUserKey : null,
     pushoverApiToken: routing.webhookEnabled ? settings.pushoverApiToken : null,
+    telegramBotToken: routing.webhookEnabled ? settings.telegramBotToken : null,
+    telegramChatId: routing.webhookEnabled ? settings.telegramChatId : null,
   };
 
   switch (type) {

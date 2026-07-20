@@ -9,6 +9,7 @@ export type NotificationAgentType =
   | 'discord'
   | 'ntfy'
   | 'gotify'
+  | 'telegram'
   | 'apprise'
   | 'pushover'
   | 'json'

@@ -61,6 +61,8 @@ const mockAllSettings: Settings = {
   ntfyAuthToken: null,
   pushoverUserKey: null,
   pushoverApiToken: null,
+  telegramBotToken: null,
+  telegramChatId: null,
   pollerEnabled: true,
   pollerIntervalMs: 15000,
   usePlexGeoip: false,

@@ -1,4 +1,4 @@
-import { Globe, MessageSquare, Bell, Share2, Smartphone, Webhook } from 'lucide-react';
+import { Globe, MessageSquare, Bell, Share2, Smartphone, Webhook, Send } from 'lucide-react';
 import type { AgentConfig, NotificationAgentType } from './types';
 import { BASE_URL } from '@/lib/basePath';
 
@@ -91,6 +91,32 @@ export const AGENT_CONFIGS: Record<NotificationAgentType, AgentConfig> = {
     ],
   },
 
+  telegram: {
+    type: 'telegram',
+    name: 'Telegram',
+    icon: Send,
+    description: 'Send notifications to a Telegram chat via a bot',
+    isRemovable: true,
+    webhookFormat: 'telegram',
+    routingChannel: 'webhook',
+    fields: [
+      {
+        key: 'telegramBotToken',
+        label: 'Bot Token',
+        type: 'secret',
+        placeholder: '123456789:ABCdef...',
+        required: true,
+      },
+      {
+        key: 'telegramChatId',
+        label: 'Chat ID',
+        type: 'text',
+        placeholder: 'e.g. 123456789 or -100123456789',
+        required: true,
+      },
+    ],
+  },
+
   apprise: {
     type: 'apprise',
     name: 'Apprise',
@@ -176,17 +202,21 @@ export const ADDABLE_AGENT_TYPES: NotificationAgentType[] = [
   'discord',
   'ntfy',
   'gotify',
+  'telegram',
   'apprise',
   'pushover',
   'json',
 ];
 
 /**
- * Agent types that share the customWebhookUrl (only one can be active)
+ * Agent types routed via the single webhook channel (only one can be active,
+ * selected by webhookFormat). Telegram uses its own bot token / chat id rather
+ * than customWebhookUrl, but shares the same one-at-a-time webhook routing slot.
  */
 export const CUSTOM_WEBHOOK_AGENTS: NotificationAgentType[] = [
   'ntfy',
   'gotify',
+  'telegram',
   'apprise',
   'pushover',
   'json',

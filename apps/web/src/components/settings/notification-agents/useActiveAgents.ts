@@ -55,10 +55,7 @@ export function useActiveAgents(settings: Settings | undefined): ActiveAgent[] {
     }
 
     // Custom webhook agents - only ONE can be active based on webhookFormat
-    if (
-      settings.webhookFormat &&
-      CUSTOM_WEBHOOK_AGENTS.includes(settings.webhookFormat)
-    ) {
+    if (settings.webhookFormat && CUSTOM_WEBHOOK_AGENTS.includes(settings.webhookFormat)) {
       const agentType = settings.webhookFormat as NotificationAgentType;
       const config = AGENT_CONFIGS[agentType];
 
@@ -80,6 +77,10 @@ export function useActiveAgents(settings: Settings | undefined): ActiveAgent[] {
             displayValue = settings.pushoverUserKey
               ? `User: ${settings.pushoverUserKey.substring(0, 8)}...`
               : undefined;
+            break;
+          case 'telegram':
+            isConfigured = !!settings.telegramBotToken && !!settings.telegramChatId;
+            displayValue = settings.telegramChatId ? `Chat: ${settings.telegramChatId}` : undefined;
             break;
           case 'apprise':
           case 'gotify':

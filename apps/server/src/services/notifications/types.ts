@@ -155,6 +155,8 @@ export type NotificationSettings = Pick<
   | 'ntfyAuthToken'
   | 'pushoverUserKey'
   | 'pushoverApiToken'
+  | 'telegramBotToken'
+  | 'telegramChatId'
 >;
 
 /**

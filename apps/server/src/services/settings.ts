@@ -22,6 +22,8 @@ const PUBLIC_DEFAULTS: Settings = {
   ntfyAuthToken: null,
   pushoverUserKey: null,
   pushoverApiToken: null,
+  telegramBotToken: null,
+  telegramChatId: null,
   pollerEnabled: true,
   pollerIntervalMs: 15000,
   usePlexGeoip: false,
@@ -189,6 +191,8 @@ export interface NotificationSettings {
   ntfyAuthToken: string | null;
   pushoverUserKey: string | null;
   pushoverApiToken: string | null;
+  telegramBotToken: string | null;
+  telegramChatId: string | null;
   webhookSecret: string | null;
   mobileEnabled: boolean;
   unitSystem: UnitSystem;
@@ -203,6 +207,8 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
     'ntfyAuthToken',
     'pushoverUserKey',
     'pushoverApiToken',
+    'telegramBotToken',
+    'telegramChatId',
     'mobileEnabled',
     'unitSystem',
   ]);
