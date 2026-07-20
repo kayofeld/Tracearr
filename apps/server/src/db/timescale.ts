@@ -660,6 +660,17 @@ async function convertToHypertable(): Promise<void> {
  * These reduce scan size by excluding irrelevant rows
  */
 async function createPartialIndexes(): Promise<void> {
+  // At most one Emby identity may be bound to a user. Makes the Emby-login
+  // trust-on-first-use bind race-safe: two concurrent first-time binds of
+  // different Emby accounts to the owner can't both succeed (the loser hits
+  // this constraint and is denied). Created here (idempotent) rather than via a
+  // drizzle migration to keep it self-contained.
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS auth_accounts_one_emby_per_user
+    ON auth_accounts (user_id)
+    WHERE provider_id = 'emby'
+  `);
+
   // Partial index for geo queries (excludes NULL rows - ~20% savings)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_sessions_geo_partial

@@ -169,19 +169,31 @@ export const embyPlugin = () =>
           }
 
           if (decision.needsLink) {
-            await db
-              .insert(authAccounts)
-              .values({
-                id: randomUUID(),
-                accountId: authResult.id,
-                providerId: EMBY_PROVIDER,
-                userId: owner.id,
-                accessToken: authResult.token,
-              })
-              .onConflictDoUpdate({
-                target: [authAccounts.providerId, authAccounts.accountId],
-                set: { userId: owner.id, accessToken: authResult.token, updatedAt: new Date() },
-              });
+            try {
+              await db
+                .insert(authAccounts)
+                .values({
+                  id: randomUUID(),
+                  accountId: authResult.id,
+                  providerId: EMBY_PROVIDER,
+                  userId: owner.id,
+                  accessToken: authResult.token,
+                })
+                .onConflictDoUpdate({
+                  target: [authAccounts.providerId, authAccounts.accountId],
+                  set: { userId: owner.id, accessToken: authResult.token, updatedAt: new Date() },
+                });
+            } catch (err) {
+              // The `one Emby per user` partial unique index rejects a second,
+              // different Emby account racing to bind the owner. The loser is
+              // denied rather than silently sharing owner access.
+              if (err instanceof Error && err.message.includes('auth_accounts_one_emby_per_user')) {
+                throw new APIError('FORBIDDEN', {
+                  message: 'This Emby account is not the Tracearr owner.',
+                });
+              }
+              throw err;
+            }
           } else {
             // Refresh the stored token on each successful login.
             await db
