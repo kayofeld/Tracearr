@@ -16,8 +16,13 @@ const baseSettings = (over: Partial<NotificationSettings> = {}): NotificationSet
 });
 
 const serverDownPayload: NotificationPayload = {
-  context: { type: 'server_down', serverName: 'My Emby', serverId: 's1' },
-} as NotificationPayload;
+  event: 'server_down',
+  title: 'Server Offline',
+  message: 'My Emby is not responding',
+  severity: 'high',
+  timestamp: new Date().toISOString(),
+  context: { type: 'server_down', serverName: 'My Emby' },
+};
 
 describe('TelegramAgent', () => {
   const agent = new TelegramAgent();
