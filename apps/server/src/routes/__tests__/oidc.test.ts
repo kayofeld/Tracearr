@@ -62,7 +62,8 @@ describe('oidc gating', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().authMethods).toEqual({
         local: true,
-        plex: true,
+        plex: false,
+        emby: true,
         oidc: false,
         oidcProviderName: null,
       });
@@ -82,7 +83,8 @@ describe('oidc gating', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().authMethods).toEqual({
         local: true,
-        plex: true,
+        plex: false,
+        emby: true,
         oidc: true,
         oidcProviderName: 'Authentik',
       });
@@ -113,7 +115,8 @@ describe('oidc gating', () => {
 
       expect(res.json().authMethods).toEqual({
         local: true,
-        plex: true,
+        plex: false,
+        emby: true,
         oidc: false,
         oidcProviderName: null,
       });

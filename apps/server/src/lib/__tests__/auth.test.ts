@@ -31,7 +31,7 @@ describe('getAuth construction', () => {
   it('registers the expected plugins', () => {
     const auth = getAuth();
     const pluginIds = auth.options.plugins?.map((p) => p.id);
-    expect(pluginIds).toEqual(['username', 'admin', 'bearer', 'plex']);
+    expect(pluginIds).toEqual(['username', 'admin', 'bearer', 'emby']);
   });
 
   it('resolves the client ip only from the shim-stamped header', () => {
@@ -68,7 +68,7 @@ describe('getAuth construction', () => {
       const auth = getOidcAuth();
       const plugins = auth.options.plugins ?? [];
       const pluginIds = plugins.map((p) => p.id);
-      expect(pluginIds).toEqual(['username', 'admin', 'bearer', 'plex', 'generic-oauth']);
+      expect(pluginIds).toEqual(['username', 'admin', 'bearer', 'emby', 'generic-oauth']);
       // Forbidden plugins must never appear, regardless of OIDC config.
       for (const forbidden of ['api-key', 'sso', 'oidc-provider', 'scim']) {
         expect(pluginIds).not.toContain(forbidden);

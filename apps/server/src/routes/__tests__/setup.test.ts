@@ -107,7 +107,8 @@ describe('Setup Routes', () => {
         hasPasswordAuth: false,
         authMethods: {
           local: true,
-          plex: true,
+          plex: false,
+          emby: true,
           oidc: false,
           oidcProviderName: null,
         },
@@ -143,7 +144,8 @@ describe('Setup Routes', () => {
         hasPasswordAuth: false,
         authMethods: {
           local: true,
-          plex: true,
+          plex: false,
+          emby: true,
           oidc: false,
           oidcProviderName: null,
         },
@@ -176,7 +178,8 @@ describe('Setup Routes', () => {
         hasPasswordAuth: true,
         authMethods: {
           local: true,
-          plex: true,
+          plex: false,
+          emby: true,
           oidc: false,
           oidcProviderName: null,
         },
@@ -209,7 +212,8 @@ describe('Setup Routes', () => {
         hasPasswordAuth: false,
         authMethods: {
           local: true,
-          plex: true,
+          plex: false,
+          emby: true,
           oidc: false,
           oidcProviderName: null,
         },
@@ -242,7 +246,8 @@ describe('Setup Routes', () => {
         hasPasswordAuth: true,
         authMethods: {
           local: true,
-          plex: true,
+          plex: false,
+          emby: true,
           oidc: false,
           oidcProviderName: null,
         },
@@ -275,7 +280,8 @@ describe('Setup Routes', () => {
         hasPasswordAuth: false,
         authMethods: {
           local: true,
-          plex: true,
+          plex: false,
+          emby: true,
           oidc: false,
           oidcProviderName: null,
         },
@@ -308,7 +314,8 @@ describe('Setup Routes', () => {
         hasPasswordAuth: false,
         authMethods: {
           local: true,
-          plex: true,
+          plex: false,
+          emby: true,
           oidc: false,
           oidcProviderName: null,
         },
@@ -341,7 +348,8 @@ describe('Setup Routes', () => {
         hasPasswordAuth: true,
         authMethods: {
           local: true,
-          plex: true,
+          plex: false,
+          emby: true,
           oidc: false,
           oidcProviderName: null,
         },
