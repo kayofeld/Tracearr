@@ -47,6 +47,8 @@ describe('NotificationManager', () => {
     ntfyAuthToken: null,
     pushoverUserKey: null,
     pushoverApiToken: null,
+    telegramBotToken: null,
+    telegramChatId: null,
     pollerEnabled: true,
     pollerIntervalMs: 15000,
     tautulliUrl: null,
@@ -473,6 +475,8 @@ describe('testAgent', () => {
       ntfyAuthToken: null,
       pushoverUserKey: null,
       pushoverApiToken: null,
+      telegramBotToken: null,
+      telegramChatId: null,
     });
 
     expect(result.success).toBe(true);
@@ -501,6 +505,8 @@ describe('testAgent', () => {
       ntfyAuthToken: 'tk_test_token_123',
       pushoverUserKey: null,
       pushoverApiToken: null,
+      telegramBotToken: null,
+      telegramChatId: null,
     });
 
     expect(result.success).toBe(true);
@@ -533,6 +539,8 @@ describe('testAgent', () => {
       ntfyAuthToken: null,
       pushoverUserKey: null,
       pushoverApiToken: null,
+      telegramBotToken: null,
+      telegramChatId: null,
     });
 
     expect(result.success).toBe(true);
@@ -562,6 +570,8 @@ describe('testAgent', () => {
       ntfyAuthToken: null,
       pushoverUserKey: null,
       pushoverApiToken: null,
+      telegramBotToken: null,
+      telegramChatId: null,
     });
 
     expect(result.success).toBe(true);
@@ -583,6 +593,8 @@ describe('testAgent', () => {
       ntfyAuthToken: null,
       pushoverUserKey: null,
       pushoverApiToken: null,
+      telegramBotToken: null,
+      telegramChatId: null,
     });
 
     expect(result.success).toBe(true);
@@ -608,6 +620,8 @@ describe('testAgent', () => {
       ntfyAuthToken: 'bad_token',
       pushoverUserKey: null,
       pushoverApiToken: null,
+      telegramBotToken: null,
+      telegramChatId: null,
     });
 
     expect(result.success).toBe(false);
@@ -625,6 +639,8 @@ describe('testAgent', () => {
       ntfyAuthToken: null,
       pushoverUserKey: null,
       pushoverApiToken: null,
+      telegramBotToken: null,
+      telegramChatId: null,
     });
 
     expect(result.success).toBe(false);
@@ -640,6 +656,8 @@ describe('testAgent', () => {
       ntfyAuthToken: null,
       pushoverUserKey: null,
       pushoverApiToken: null,
+      telegramBotToken: null,
+      telegramChatId: null,
     });
 
     expect(result.success).toBe(false);

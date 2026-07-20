@@ -288,6 +288,8 @@ export async function processNotificationJob(job: Job<NotificationJobData>): Pro
     ntfyAuthToken: routing.webhookEnabled ? settings.ntfyAuthToken : null,
     pushoverUserKey: routing.webhookEnabled ? settings.pushoverUserKey : null,
     pushoverApiToken: routing.webhookEnabled ? settings.pushoverApiToken : null,
+    telegramBotToken: routing.webhookEnabled ? settings.telegramBotToken : null,
+    telegramChatId: routing.webhookEnabled ? settings.telegramChatId : null,
   };
 
   switch (type) {

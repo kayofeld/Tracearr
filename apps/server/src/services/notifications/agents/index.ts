@@ -11,6 +11,7 @@ export { AppriseAgent } from './apprise.js';
 export { PushoverAgent } from './pushover.js';
 export { JsonWebhookAgent } from './json-webhook.js';
 export { GotifyAgent } from './gotify.js';
+export { TelegramAgent } from './telegram.js';
 
 import type { NotificationAgent } from '../types.js';
 import { DiscordAgent } from './discord.js';
@@ -19,6 +20,7 @@ import { AppriseAgent } from './apprise.js';
 import { PushoverAgent } from './pushover.js';
 import { JsonWebhookAgent } from './json-webhook.js';
 import { GotifyAgent } from './gotify.js';
+import { TelegramAgent } from './telegram.js';
 
 /**
  * Agent registry - lazy-loaded singleton instances
@@ -50,6 +52,9 @@ function getOrCreateAgent(name: string): NotificationAgent | undefined {
     case 'gotify':
       agentRegistry[name] = new GotifyAgent();
       break;
+    case 'telegram':
+      agentRegistry[name] = new TelegramAgent();
+      break;
     default:
       return undefined;
   }
@@ -62,7 +67,7 @@ function getOrCreateAgent(name: string): NotificationAgent | undefined {
  */
 export function createAllAgents(): NotificationAgent[] {
   // Ensure all agents are created
-  const names = ['discord', 'ntfy', 'gotify', 'apprise', 'pushover', 'json-webhook'];
+  const names = ['discord', 'ntfy', 'gotify', 'telegram', 'apprise', 'pushover', 'json-webhook'];
   return names.map((name) => getOrCreateAgent(name)!);
 }
 

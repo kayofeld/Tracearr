@@ -117,6 +117,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       'ntfyAuthToken',
       'pushoverUserKey',
       'pushoverApiToken',
+      'telegramBotToken',
+      'telegramChatId',
     ]);
 
     let webhookUrl: string | null = null;
@@ -125,6 +127,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     let ntfyAuthToken: string | null = null;
     let pushoverUserKey: string | null = null;
     let pushoverApiToken: string | null = null;
+    let telegramBotToken: string | null = null;
+    let telegramChatId: string | null = null;
 
     if (type === 'discord') {
       webhookUrl = url ?? currentSettings.discordWebhookUrl ?? null;
@@ -135,11 +139,17 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       ntfyAuthToken = currentSettings.ntfyAuthToken ?? null;
       pushoverUserKey = currentSettings.pushoverUserKey ?? null;
       pushoverApiToken = currentSettings.pushoverApiToken ?? null;
+      telegramBotToken = currentSettings.telegramBotToken ?? null;
+      telegramChatId = currentSettings.telegramChatId ?? null;
     }
 
     if (webhookFormat === 'pushover') {
       if (!pushoverUserKey || !pushoverApiToken) {
         return reply.badRequest('Pushover requires User Key and API Token');
+      }
+    } else if (webhookFormat === 'telegram') {
+      if (!telegramBotToken || !telegramChatId) {
+        return reply.badRequest('Telegram requires a Bot Token and Chat ID');
       }
     } else if (!webhookUrl) {
       return reply.badRequest(`No ${type} webhook URL configured`);
@@ -154,6 +164,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       ntfyAuthToken,
       pushoverUserKey,
       pushoverApiToken,
+      telegramBotToken,
+      telegramChatId,
     };
 
     // Determine which agent to test based on type and format
@@ -174,6 +186,9 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
           break;
         case 'gotify':
           agentName = 'gotify';
+          break;
+        case 'telegram':
+          agentName = 'telegram';
           break;
         default:
           agentName = 'json-webhook';
