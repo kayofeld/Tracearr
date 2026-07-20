@@ -178,6 +178,27 @@ export function stopImageCacheCleanup(): void {
 }
 
 /**
+ * Append a client-supplied image path to a media server's base URL and REQUIRE
+ * the parsed result to stay on the server's own origin.
+ *
+ * Concatenation preserves the original behavior (including reverse-proxy base
+ * paths like https://host/jellyfin), but the concatenated string is then parsed
+ * and its origin compared to the base's: a value like "@evil.com/x" parses to
+ * host evil.com and is rejected, closing the token-exfiltration + off-origin
+ * SSRF on the unauthenticated image-proxy route. A path that stays on-origin
+ * (a leading "/…" or a harmless "/@evil.com/x") is allowed. Throws otherwise.
+ */
+export function resolveSameOrigin(serverUrl: string, imagePath: string): URL {
+  const baseUrl = serverUrl.replace(/\/$/, '');
+  const baseOrigin = new URL(baseUrl).origin; // throws on a malformed configured URL
+  const target = new URL(`${baseUrl}${imagePath}`); // throws on a malformed path
+  if (target.origin !== baseOrigin) {
+    throw new Error('image path escapes server origin');
+  }
+  return target;
+}
+
+/**
  * Fetch and proxy an image from a media server
  */
 export async function proxyImage(options: ProxyOptions): Promise<ProxyResult> {
@@ -217,33 +238,34 @@ export async function proxyImage(options: ProxyOptions): Promise<ProxyResult> {
 
   const token = server.token;
 
-  // Build image URL based on server type
-  let imageUrl: string;
-  const headers: Record<string, string> = {};
-
-  if (server.type === 'plex') {
-    // Plex image URLs are relative paths like /library/metadata/123/thumb/456
-    // Need to append X-Plex-Token
-    const baseUrl = server.url.replace(/\/$/, '');
-    const separator = imagePath.includes('?') ? '&' : '?';
-    imageUrl = `${baseUrl}${imagePath}${separator}X-Plex-Token=${token}`;
-    headers['Accept'] = 'image/*';
-  } else {
-    // Jellyfin/Emby - imagePath should include the full endpoint
-    const baseUrl = server.url.replace(/\/$/, '');
-    imageUrl = `${baseUrl}${imagePath}`;
-    if (server.type === 'jellyfin') {
-      headers['Authorization'] = `MediaBrowser Token="${token}"`;
-    } else {
-      headers['X-Emby-Token'] = token;
-    }
-    headers['Accept'] = 'image/*';
+  // Build image URL based on server type. imagePath is a CLIENT-SUPPLIED value on
+  // an unauthenticated route, so it must resolve to the server's OWN origin — never
+  // string-concatenate it (a value like "@evil.com/x" would hijack the host and
+  // exfiltrate the token). resolveSameOrigin throws if the path escapes the origin.
+  let target: URL;
+  try {
+    target = resolveSameOrigin(server.url, imagePath);
+  } catch {
+    const fallbackSvg = getFallbackImage(fallback, width, height);
+    return { data: fallbackSvg, contentType: 'image/svg+xml', cached: false };
   }
 
-  // Fetch image from server
+  const headers: Record<string, string> = { Accept: 'image/*' };
+
+  if (server.type === 'plex') {
+    target.searchParams.set('X-Plex-Token', token);
+  } else if (server.type === 'jellyfin') {
+    headers['Authorization'] = `MediaBrowser Token="${token}"`;
+  } else {
+    headers['X-Emby-Token'] = token;
+  }
+
+  // Fetch image from server. redirect:'error' so the media server can't bounce us
+  // (with the token) off-origin via a 30x — the origin-lock only guards the first hop.
   try {
-    const response = await fetch(imageUrl, {
+    const response = await fetch(target, {
       headers,
+      redirect: 'error',
       signal: AbortSignal.timeout(10000), // 10 second timeout
     });
 
