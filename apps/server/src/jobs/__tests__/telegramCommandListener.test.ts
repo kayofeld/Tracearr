@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { chatIdReplyFor } from '../telegramCommandListener.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { chatIdReplyFor, allowReply, _resetCooldownForTests } from '../telegramCommandListener.js';
 
 describe('chatIdReplyFor', () => {
   const upd = (text: string | undefined, chatId: unknown = 4242) => ({
@@ -36,5 +36,24 @@ describe('chatIdReplyFor', () => {
 
   it('ignores a command with no chat id', () => {
     expect(chatIdReplyFor({ update_id: 1, message: { text: '/start' } })).toBeNull();
+  });
+});
+
+describe('allowReply (per-chat cooldown)', () => {
+  beforeEach(() => _resetCooldownForTests());
+
+  it('allows the first reply and blocks a repeat within the cooldown', () => {
+    expect(allowReply(1, 1_000)).toBe(true);
+    expect(allowReply(1, 5_000)).toBe(false); // 4s later, still within 60s
+  });
+
+  it('allows again once the cooldown has elapsed', () => {
+    expect(allowReply(1, 1_000)).toBe(true);
+    expect(allowReply(1, 1_000 + 60_000)).toBe(true);
+  });
+
+  it('tracks chats independently', () => {
+    expect(allowReply(1, 1_000)).toBe(true);
+    expect(allowReply(2, 1_000)).toBe(true);
   });
 });
