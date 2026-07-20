@@ -15,7 +15,18 @@
 # derived from the repo's own tags.
 set -uo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Re-exec from a stable copy in /tmp before touching the repo: `git checkout` of a
+# release that changed this file would otherwise rewrite it mid-run and corrupt the
+# still-executing bash. The copy runs to completion regardless of the checkout.
+if [ -z "${TRACEARR_UPDATE_REEXEC:-}" ]; then
+  _self_copy="$(mktemp /tmp/tracearr-update.XXXXXX.sh)"
+  cp "${BASH_SOURCE[0]}" "$_self_copy"
+  chmod +x "$_self_copy"
+  export TRACEARR_UPDATE_REEXEC=1 TRACEARR_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  exec "$_self_copy" "$@"
+fi
+
+REPO_DIR="${TRACEARR_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 STATUS_FILE="$REPO_DIR/.update-status.json"
 LOG_FILE="$REPO_DIR/.update.log"
 cd "$REPO_DIR"
