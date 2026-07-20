@@ -7,7 +7,7 @@
  * Based on Emby OpenAPI specification v4.1.1.0
  */
 
-import { fetchJson } from '../../../utils/http.js';
+import { fetchJson, HttpClientError } from '../../../utils/http.js';
 import {
   BaseMediaServerClient,
   type JellyfinEmbyActivityEntry,
@@ -122,22 +122,52 @@ export class EmbyClient extends BaseMediaServerClient {
   }
 
   /**
+   * Error types for server admin verification
+   */
+  static readonly AdminVerifyError = {
+    CONNECTION_FAILED: 'CONNECTION_FAILED',
+    INVALID_KEY: 'INVALID_KEY',
+    NOT_ADMIN: 'NOT_ADMIN',
+  } as const;
+
+  /**
    * Verify if API key has admin access to an Emby server
    *
    * Handles two token types:
    * 1. User tokens (from AuthenticateByName) - verified via /Users/Me
    * 2. API keys (created in Emby admin) - verified via /Auth/Keys (requires admin)
+   *
+   * @returns { success: true } if admin access verified
+   * @returns { success: false, code, message } if verification failed
    */
-  static async verifyServerAdmin(apiKey: string, serverUrl: string): Promise<boolean> {
+  static async verifyServerAdmin(
+    apiKey: string,
+    serverUrl: string
+  ): Promise<{ success: true } | { success: false; code: string; message: string }> {
     const url = serverUrl.replace(/\/$/, '');
-    const authHeader = BaseMediaServerClient.buildStaticAuthHeader(apiKey);
 
     const headers = {
-      'X-Emby-Authorization': authHeader,
+      'X-Emby-Authorization': BaseMediaServerClient.buildStaticAuthHeader(apiKey),
       Accept: 'application/json',
     };
 
-    // Try /Users/Me first (works for user tokens from authentication)
+    // Verify basic (unauthenticated) connectivity so a network problem is distinct from auth.
+    try {
+      await fetchJson<unknown>(`${url}/System/Info/Public`, {
+        headers: { Accept: 'application/json' },
+        service: 'emby',
+        timeout: 10000,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to connect to server';
+      return {
+        success: false,
+        code: EmbyClient.AdminVerifyError.CONNECTION_FAILED,
+        message: `Cannot reach Emby server at ${url}. ${message}`,
+      };
+    }
+
+    // Try /Users/Me first (works for user tokens from AuthenticateByName).
     try {
       const data = await fetchJson<Record<string, unknown>>(`${url}/Users/Me`, {
         headers,
@@ -146,22 +176,57 @@ export class EmbyClient extends BaseMediaServerClient {
       });
 
       const user = parseUser(data);
-      return user.isAdmin;
-    } catch {
-      // /Users/Me returns 400 for API keys (not user tokens)
-      // Fall through to try /Auth/Keys
+      if (user.isAdmin) {
+        return { success: true };
+      }
+      return {
+        success: false,
+        code: EmbyClient.AdminVerifyError.NOT_ADMIN,
+        message: 'This Emby account is not an administrator.',
+      };
+    } catch (error) {
+      // 401 means the key was rejected outright. API keys get a 400 here (no user context),
+      // which is expected — fall through to /Auth/Keys.
+      if (error instanceof HttpClientError && error.statusCode === 401) {
+        return {
+          success: false,
+          code: EmbyClient.AdminVerifyError.INVALID_KEY,
+          message: 'Emby rejected this API key (it may be invalid or expired).',
+        };
+      }
     }
 
-    // Try /Auth/Keys (only accessible with admin-level API keys)
+    // Try /Auth/Keys, which only admin-level API keys can read.
     try {
       await fetchJson<unknown>(`${url}/Auth/Keys`, {
         headers,
         service: 'emby',
         timeout: 10000,
       });
-      return true;
-    } catch {
-      return false;
+      return { success: true };
+    } catch (error) {
+      if (error instanceof HttpClientError) {
+        if (error.statusCode === 401) {
+          return {
+            success: false,
+            code: EmbyClient.AdminVerifyError.INVALID_KEY,
+            message: 'Emby rejected this API key (it may be invalid or expired).',
+          };
+        }
+        if (error.statusCode === 403) {
+          return {
+            success: false,
+            code: EmbyClient.AdminVerifyError.NOT_ADMIN,
+            message: 'This API key does not have administrator access on this Emby server.',
+          };
+        }
+      }
+      const message = error instanceof Error ? error.message : 'Unable to verify admin access';
+      return {
+        success: false,
+        code: EmbyClient.AdminVerifyError.CONNECTION_FAILED,
+        message: `Could not verify admin access on Emby server at ${url}. ${message}`,
+      };
     }
   }
 }

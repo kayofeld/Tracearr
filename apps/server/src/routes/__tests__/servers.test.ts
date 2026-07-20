@@ -49,6 +49,11 @@ vi.mock('../../services/mediaServer/index.js', () => ({
   },
   EmbyClient: {
     verifyServerAdmin: vi.fn(),
+    AdminVerifyError: {
+      CONNECTION_FAILED: 'CONNECTION_FAILED',
+      INVALID_KEY: 'INVALID_KEY',
+      NOT_ADMIN: 'NOT_ADMIN',
+    },
   },
 }));
 
@@ -271,7 +276,7 @@ describe('Server Routes', () => {
     beforeEach(() => {
       vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({ success: true });
       vi.mocked(JellyfinClient.verifyServerAdmin).mockResolvedValue({ success: true });
-      vi.mocked(EmbyClient.verifyServerAdmin).mockResolvedValue(true);
+      vi.mocked(EmbyClient.verifyServerAdmin).mockResolvedValue({ success: true });
       vi.mocked(syncServer).mockResolvedValue({
         usersAdded: 5,
         usersUpdated: 0,
