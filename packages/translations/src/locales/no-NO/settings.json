@@ -444,12 +444,17 @@
   "title": "Innstillinger",
   "update": {
     "betaUpdate": "Oppdatering av beta",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Ny versjon",
     "pullInstructions": "Etter trekk, start deretter beholderen på nytt for å bruke oppdateringen.",
     "releaseNotes": "Utgivelsesnotater",
+    "restarting": "Restarting the server.",
     "stableRelease": "Stabil versjon",
     "title": "Oppdatering tilgjengelig",
     "updateCommand": "Oppdater kommando",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} tilgjengelig"
   },
   "webhooks": {

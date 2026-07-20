@@ -1,0 +1,26 @@
+# Tracearr self-update unit (bare-metal / systemd).
+#
+# A oneshot that runs scripts/update.sh in its OWN cgroup, so that when the
+# update restarts tracearr.service this updater is not killed mid-build. The
+# in-app "Update" button triggers it with `systemctl start tracearr-update`.
+#
+# Install:
+#   sudo cp docker/systemd/tracearr-update.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#
+# Grant the tracearr service user permission to start it and restart tracearr,
+# with a scoped sudoers drop-in (`sudo visudo -f /etc/sudoers.d/tracearr`):
+#   tracearr ALL=(root) NOPASSWD: /usr/bin/systemctl start tracearr-update.service, /usr/bin/systemctl restart tracearr.service
+#
+# Then set TRACEARR_SELF_UPDATE=true in the tracearr .env to enable the button.
+
+[Unit]
+Description=Tracearr self-update
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tracearr
+WorkingDirectory=/opt/Tracearr
+ExecStart=/opt/Tracearr/scripts/update.sh
+# Collect the transient state so repeated runs don't accumulate failed units.

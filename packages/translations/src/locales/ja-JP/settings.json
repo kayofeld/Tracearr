@@ -444,12 +444,17 @@
   "title": "設定",
   "update": {
     "betaUpdate": "ベータ版の更新",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "新しいバージョン",
     "pullInstructions": "プルした後、コンテナを再起動して更新を適用します。",
     "releaseNotes": "リリースノート",
+    "restarting": "Restarting the server.",
     "stableRelease": "安定版",
     "title": "アップデートがあります",
     "updateCommand": "コマンドを更新",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} が利用可能です"
   },
   "webhooks": {

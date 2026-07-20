@@ -444,12 +444,17 @@
   "title": "Setări",
   "update": {
     "betaUpdate": "Actualizare beta",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Versiune nouă",
     "pullInstructions": "După tragere, reporniţi recipientul pentru a aplica actualizarea.",
     "releaseNotes": "Note de lansare",
+    "restarting": "Restarting the server.",
     "stableRelease": "Lansare stabilă",
     "title": "Actualizare disponibilă",
     "updateCommand": "Actualizați comanda",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} disponibil"
   },
   "webhooks": {

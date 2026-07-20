@@ -444,12 +444,17 @@
   "title": "Réglages",
   "update": {
     "betaUpdate": "Mise à jour bêta",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Nouvelle version",
     "pullInstructions": "Après avoir réalisé le pull Docker, redémarrez cotre conteneur pour appliquer la modification.",
     "releaseNotes": "Notes de version",
+    "restarting": "Restarting the server.",
     "stableRelease": "Version stable",
     "title": "Mise à jour disponible",
     "updateCommand": "Commande de mise à jour",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "Version {{version}} disponible"
   },
   "webhooks": {

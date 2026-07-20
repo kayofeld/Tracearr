@@ -444,12 +444,17 @@
   "title": "Ajustes",
   "update": {
     "betaUpdate": "Actualización beta",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Nueva versión",
     "pullInstructions": "Entendido.",
     "releaseNotes": "Notas de la versión",
+    "restarting": "Restarting the server.",
     "stableRelease": "Versión Estable",
     "title": "Actualización disponible",
     "updateCommand": "Comando de actualización",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} disponible"
   },
   "webhooks": {
