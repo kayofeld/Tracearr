@@ -44,7 +44,9 @@ export const setupRoutes: FastifyPluginAsync = async (app) => {
       hasPasswordAuth: passwordUserList.length > 0,
       authMethods: {
         local: localLoginEnabled,
-        plex: true,
+        // Plex login was replaced by Emby credential login (embyPlugin).
+        plex: false,
+        emby: true,
         oidc: oidcConfigured,
         oidcProviderName: oidcConfigured ? (process.env.OIDC_PROVIDER_NAME ?? 'SSO') : null,
       },
