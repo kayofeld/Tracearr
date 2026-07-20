@@ -142,15 +142,16 @@ EOF
 
 `APP_VERSION` is what the in-app update checker compares against the latest release, so set it to the deployed tag (the update script can re-derive it from `git describe` on each pull). See `.env.example` for the full list of optional settings (CORS_ORIGIN and `TRUST_PROXY` behind a reverse proxy, OIDC sign-in, the experimental native-WebSocket real-time tier, and more).
 
-**Run**
+**Run.** The process reads its configuration from the environment, so export `.env` into the shell before starting it directly:
 
 ```bash
+set -a; source .env; set +a
 node apps/server/dist/index.js
 ```
 
 The server applies database migrations on startup, then serves the app at `http://localhost:3000` (or your `PORT`). There is no separate migrate step. Bundled GeoLite2 databases under `data/` give geolocation out of the box.
 
-**Keep it running** with a process manager. Example systemd unit at `/etc/systemd/system/tracearr.service`:
+**Keep it running** with a process manager. Example systemd unit at `/etc/systemd/system/tracearr.service` (assuming the repo is checked out at `/opt/Tracearr`):
 
 ```ini
 [Unit]
@@ -158,7 +159,10 @@ Description=Tracearr
 After=network.target postgresql.service redis-server.service
 
 [Service]
-WorkingDirectory=/opt/tracearr
+WorkingDirectory=/opt/Tracearr
+# systemd injects the .env values into the process environment. This is required:
+# the app reads DATABASE_URL/REDIS_URL at startup, so they must be real env vars.
+EnvironmentFile=/opt/Tracearr/.env
 ExecStart=/usr/bin/node apps/server/dist/index.js
 Restart=on-failure
 User=tracearr
@@ -167,7 +171,7 @@ User=tracearr
 WantedBy=multi-user.target
 ```
 
-Then `sudo systemctl enable --now tracearr` (with the repo checked out at `/opt/tracearr` and `.env` in that directory).
+Then `sudo systemctl enable --now tracearr` (with the repo at `/opt/Tracearr`, `.env` in that directory, and the `tracearr` user owning it: `sudo chown -R tracearr:tracearr /opt/Tracearr`).
 
 **Updating** is `git pull` plus a rebuild and restart; migrations run on the next start:
 
