@@ -444,12 +444,17 @@
   "title": "Asetukset",
   "update": {
     "betaUpdate": "Beta Päivitys",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Uusi Versio",
     "pullInstructions": "Käynnistä kontti uudelleen vetämisen jälkeen käyttääksesi päivitystä.",
     "releaseNotes": "Julkaise Muistiinpanot",
+    "restarting": "Restarting the server.",
     "stableRelease": "Vakaa Versio",
     "title": "Päivitys Saatavilla",
     "updateCommand": "Päivitä Komento",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} saatavilla"
   },
   "webhooks": {

@@ -444,12 +444,17 @@
   "title": "设置",
   "update": {
     "betaUpdate": "测试版升级",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "新版本",
     "pullInstructions": "在拉取后，重新启动您的容器以应用更新。",
     "releaseNotes": "更新日志",
+    "restarting": "Restarting the server.",
     "stableRelease": "Stable 版",
     "title": "有可用更新",
     "updateCommand": "更新命令",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}}可用"
   },
   "webhooks": {

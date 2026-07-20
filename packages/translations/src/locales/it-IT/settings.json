@@ -444,12 +444,17 @@
   "title": "Impostazioni",
   "update": {
     "betaUpdate": "Aggiornamento Beta",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Nuova Versione",
     "pullInstructions": "Dopo aver tirato, riavviare il contenitore per applicare l'aggiornamento.",
     "releaseNotes": "Note Di Rilascio",
+    "restarting": "Restarting the server.",
     "stableRelease": "Rilascio Stabile",
     "title": "Aggiornamento Disponibile",
     "updateCommand": "Aggiorna Comando",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} disponibile"
   },
   "webhooks": {

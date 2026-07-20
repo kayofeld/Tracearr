@@ -444,12 +444,17 @@
   "title": "Definições",
   "update": {
     "betaUpdate": "Beta Update",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "New Version",
     "pullInstructions": "After pulling, restart your container to apply the update.",
     "releaseNotes": "Release Notes",
+    "restarting": "Restarting the server.",
     "stableRelease": "Stable Release",
     "title": "Update Available",
     "updateCommand": "Update Command",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} available"
   },
   "webhooks": {

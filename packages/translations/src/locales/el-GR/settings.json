@@ -444,12 +444,17 @@
   "title": "Ρυθμίσεις",
   "update": {
     "betaUpdate": "Ενημέρωση Beta",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Νέα Έκδοση",
     "pullInstructions": "Μετά το τράβηγμα, επανεκκινήστε τον περιέκτη για να εφαρμόσετε την ενημέρωση.",
     "releaseNotes": "Σημειώσεις Έκδοσης",
+    "restarting": "Restarting the server.",
     "stableRelease": "Σταθερή Έκδοση",
     "title": "Διαθέσιμη Ενημέρωση",
     "updateCommand": "Ενημέρωση Εντολής",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} διαθέσιμο"
   },
   "webhooks": {

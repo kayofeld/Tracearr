@@ -444,12 +444,17 @@
   "title": "Nastavení",
   "update": {
     "betaUpdate": "Aktualizace beta verze",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Nová verze",
     "pullInstructions": "Po natažení restartujte kontejner pro aplikaci aktualizace.",
     "releaseNotes": "Poznámky k vydání",
+    "restarting": "Restarting the server.",
     "stableRelease": "Stabilní vydání",
     "title": "Dostupná aktualizace",
     "updateCommand": "Aktualizovat příkaz",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} k dispozici"
   },
   "webhooks": {

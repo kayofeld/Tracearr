@@ -369,6 +369,11 @@
   "update": {
     "title": "Update Available",
     "releaseNotes": "Release Notes",
+    "updateNow": "Update now",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
+    "restarting": "Restarting the server.",
+    "updated": "Updated to {{version}}. Reloading.",
+    "failed": "Update failed",
     "updateCommand": "Update Command",
     "pullInstructions": "After pulling, restart your container to apply the update.",
     "stableRelease": "Stable Release",

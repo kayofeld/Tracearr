@@ -444,12 +444,17 @@
   "title": "Настройки",
   "update": {
     "betaUpdate": "Бета обновление",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Новая версия",
     "pullInstructions": "После загрузки перезагрузите контейнер, чтобы применить обновление.",
     "releaseNotes": "Примечания к выпуску",
+    "restarting": "Restarting the server.",
     "stableRelease": "Стабильный выпуск",
     "title": "Доступно обновление",
     "updateCommand": "Обновить команду",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "Доступно {{version}}"
   },
   "webhooks": {

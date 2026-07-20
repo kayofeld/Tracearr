@@ -444,12 +444,17 @@
   "title": "Instellingen",
   "update": {
     "betaUpdate": "Bèta-update",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Nieuwe versie",
     "pullInstructions": "Herstart je container na het ophalen om de update toe te passen.",
     "releaseNotes": "Uitgave-opmerkingen",
+    "restarting": "Restarting the server.",
     "stableRelease": "Stabiele versie",
     "title": "Update beschikbaar",
     "updateCommand": "Update-opdracht",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} beschikbaar"
   },
   "webhooks": {

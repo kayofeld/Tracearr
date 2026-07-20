@@ -1666,6 +1666,19 @@ class ApiClient {
     get: () => this.request<VersionInfo>('/version'),
     check: () =>
       this.request<{ message: string }>('/version/check', { method: 'POST', body: '{}' }),
+    updateCapability: () =>
+      this.request<{ available: boolean; enabled: boolean; isDocker: boolean }>(
+        '/version/update/capability'
+      ),
+    update: () =>
+      this.request<{ started: boolean; target: string }>('/version/update', {
+        method: 'POST',
+        body: '{}',
+      }),
+    updateStatus: () =>
+      this.request<{ state: string; message: string | null; at: string | null }>(
+        '/version/update/status'
+      ),
   };
 
   // Tailscale VPN

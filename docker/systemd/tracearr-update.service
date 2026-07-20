@@ -1,0 +1,38 @@
+# Tracearr self-update unit (bare-metal / systemd).
+#
+# A oneshot that runs scripts/update.sh in its OWN cgroup, so that when the
+# update restarts tracearr.service this updater is not killed mid-build. The
+# in-app "Update" button triggers it with `systemctl start tracearr-update`.
+#
+# Install:
+#   sudo cp docker/systemd/tracearr-update.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#
+# Grant the tracearr service user permission to start it and restart tracearr,
+# with a scoped sudoers drop-in (`sudo visudo -f /etc/sudoers.d/tracearr`).
+# The args must match EXACTLY what the app/script invoke (sudoers matches the
+# full argv): the button spawns `sudo systemctl start --no-block ...` and the
+# updater runs `sudo systemctl restart tracearr.service`.
+#   tracearr ALL=(root) NOPASSWD: /usr/bin/systemctl start --no-block tracearr-update.service, /usr/bin/systemctl restart tracearr.service
+#
+# Then set TRACEARR_SELF_UPDATE=true in the tracearr .env to enable the button.
+#
+# The updater builds BEFORE it restarts, so a failed build leaves the current
+# version running. It does NOT auto-roll-back a build that succeeds but crashes
+# on boot (or a migration that ran on the new process). Manual recovery:
+#   cd /opt/Tracearr
+#   git checkout -f <previous-tag>      # e.g. the tag from `git tag --sort=-v:refname`
+#   CI=true corepack pnpm install --frozen-lockfile && corepack pnpm build
+#   sudo systemctl restart tracearr.service
+# Reverse any migration the failed release applied per its release notes.
+
+[Unit]
+Description=Tracearr self-update
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tracearr
+WorkingDirectory=/opt/Tracearr
+ExecStart=/opt/Tracearr/scripts/update.sh
+# Collect the transient state so repeated runs don't accumulate failed units.

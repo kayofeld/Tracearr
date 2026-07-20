@@ -444,12 +444,17 @@
   "title": "الإعدادات",
   "update": {
     "betaUpdate": "تحديث بيتا",
+    "failed": "Update failed",
+    "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "نسخة جديدة",
     "pullInstructions": "بعد السحب ، أعد تشغيل الحاوية لتطبيق التحديث.",
     "releaseNotes": "ملاحظات الإصدار",
+    "restarting": "Restarting the server.",
     "stableRelease": "الإصدار المستقر",
     "title": "تحديث متوفر",
     "updateCommand": "تحديث الأمر",
+    "updateNow": "Update now",
+    "updated": "Updated to {{version}}. Reloading.",
     "versionAvailable": "{{version}} available"
   },
   "webhooks": {
