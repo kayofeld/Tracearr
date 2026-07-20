@@ -9,8 +9,11 @@
 #   sudo systemctl daemon-reload
 #
 # Grant the tracearr service user permission to start it and restart tracearr,
-# with a scoped sudoers drop-in (`sudo visudo -f /etc/sudoers.d/tracearr`):
-#   tracearr ALL=(root) NOPASSWD: /usr/bin/systemctl start tracearr-update.service, /usr/bin/systemctl restart tracearr.service
+# with a scoped sudoers drop-in (`sudo visudo -f /etc/sudoers.d/tracearr`).
+# The args must match EXACTLY what the app/script invoke (sudoers matches the
+# full argv): the button spawns `sudo systemctl start --no-block ...` and the
+# updater runs `sudo systemctl restart tracearr.service`.
+#   tracearr ALL=(root) NOPASSWD: /usr/bin/systemctl start --no-block tracearr-update.service, /usr/bin/systemctl restart tracearr.service
 #
 # Then set TRACEARR_SELF_UPDATE=true in the tracearr .env to enable the button.
 #

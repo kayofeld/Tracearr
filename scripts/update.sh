@@ -27,6 +27,9 @@ if [ -z "${TRACEARR_UPDATE_REEXEC:-}" ]; then
 fi
 
 REPO_DIR="${TRACEARR_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# systemd runs this unit with a minimal PATH; node/corepack commonly live in
+# /usr/local/bin. Prepend the usual toolchain dirs so git/node/corepack resolve.
+export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 STATUS_FILE="$REPO_DIR/.update-status.json"
 LOG_FILE="$REPO_DIR/.update.log"
 cd "$REPO_DIR"
