@@ -24,17 +24,17 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { users, servers, authAccounts } from '../db/schema.js';
 import { EmbyClient } from '../services/mediaServer/index.js';
-import { assertSignupAllowed, assertClaimCode } from './authGuards.js';
 
 const EMBY_PROVIDER = 'emby';
 
+// NOTE: the server URL is NEVER taken from the client. It is resolved from the
+// owner's own configured Emby server. Accepting a client URL would let an
+// attacker point login at their OWN Emby (where they are trivially admin),
+// satisfy the isAdmin gate, and get bound as the Tracearr owner (auth bypass),
+// as well as drive SSRF. Only credentials are accepted here.
 const loginBody = z.object({
   username: z.string().min(1),
   password: z.string(),
-  // Optional: defaults to the configured Emby server. Provided on first-run when
-  // no server is registered yet.
-  serverUrl: z.url().optional(),
-  claimCode: z.string().optional(),
 });
 
 type EmbyEndpointCtx = Parameters<typeof setSessionCookie>[0];
@@ -81,8 +81,8 @@ export function decideEmbyOwnerLogin(input: {
   return { allow: true, needsLink: true };
 }
 
-async function resolveEmbyServerUrl(provided: string | undefined): Promise<string | null> {
-  if (provided) return provided.replace(/\/$/, '');
+/** The owner's configured Emby server URL — the only server we trust to auth against. */
+async function resolveConfiguredEmbyServerUrl(): Promise<string | null> {
   const [server] = await db
     .select({ url: servers.url })
     .from(servers)
@@ -99,12 +99,12 @@ export const embyPlugin = () =>
         '/emby/login',
         { method: 'POST', body: loginBody },
         async (ctx) => {
-          const { username, password, serverUrl, claimCode } = ctx.body;
+          const { username, password } = ctx.body;
 
-          const url = await resolveEmbyServerUrl(serverUrl);
+          const url = await resolveConfiguredEmbyServerUrl();
           if (!url) {
             throw new APIError('BAD_REQUEST', {
-              message: 'No Emby server is configured. Provide the Emby server URL.',
+              message: 'No Emby server is configured. Connect an Emby server first.',
             });
           }
 
@@ -127,42 +127,17 @@ export const embyPlugin = () =>
 
           const [owner] = await db.select().from(users).where(eq(users.role, 'owner')).limit(1);
 
-          // ---- First-run: no owner yet. Create the owner from this Emby admin. ----
+          // No owner => fail closed. First-run owner creation is the local-signup
+          // flow (an Emby login can't bootstrap an owner: doing so would let an
+          // admin on ANY reachable Emby become the owner). Emby login only maps to
+          // an already-established owner + configured server.
           if (!owner) {
-            await assertSignupAllowed(); // fails closed if an owner somehow exists
-            assertClaimCode(claimCode);
-
-            const newUserId = randomUUID();
-            const inserted = await db
-              .insert(users)
-              .values({
-                id: newUserId,
-                username: authResult.username.toLowerCase(),
-                displayUsername: authResult.username,
-                name: authResult.username,
-                role: 'owner',
-                emailVerified: true,
-              })
-              .returning();
-            const created = inserted[0];
-            if (!created) {
-              throw new APIError('INTERNAL_SERVER_ERROR', { message: 'Failed to create user.' });
-            }
-            await db.insert(authAccounts).values({
-              id: randomUUID(),
-              accountId: authResult.id,
-              providerId: EMBY_PROVIDER,
-              userId: created.id,
-              accessToken: authResult.token,
-            });
-            const { user: sessionUser } = await createEmbySession(ctx, created.id);
-            return ctx.json({
-              authorized: true,
-              user: { id: sessionUser.id, username: created.username, role: 'owner' },
+            throw new APIError('FORBIDDEN', {
+              message: 'Set up the owner account first, then link Emby.',
             });
           }
 
-          // ---- Owner exists: verify/bind this Emby identity to the owner. ----
+          // ---- Verify/bind this Emby identity to the owner. ----
           const [linkForThisEmbyAccount] = await db
             .select({ userId: authAccounts.userId })
             .from(authAccounts)
