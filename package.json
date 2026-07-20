@@ -1,6 +1,6 @@
 {
   "name": "tracearr",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "private": true,
   "type": "module",
   "description": "Streaming access manager for Plex and Jellyfin",
