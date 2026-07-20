@@ -33,6 +33,37 @@ function sequence(...steps: Array<{ resolve?: unknown; reject?: Error }>) {
   });
 }
 
+describe('EmbyClient.authenticate', () => {
+  beforeEach(() => {
+    mockFetchJson.mockReset();
+  });
+
+  it('sends the plaintext password in the `Pw` field, not `Password`', async () => {
+    // Regression: Emby 4.9.5 returns 401 when the password is sent as `Password`;
+    // it must be `Pw` (verified live). Getting this wrong breaks Emby login entirely.
+    mockFetchJson.mockResolvedValue({
+      AccessToken: 'tok',
+      User: { Id: 'u1', Name: 'draner', Policy: { IsAdministrator: true } },
+    });
+
+    const result = await EmbyClient.authenticate(URL, 'draner', 's3cret!!');
+
+    const call = mockFetchJson.mock.calls[0];
+    expect(call?.[0]).toBe(`${URL}/Users/AuthenticateByName`);
+    const body = JSON.parse((call?.[1]?.body as string) ?? '{}') as Record<string, unknown>;
+    expect(body.Pw).toBe('s3cret!!');
+    expect(body.Username).toBe('draner');
+    expect(body).not.toHaveProperty('Password');
+    expect(result?.isAdmin).toBe(true);
+  });
+
+  it('returns null on a 401 (bad credentials)', async () => {
+    mockFetchJson.mockRejectedValue(new Error('emby request failed: 401 Unauthorized'));
+    const result = await EmbyClient.authenticate(URL, 'draner', 'wrong');
+    expect(result).toBeNull();
+  });
+});
+
 describe('EmbyClient.verifyServerAdmin', () => {
   beforeEach(() => {
     mockFetchJson.mockReset();
