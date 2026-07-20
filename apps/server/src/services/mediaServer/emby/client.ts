@@ -87,7 +87,9 @@ export class EmbyClient extends BaseMediaServerClient {
 
   /**
    * Authenticate with username/password
-   * Note: Emby uses 'Password' field (not 'Pw' like Jellyfin)
+   * Note: Emby takes the plaintext password in the `Pw` field (same as Jellyfin).
+   * Verified live against Emby 4.9.5: `Pw` returns 200 + a token, while sending
+   * the password in a `Password` field returns 401.
    */
   static async authenticate(
     serverUrl: string,
@@ -107,7 +109,7 @@ export class EmbyClient extends BaseMediaServerClient {
         },
         body: JSON.stringify({
           Username: username,
-          Password: password, // Emby uses 'Password', not 'Pw'
+          Pw: password, // plaintext password field Emby expects (NOT `Password`)
         }),
         service: 'emby',
         timeout: 10000, // bound the login round-trip (parity with verifyServerAdmin)
