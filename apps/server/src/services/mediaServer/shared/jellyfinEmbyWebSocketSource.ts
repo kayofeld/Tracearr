@@ -40,6 +40,16 @@ const SUBSCRIBE_CONFIRM_TIMEOUT_MS = 5000;
 // every ~1.5s, so 15s is ~10 missed frames.
 const HEARTBEAT_TIMEOUT_MS = 15000;
 
+// Jellyfin's SessionWebSocketListener force-closes any socket that hasn't sent a
+// KeepAlive within its WebSocketLostTimeout (~60s); only KeepAlive refreshes it,
+// inbound Sessions frames do not. Send one on every ForceKeepAlive AND on a timer
+// well under 60s so the Jellyfin path doesn't churn. Emby tolerates it too.
+const KEEPALIVE_INTERVAL_MS = 30000;
+
+// Re-probe cadence once the reconnect budget is spent — polling covers data
+// meanwhile. Matches the plugin source's 3-min fallback (not the 30s backoff cap).
+const FALLBACK_RETRY_MS = 3 * 60 * 1000;
+
 interface RawSession {
   Id?: unknown;
   UserId?: unknown;
@@ -62,10 +72,11 @@ export function sessionSignatures(sessions: unknown): Set<string> {
     const nowPlaying = raw?.NowPlayingItem;
     if (!nowPlaying) continue; // only playing sessions matter to the poller
     const sessionId = String(raw?.Id ?? '');
+    const userId = String(raw?.UserId ?? '');
     const itemId = String(nowPlaying?.Id ?? '');
     const isPaused = raw?.PlayState?.IsPaused === true ? '1' : '0';
     const playMethod = String(raw?.PlayState?.PlayMethod ?? '');
-    sigs.add(`${sessionId}:${itemId}:${isPaused}:${playMethod}`);
+    sigs.add(`${sessionId}:${userId}:${itemId}:${isPaused}:${playMethod}`);
   }
   return sigs;
 }
@@ -100,6 +111,8 @@ export class JellyfinEmbyWebSocketSource extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private subscribeConfirmTimer: NodeJS.Timeout | null = null;
+  private connectTimer: NodeJS.Timeout | null = null;
+  private keepAliveTimer: NodeJS.Timeout | null = null;
 
   private connectedAt: Date | null = null;
   private lastEventTime: Date | null = null;
@@ -153,19 +166,34 @@ export class JellyfinEmbyWebSocketSource extends EventEmitter {
   }
 
   connect(): void {
+    // Guard: never open a second socket over a live/in-flight one.
+    if (this.state === 'connecting' || this.state === 'connected') return;
     this.clearTimers();
     this.setState(this.reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
 
     let ws: WebSocket;
     try {
       ws = new WebSocketImpl(this.wsUrl());
-    } catch (error) {
-      this.handleError(error);
+    } catch {
+      // The raw error can embed the URL (with ?api_key=...) — never propagate it,
+      // it would surface in the connection-status error field broadcast to clients.
+      this.handleError(new Error('WebSocket construction failed'));
       return;
     }
     this.ws = ws;
 
+    // A stalled upgrade (blackhole / tarpit) never fires onopen; without this the
+    // tier hangs in 'connecting' until undici's multi-minute default. Polling
+    // covers data meanwhile; this bounds the stall.
+    this.connectTimer = setTimeout(() => {
+      this.handleError(new Error('WebSocket connect timeout'));
+    }, HEARTBEAT_TIMEOUT_MS);
+
     ws.onopen = () => {
+      if (this.connectTimer) {
+        clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+      }
       this.connectedAt = new Date();
       this.reconnectAttempts = 0;
       this.setState('connected');
@@ -175,6 +203,7 @@ export class JellyfinEmbyWebSocketSource extends EventEmitter {
       this.subscribeConfirmTimer = setTimeout(() => {
         if (!this.hadFirstSnapshot) this.subscribe();
       }, SUBSCRIBE_CONFIRM_TIMEOUT_MS);
+      this.startKeepAlive();
       this.resetHeartbeat();
     };
 
@@ -186,8 +215,21 @@ export class JellyfinEmbyWebSocketSource extends EventEmitter {
   }
 
   private subscribe(): void {
+    this.send({ MessageType: 'SessionsStart', Data: SUBSCRIBE_PAYLOAD });
+  }
+
+  private sendKeepAlive(): void {
+    this.send({ MessageType: 'KeepAlive' });
+  }
+
+  private startKeepAlive(): void {
+    if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
+    this.keepAliveTimer = setInterval(() => this.sendKeepAlive(), KEEPALIVE_INTERVAL_MS);
+  }
+
+  private send(payload: Record<string, unknown>): void {
     try {
-      this.ws?.send(JSON.stringify({ MessageType: 'SessionsStart', Data: SUBSCRIBE_PAYLOAD }));
+      this.ws?.send(JSON.stringify(payload));
     } catch {
       // send on a closing socket throws; the close/error path handles recovery
     }
@@ -205,6 +247,12 @@ export class JellyfinEmbyWebSocketSource extends EventEmitter {
       };
     } catch {
       return; // non-JSON keep-alive; liveness already recorded above
+    }
+    // Jellyfin asks for a KeepAlive on connect (and periodically); reply at once
+    // so it doesn't force-close us. Our own interval covers the periodic case.
+    if (msg.MessageType === 'ForceKeepAlive') {
+      this.sendKeepAlive();
+      return;
     }
     if (msg.MessageType !== 'Sessions') return;
 
@@ -257,7 +305,7 @@ export class JellyfinEmbyWebSocketSource extends EventEmitter {
       this.reconnectTimer = setTimeout(() => {
         this.reconnectAttempts = 0;
         this.connect();
-      }, SSE_CONFIG.MAX_RETRY_DELAY_MS);
+      }, FALLBACK_RETRY_MS);
       return;
     }
 
@@ -305,8 +353,12 @@ export class JellyfinEmbyWebSocketSource extends EventEmitter {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     if (this.subscribeConfirmTimer) clearTimeout(this.subscribeConfirmTimer);
+    if (this.connectTimer) clearTimeout(this.connectTimer);
+    if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
     this.reconnectTimer = null;
     this.heartbeatTimer = null;
     this.subscribeConfirmTimer = null;
+    this.connectTimer = null;
+    this.keepAliveTimer = null;
   }
 }

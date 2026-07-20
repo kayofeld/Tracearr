@@ -431,6 +431,9 @@ export class SSEManager extends EventEmitter {
       Date.now() - status.connectedAt.getTime() > 30_000;
     const pluginUpdateAvailable =
       serverType !== 'plex' &&
+      // The native-WS tier has no plugin, so a null version is not a stale plugin -
+      // don't nag about a plugin update on the transport whose point is no plugin.
+      !NATIVE_WS_ENABLED &&
       latest !== null &&
       state === 'connected' &&
       (pluginVersion === null ? connectedLongEnough : compareVersions(pluginVersion, latest) < 0);
