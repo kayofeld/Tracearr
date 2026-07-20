@@ -106,6 +106,77 @@ Open `http://localhost:3000` and connect your Plex, Jellyfin, or Emby server.
 
 For Portainer deployment, alternative configurations, or detailed requirements, see the [Docker deployment guide](docker/examples/README.md). For full documentation, visit [docs.tracearr.com](https://docs.tracearr.com).
 
+### Manual install (without Docker)
+
+Tracearr runs as a single Node process that serves both the API and the web UI. You bring your own PostgreSQL and Redis.
+
+**Prerequisites**
+
+- Node.js 22+ and pnpm 11.8+ (`corepack enable` provides pnpm)
+- PostgreSQL 16+ with the TimescaleDB extension enabled on the database
+- Redis 7+
+
+**Install and build**
+
+```bash
+git clone https://github.com/connorgallopo/Tracearr.git
+cd Tracearr
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+**Configure** — create `.env` in the repository root (the server loads it automatically):
+
+```bash
+cat > .env <<EOF
+DATABASE_URL=postgres://tracearr:tracearr@localhost:5432/tracearr
+REDIS_URL=redis://localhost:6379
+JWT_SECRET=$(openssl rand -hex 32)
+COOKIE_SECRET=$(openssl rand -hex 32)
+NODE_ENV=production
+PORT=3000
+HOST=0.0.0.0
+EOF
+```
+
+See `.env.example` for the full list of optional settings (CORS_ORIGIN and `TRUST_PROXY` behind a reverse proxy, OIDC sign-in, the experimental native-WebSocket real-time tier, and more).
+
+**Run**
+
+```bash
+node apps/server/dist/index.js
+```
+
+The server applies database migrations on startup, then serves the app at `http://localhost:3000` (or your `PORT`). There is no separate migrate step. Bundled GeoLite2 databases under `data/` give geolocation out of the box.
+
+**Keep it running** with a process manager. Example systemd unit at `/etc/systemd/system/tracearr.service`:
+
+```ini
+[Unit]
+Description=Tracearr
+After=network.target postgresql.service redis-server.service
+
+[Service]
+WorkingDirectory=/opt/tracearr
+ExecStart=/usr/bin/node apps/server/dist/index.js
+Restart=on-failure
+User=tracearr
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then `sudo systemctl enable --now tracearr` (with the repo checked out at `/opt/tracearr` and `.env` in that directory).
+
+**Updating** is `git pull` plus a rebuild and restart; migrations run on the next start:
+
+```bash
+git pull
+pnpm install --frozen-lockfile
+pnpm build
+sudo systemctl restart tracearr
+```
+
 ### Docker Tags
 
 | Tag                  | Description                                        |
