@@ -89,6 +89,10 @@ import {
   cleanupOrphanedPendingSessions,
 } from './jobs/sseProcessor.js';
 import { startPluginUpdateChecker, stopPluginUpdateChecker } from './jobs/pluginUpdateChecker.js';
+import {
+  startTelegramCommandListener,
+  stopTelegramCommandListener,
+} from './jobs/telegramCommandListener.js';
 import { initializeWebSocket, broadcastToSessions } from './websocket/index.js';
 import {
   initNotificationQueue,
@@ -503,6 +507,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     await tailscaleService.shutdown();
     stopSSEProcessor();
     stopPluginUpdateChecker();
+    stopTelegramCommandListener();
     await shutdownNotificationQueue();
     await shutdownKillQueue();
     await shutdownImportQueue();
@@ -1026,6 +1031,7 @@ async function initializePostListen(app: FastifyInstance) {
     await cleanupOrphanedPendingSessions();
     startSSEProcessor(); // Subscribe to SSE events
     startPluginUpdateChecker();
+    startTelegramCommandListener();
     await sseManager.start(); // Start SSE connections
     app.log.info('Real-time SSE connections started');
   } catch (err) {
@@ -1167,6 +1173,7 @@ async function start() {
         stopPoller();
         stopSSEProcessor();
         stopPluginUpdateChecker();
+        stopTelegramCommandListener();
         void sseManager.stop();
         void tailscaleService.shutdown();
 
