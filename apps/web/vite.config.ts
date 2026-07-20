@@ -44,5 +44,21 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // Route pages are lazy-loaded (see App.tsx), so these heavy libs already
+        // fall out of the initial bundle; pin them to stable shared chunks so the
+        // several chart/map routes share one cached copy loaded on demand.
+        // (rolldown requires the function form.)
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return;
+          if (/[\\/](highcharts|highcharts-react-official)[\\/]/.test(id)) return 'highcharts';
+          if (/[\\/](leaflet|react-leaflet|react-leaflet-heatmap-layer-v3)[\\/]/.test(id)) {
+            return 'leaflet';
+          }
+          if (/[\\/](react|react-dom|react-router)[\\/]/.test(id)) return 'react-vendor';
+        },
+      },
+    },
   },
 }));
