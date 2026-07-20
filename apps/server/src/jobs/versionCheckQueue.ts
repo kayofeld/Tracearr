@@ -31,7 +31,10 @@ export class GitHubRateLimitError extends Error {
 }
 
 // GitHub API configuration
-const DEFAULT_UPDATE_REPO = 'connorgallopo/Tracearr';
+// This is the kayofeld fork's own line: the update checker tracks the fork's
+// releases by default. Override with TRACEARR_UPDATE_REPO to follow a different
+// repo (e.g. upstream connorgallopo/Tracearr, or your own fork).
+const DEFAULT_UPDATE_REPO = 'kayofeld/Tracearr';
 
 /**
  * The GitHub `owner/repo` the update checker tracks. Defaults to upstream; set

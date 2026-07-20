@@ -28,18 +28,18 @@ import {
 } from '../versionCheckQueue.js';
 
 describe('resolveUpdateRepo', () => {
-  it('defaults to upstream when unset', () => {
-    expect(resolveUpdateRepo(undefined)).toBe('connorgallopo/Tracearr');
+  it('defaults to this fork when unset', () => {
+    expect(resolveUpdateRepo(undefined)).toBe('kayofeld/Tracearr');
   });
-  it('accepts a valid owner/repo slug (a fork)', () => {
-    expect(resolveUpdateRepo('kayofeld/Tracearr')).toBe('kayofeld/Tracearr');
+  it('accepts a valid owner/repo slug (e.g. upstream or another fork)', () => {
+    expect(resolveUpdateRepo('connorgallopo/Tracearr')).toBe('connorgallopo/Tracearr');
   });
   it('trims surrounding whitespace', () => {
-    expect(resolveUpdateRepo('  kayofeld/Tracearr  ')).toBe('kayofeld/Tracearr');
+    expect(resolveUpdateRepo('  connorgallopo/Tracearr  ')).toBe('connorgallopo/Tracearr');
   });
   it('falls back to default on a malformed or injection-y value', () => {
     for (const bad of ['', 'no-slash', 'a/b/c', 'owner/repo?x=1', '../../etc', 'a/b c']) {
-      expect(resolveUpdateRepo(bad)).toBe('connorgallopo/Tracearr');
+      expect(resolveUpdateRepo(bad)).toBe('kayofeld/Tracearr');
     }
   });
 });

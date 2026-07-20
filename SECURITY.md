@@ -1,5 +1,12 @@
 # Security Policy
 
+> [!NOTE]
+> This is the **kayofeld fork**. For vulnerabilities in **this fork's** code, use the "Report a
+> vulnerability" button under the Security tab of [kayofeld/Tracearr](https://github.com/kayofeld/Tracearr/security)
+> — that reaches the fork maintainer privately. `security@tracearr.com` below is **upstream's** contact and
+> does not reach this fork. For issues in upstream Tracearr, report to
+> [connorgallopo/Tracearr](https://github.com/connorgallopo/Tracearr).
+
 > [!CAUTION]
 > Unedited LLM "audit" reports waste my time and will be closed without a detailed response. Repeat offenders get blocked. See [AI / LLM-generated reports](#ai--llm-generated-reports) below for what's acceptable.
 

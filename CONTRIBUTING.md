@@ -1,5 +1,11 @@
 # Contributing to Tracearr
 
+> [!NOTE]
+> This is the **[kayofeld](https://github.com/kayofeld) fork**, run fork-direct as a personal line (see the
+> README's fork note). To contribute to Tracearr broadly, consider
+> [upstream](https://github.com/connorgallopo/Tracearr), which actively takes PRs. The guidance below
+> applies to both; for a fork-specific change, open a PR against `kayofeld/Tracearr`.
+
 Thanks for considering a contribution. This document covers how we work and what we expect from PRs.
 
 ## Talk to Us First
