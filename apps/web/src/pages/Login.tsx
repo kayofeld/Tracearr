@@ -2,15 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  Loader2,
-  ExternalLink,
-  User,
-  KeyRound,
-  LogIn,
-  AlertCircle,
-  AlertTriangle,
-} from 'lucide-react';
+import { Loader2, User, KeyRound, LogIn, AlertCircle, AlertTriangle } from 'lucide-react';
 import { MediaServerIcon } from '@/components/icons/MediaServerIcon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,12 +13,8 @@ import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { authClient } from '@/lib/authClient';
 import { api, BASE_URL } from '@/lib/api';
-import type { PlexDiscoveredServer, SetupStatus } from '@tracearr/shared';
+import type { SetupStatus } from '@tracearr/shared';
 import { LogoIcon } from '@/components/brand/Logo';
-import { PlexServerSelector } from '@/components/auth/PlexServerSelector';
-
-// Plex brand color
-const PLEX_COLOR = 'bg-[#E5A00D] hover:bg-[#C88A0B]';
 
 const DEFAULT_AUTH_METHODS: SetupStatus['authMethods'] = {
   local: true,
@@ -36,7 +24,7 @@ const DEFAULT_AUTH_METHODS: SetupStatus['authMethods'] = {
   oidcProviderName: null,
 };
 
-type AuthStep = 'claim-code-gate' | 'initial' | 'plex-waiting' | 'server-select';
+type AuthStep = 'claim-code-gate' | 'initial';
 
 export function Login() {
   const navigate = useNavigate();
@@ -53,11 +41,6 @@ export function Login() {
 
   // Auth flow state
   const [authStep, setAuthStep] = useState<AuthStep>('initial');
-  const [plexAuthUrl, setPlexAuthUrl] = useState<string | null>(null);
-  const [plexServers, setPlexServers] = useState<PlexDiscoveredServer[]>([]);
-  const [plexTempToken, setPlexTempToken] = useState<string | null>(null);
-  const [connectingToServer, setConnectingToServer] = useState<string | null>(null);
-  const [plexPopup, setPlexPopup] = useState<ReturnType<typeof window.open>>(null);
 
   // Local auth form state (sign-in uses a single identifier field; sign-up
   // collects a display name and a separate login username)
@@ -134,14 +117,6 @@ export function Login() {
     }
   }, [isAuthenticated, authLoading, navigate, searchParams]);
 
-  // Close Plex popup helper
-  const closePlexPopup = () => {
-    if (plexPopup && !plexPopup.closed) {
-      plexPopup.close();
-    }
-    setPlexPopup(null);
-  };
-
   // Handle claim code validation (immediate feedback, server validates again during signup)
   const handleClaimCodeValidation = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -163,124 +138,6 @@ export function Login() {
     } finally {
       setClaimCodeLoading(false);
     }
-  };
-
-  // Poll for Plex PIN claim
-  const pollPlexPin = async (pinId: string) => {
-    try {
-      const result = await api.auth.checkPlexPin({
-        pinId,
-        ...(requiresClaimCode && { claimCode: claimCode.trim() }),
-      });
-
-      if (!result.authorized) {
-        // Still waiting for PIN claim, continue polling
-        setTimeout(() => void pollPlexPin(pinId), 2000);
-        return;
-      }
-
-      // PIN claimed - close the popup
-      closePlexPopup();
-
-      // Check what we got back
-      if (result.needsServerSelection && result.servers && result.tempToken) {
-        // New user - needs to select a server
-        setPlexServers(result.servers);
-        setPlexTempToken(result.tempToken);
-        setAuthStep('server-select');
-      } else if (result.user) {
-        // User authenticated (returning or no servers) - session cookie is already set
-        await queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
-        toast.success(t('notifications:toast.success.loggedIn.title'), {
-          description: t('notifications:toast.success.loggedIn.message'),
-        });
-        void navigate('/');
-      }
-    } catch (error) {
-      resetPlexAuth();
-      toast.error(t('notifications:toast.error.authFailed'), {
-        description: error instanceof Error ? error.message : t('pages:login.plexAuthFailed'),
-      });
-    }
-  };
-
-  // Start Plex OAuth flow
-  const handlePlexLogin = async () => {
-    setAuthStep('plex-waiting');
-
-    // Open popup to blank page first (same origin) - helps with cross-origin close
-    const popup = window.open('about:blank', 'plex_auth', 'width=600,height=700,popup=yes');
-    setPlexPopup(popup);
-
-    try {
-      // Pass callback URL so Plex redirects back to our domain after auth
-      const callbackUrl = `${window.location.origin}${BASE_URL}auth/plex-callback`;
-      const result = await api.auth.initiatePlex(callbackUrl);
-      setPlexAuthUrl(result.authUrl);
-
-      // Navigate popup to Plex auth
-      if (popup && !popup.closed) {
-        popup.location.assign(result.authUrl);
-      }
-
-      // Start polling
-      void pollPlexPin(result.pinId);
-    } catch (error) {
-      closePlexPopup();
-      setAuthStep('initial');
-      toast.error(t('common:errors.generic'), {
-        description: error instanceof Error ? error.message : t('pages:login.plexStartFailed'),
-      });
-    }
-  };
-
-  // Connect to selected Plex server
-  const handlePlexServerSelect = async (
-    serverUri: string,
-    serverName: string,
-    clientIdentifier: string
-  ) => {
-    if (!plexTempToken) return;
-
-    setConnectingToServer(serverName);
-
-    try {
-      const result = await api.auth.connectPlexServer({
-        tempToken: plexTempToken,
-        serverUri,
-        serverName,
-        clientIdentifier,
-        ...(requiresClaimCode && { claimCode: claimCode.trim() }),
-      });
-
-      if (result.authorized) {
-        await queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
-        toast.success(t('notifications:toast.success.loggedIn.title'), {
-          description: t('pages:login.connectedTo', { name: serverName }),
-        });
-        void navigate('/');
-      }
-    } catch (error) {
-      toast.error(t('common:errors.connectionFailed'), {
-        description: error instanceof Error ? error.message : t('pages:login.serverConnectFailed'),
-      });
-    } finally {
-      setConnectingToServer(null);
-    }
-  };
-
-  // Reset Plex auth state
-  const resetPlexAuth = () => {
-    // Close popup if still open
-    if (plexPopup && !plexPopup.closed) {
-      plexPopup.close();
-    }
-    setPlexPopup(null);
-    setAuthStep('initial');
-    setPlexAuthUrl(null);
-    setPlexServers([]);
-    setPlexTempToken(null);
-    setConnectingToServer(null);
   };
 
   // Handle local sign-up (first-run owner account creation)
@@ -463,53 +320,10 @@ export function Login() {
     );
   }
 
-  // Server selection step (only during Plex signup)
-  if (authStep === 'server-select' && plexServers.length > 0) {
-    return (
-      <div className="bg-background flex min-h-screen flex-col items-center justify-center p-4">
-        <div className="mb-8 flex flex-col items-center text-center">
-          <LogoIcon className="mb-4 h-20 w-20" />
-          <h1 className="text-4xl font-bold tracking-tight">{t('pages:login.title')}</h1>
-          <p className="text-muted-foreground mt-2">{t('pages:login.selectPlexServer')}</p>
-        </div>
-
-        <Card className="w-fit max-w-[calc(100vw-2rem)] min-w-[28rem]">
-          <CardHeader>
-            <CardTitle>{t('settings:plex.selectServer')}</CardTitle>
-            <CardDescription>{t('settings:plex.chooseServer')}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <PlexServerSelector
-              servers={plexServers}
-              onSelect={handlePlexServerSelect}
-              connecting={connectingToServer !== null}
-              connectingToServer={connectingToServer}
-              onCancel={resetPlexAuth}
-              onTestCustomUrl={
-                plexTempToken
-                  ? async (uri) => {
-                      const result = await api.auth.testPlexConnection({
-                        uri,
-                        tempToken: plexTempToken,
-                        ...(requiresClaimCode && claimCode.trim()
-                          ? { claimCode: claimCode.trim() }
-                          : {}),
-                      });
-                      return result.connection;
-                    }
-                  : undefined
-              }
-            />
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   // Emby credential login is offered for returning sign-in (an owner + Emby
   // server already exist). First-run setup stays on local account creation.
   const showEmbyLogin = authMethods.emby && !needsSetup;
-  const hasPrimaryMethods = authMethods.plex || showEmbyLogin || authMethods.oidc;
+  const hasPrimaryMethods = showEmbyLogin || authMethods.oidc;
 
   return (
     <div className="bg-background flex min-h-screen flex-col items-center justify-center p-4">
@@ -540,237 +354,195 @@ export function Login() {
             </Alert>
           )}
 
-          {authStep === 'plex-waiting' ? (
-            <div className="space-y-4">
-              <div className="bg-muted/50 rounded-lg p-4 text-center">
-                <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-[#E5A00D]" />
-                <p className="text-sm font-medium">{t('pages:login.waitingForPlex')}</p>
-                <p className="text-muted-foreground mt-1 text-xs">
-                  {t('pages:login.completeInPopup')}
-                </p>
-                {plexAuthUrl && (
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    onClick={() => window.open(plexAuthUrl, '_blank')}
-                    className="mt-2 h-auto gap-1 p-0"
-                  >
-                    <ExternalLink className="h-3 w-3" />
-                    {t('pages:login.reopenPlexLogin')}
-                  </Button>
-                )}
-              </div>
-              <Button variant="ghost" className="w-full" onClick={resetPlexAuth}>
-                {t('common:actions.cancel')}
-              </Button>
-            </div>
-          ) : (
-            <>
-              {showEmbyLogin && (
-                <form onSubmit={handleEmbyLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="emby-username">{t('pages:login.embyUsername')}</Label>
-                    <Input
-                      id="emby-username"
-                      type="text"
-                      autoComplete="username"
-                      value={embyUsername}
-                      onChange={(e) => setEmbyUsername(e.target.value)}
-                      required
-                      disabled={embyPending}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="emby-password">{t('settings:account.password')}</Label>
-                    <Input
-                      id="emby-password"
-                      type="password"
-                      autoComplete="current-password"
-                      value={embyPassword}
-                      onChange={(e) => setEmbyPassword(e.target.value)}
-                      required
-                      disabled={embyPending}
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={embyPending}>
-                    {embyPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <MediaServerIcon type="emby" className="mr-2 h-4 w-4" />
-                    )}
-                    {t('pages:login.signInWithEmby')}
-                  </Button>
-                </form>
-              )}
-
-              {authMethods.plex && (
-                <Button className={`w-full ${PLEX_COLOR} text-white`} onClick={handlePlexLogin}>
-                  <MediaServerIcon type="plex" className="mr-2 h-4 w-4" />
-                  {needsSetup
-                    ? t('settings:plex.signUpWithPlex')
-                    : t('settings:plex.signInWithPlex')}
-                </Button>
-              )}
-
-              {authMethods.oidc && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  disabled={oidcPending}
-                  onClick={handleOidcLogin}
-                >
-                  {oidcPending ? (
+          <>
+            {showEmbyLogin && (
+              <form onSubmit={handleEmbyLogin} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="emby-username">{t('pages:login.embyUsername')}</Label>
+                  <Input
+                    id="emby-username"
+                    type="text"
+                    autoComplete="username"
+                    value={embyUsername}
+                    onChange={(e) => setEmbyUsername(e.target.value)}
+                    required
+                    disabled={embyPending}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="emby-password">{t('settings:account.password')}</Label>
+                  <Input
+                    id="emby-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={embyPassword}
+                    onChange={(e) => setEmbyPassword(e.target.value)}
+                    required
+                    disabled={embyPending}
+                  />
+                </div>
+                <Button type="submit" className="w-full" disabled={embyPending}>
+                  {embyPending ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
-                    <LogIn className="mr-2 h-4 w-4" />
+                    <MediaServerIcon type="emby" className="mr-2 h-4 w-4" />
                   )}
-                  {t('pages:login.continueWith', { provider: authMethods.oidcProviderName })}
+                  {t('pages:login.signInWithEmby')}
                 </Button>
-              )}
+              </form>
+            )}
 
-              {hasPrimaryMethods && (
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-card text-muted-foreground px-2">{t('common:or')}</span>
-                  </div>
-                </div>
-              )}
-
-              {authMethods.local ? (
-                needsSetup ? (
-                  <form onSubmit={handleSignUp} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="name">{t('settings:account.displayName')}</Label>
-                      <Input
-                        id="name"
-                        type="text"
-                        autoComplete="name"
-                        placeholder={t('pages:login.displayNamePlaceholder')}
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
-                        disabled={localPending}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="username">{t('pages:login.username')}</Label>
-                      <Input
-                        id="username"
-                        type="text"
-                        autoComplete="username"
-                        placeholder={t('pages:login.usernamePlaceholder')}
-                        value={signupUsername}
-                        onChange={(e) => setSignupUsername(e.target.value)}
-                        required
-                        minLength={3}
-                        maxLength={30}
-                        disabled={localPending}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email">{t('settings:account.email')}</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        autoComplete="email"
-                        placeholder={t('pages:login.emailPlaceholder')}
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
-                        disabled={localPending}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="password">{t('settings:account.password')}</Label>
-                      <Input
-                        id="password"
-                        type="password"
-                        autoComplete="new-password"
-                        placeholder={t('pages:login.passwordPlaceholder')}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                        minLength={8}
-                        disabled={localPending}
-                      />
-                    </div>
-                    {formError && (
-                      <p
-                        className="text-destructive flex items-center gap-1.5 text-sm"
-                        role="alert"
-                      >
-                        <AlertCircle className="h-4 w-4 shrink-0" />
-                        {formError}
-                      </p>
-                    )}
-                    <Button type="submit" className="w-full" disabled={localPending}>
-                      {localPending ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <User className="mr-2 h-4 w-4" />
-                      )}
-                      {t('settings:account.createAccount')}
-                    </Button>
-                  </form>
+            {authMethods.oidc && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={oidcPending}
+                onClick={handleOidcLogin}
+              >
+                {oidcPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
-                  <form onSubmit={handleSignIn} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="identifier">{t('pages:login.usernameOrEmail')}</Label>
-                      <Input
-                        id="identifier"
-                        type="text"
-                        autoComplete="username"
-                        placeholder={t('pages:login.identifierPlaceholder')}
-                        value={identifier}
-                        onChange={(e) => setIdentifier(e.target.value)}
-                        required
-                        disabled={localPending}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="password">{t('settings:account.password')}</Label>
-                      <Input
-                        id="password"
-                        type="password"
-                        autoComplete="current-password"
-                        placeholder={t('pages:login.yourPasswordPlaceholder')}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                        disabled={localPending}
-                      />
-                    </div>
-                    {formError && (
-                      <p
-                        className="text-destructive flex items-center gap-1.5 text-sm"
-                        role="alert"
-                      >
-                        <AlertCircle className="h-4 w-4 shrink-0" />
-                        {formError}
-                      </p>
+                  <LogIn className="mr-2 h-4 w-4" />
+                )}
+                {t('pages:login.continueWith', { provider: authMethods.oidcProviderName })}
+              </Button>
+            )}
+
+            {hasPrimaryMethods && (
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card text-muted-foreground px-2">{t('common:or')}</span>
+                </div>
+              </div>
+            )}
+
+            {authMethods.local ? (
+              needsSetup ? (
+                <form onSubmit={handleSignUp} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">{t('settings:account.displayName')}</Label>
+                    <Input
+                      id="name"
+                      type="text"
+                      autoComplete="name"
+                      placeholder={t('pages:login.displayNamePlaceholder')}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
+                      disabled={localPending}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="username">{t('pages:login.username')}</Label>
+                    <Input
+                      id="username"
+                      type="text"
+                      autoComplete="username"
+                      placeholder={t('pages:login.usernamePlaceholder')}
+                      value={signupUsername}
+                      onChange={(e) => setSignupUsername(e.target.value)}
+                      required
+                      minLength={3}
+                      maxLength={30}
+                      disabled={localPending}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">{t('settings:account.email')}</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      autoComplete="email"
+                      placeholder={t('pages:login.emailPlaceholder')}
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      disabled={localPending}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="password">{t('settings:account.password')}</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={t('pages:login.passwordPlaceholder')}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      minLength={8}
+                      disabled={localPending}
+                    />
+                  </div>
+                  {formError && (
+                    <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      {formError}
+                    </p>
+                  )}
+                  <Button type="submit" className="w-full" disabled={localPending}>
+                    {localPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <User className="mr-2 h-4 w-4" />
                     )}
-                    <Button type="submit" className="w-full" disabled={localPending}>
-                      {localPending ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <KeyRound className="mr-2 h-4 w-4" />
-                      )}
-                      {t('common:actions.signIn')}
-                    </Button>
-                  </form>
-                )
+                    {t('settings:account.createAccount')}
+                  </Button>
+                </form>
               ) : (
-                <p className="text-muted-foreground text-center text-sm">
-                  {t('pages:login.localDisabledHint')}
-                </p>
-              )}
-            </>
-          )}
+                <form onSubmit={handleSignIn} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="identifier">{t('pages:login.usernameOrEmail')}</Label>
+                    <Input
+                      id="identifier"
+                      type="text"
+                      autoComplete="username"
+                      placeholder={t('pages:login.identifierPlaceholder')}
+                      value={identifier}
+                      onChange={(e) => setIdentifier(e.target.value)}
+                      required
+                      disabled={localPending}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="password">{t('settings:account.password')}</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      autoComplete="current-password"
+                      placeholder={t('pages:login.yourPasswordPlaceholder')}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      disabled={localPending}
+                    />
+                  </div>
+                  {formError && (
+                    <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      {formError}
+                    </p>
+                  )}
+                  <Button type="submit" className="w-full" disabled={localPending}>
+                    {localPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <KeyRound className="mr-2 h-4 w-4" />
+                    )}
+                    {t('common:actions.signIn')}
+                  </Button>
+                </form>
+              )
+            ) : (
+              <p className="text-muted-foreground text-center text-sm">
+                {t('pages:login.localDisabledHint')}
+              </p>
+            )}
+          </>
         </CardContent>
       </Card>
 
