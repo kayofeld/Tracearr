@@ -13,6 +13,15 @@
 #   tracearr ALL=(root) NOPASSWD: /usr/bin/systemctl start tracearr-update.service, /usr/bin/systemctl restart tracearr.service
 #
 # Then set TRACEARR_SELF_UPDATE=true in the tracearr .env to enable the button.
+#
+# The updater builds BEFORE it restarts, so a failed build leaves the current
+# version running. It does NOT auto-roll-back a build that succeeds but crashes
+# on boot (or a migration that ran on the new process). Manual recovery:
+#   cd /opt/Tracearr
+#   git checkout -f <previous-tag>      # e.g. the tag from `git tag --sort=-v:refname`
+#   CI=true corepack pnpm install --frozen-lockfile && corepack pnpm build
+#   sudo systemctl restart tracearr.service
+# Reverse any migration the failed release applied per its release notes.
 
 [Unit]
 Description=Tracearr self-update

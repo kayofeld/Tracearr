@@ -54,6 +54,10 @@ git fetch --tags --prune origin || fail "git fetch failed"
 # Latest STABLE tag by version sort (excludes alpha/beta/rc prereleases).
 TARGET="$(git tag -l 'v*' | grep -viE '\-(alpha|beta|rc|next|dev|canary)' | sort -V | tail -1)"
 [ -n "$TARGET" ] || fail "no release tag found"
+# Validate before the tag is used anywhere (checkout, sed-free stamp, status JSON).
+# A ref name legally allows / ; & $ ( ) ' " etc.; an unvalidated tag is a code-exec
+# vector via sed and breaks the status JSON. Semver-only closes all of it.
+[[ "$TARGET" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "unexpected tag name: $TARGET"
 CURRENT="$(git describe --tags --always 2>/dev/null || echo unknown)"
 echo "[update] current=$CURRENT target=$TARGET"
 
@@ -73,11 +77,15 @@ status "running" "Building"
 corepack pnpm build || fail "build failed"
 
 # Stamp the version so the update checker compares correctly after restart.
+# Rewrite without sed: the version is trusted (validated semver above), but a
+# sed s/// on file content is needlessly fragile — rebuild the file instead.
 VERSION="${TARGET#v}"
-if grep -q '^APP_VERSION=' .env 2>/dev/null; then
-  sed -i "s/^APP_VERSION=.*/APP_VERSION=$VERSION/" .env
+if [ -f .env ]; then
+  grep -v '^APP_VERSION=' .env >.env.tmp || true
+  echo "APP_VERSION=$VERSION" >>.env.tmp
+  mv .env.tmp .env
 else
-  echo "APP_VERSION=$VERSION" >>.env
+  echo "APP_VERSION=$VERSION" >.env
 fi
 
 # Point of no return: everything built. Migrations run on the new process start.
