@@ -110,6 +110,7 @@ export class EmbyClient extends BaseMediaServerClient {
           Password: password, // Emby uses 'Password', not 'Pw'
         }),
         service: 'emby',
+        timeout: 10000, // bound the login round-trip (parity with verifyServerAdmin)
       });
 
       return parseAuthResponse(data);

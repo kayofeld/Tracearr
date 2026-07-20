@@ -30,7 +30,8 @@ const PLEX_COLOR = 'bg-[#E5A00D] hover:bg-[#C88A0B]';
 
 const DEFAULT_AUTH_METHODS: SetupStatus['authMethods'] = {
   local: true,
-  plex: true,
+  plex: false,
+  emby: true,
   oidc: false,
   oidcProviderName: null,
 };
@@ -67,6 +68,11 @@ export function Login() {
   const [name, setName] = useState('');
   const [signupUsername, setSignupUsername] = useState('');
   const [email, setEmail] = useState('');
+
+  // Emby credential login state
+  const [embyUsername, setEmbyUsername] = useState('');
+  const [embyPassword, setEmbyPassword] = useState('');
+  const [embyPending, setEmbyPending] = useState(false);
 
   // OIDC state
   const [oidcPending, setOidcPending] = useState(false);
@@ -341,6 +347,37 @@ export function Login() {
     }
   };
 
+  // Handle Emby credential sign-in (owner logs in with their Emby admin account).
+  const handleEmbyLogin = async (e: React.SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setFormError(null);
+    setEmbyPending(true);
+
+    try {
+      const { error } = await authClient.$fetch('/emby/login', {
+        method: 'POST',
+        body: {
+          username: embyUsername.trim(),
+          password: embyPassword,
+          ...(requiresClaimCode && { claimCode: claimCode.trim() }),
+        },
+      });
+
+      if (error) {
+        setFormError(error.message ?? t('pages:login.embyLoginFailed'));
+        return;
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
+      toast.success(t('notifications:toast.success.loggedIn.title'), {
+        description: t('notifications:toast.success.loggedIn.message'),
+      });
+      void navigate('/');
+    } finally {
+      setEmbyPending(false);
+    }
+  };
+
   // Handle OIDC sign-in - redirects the browser to the provider on success
   const handleOidcLogin = async () => {
     setOidcPending(true);
@@ -469,7 +506,10 @@ export function Login() {
     );
   }
 
-  const hasPrimaryMethods = authMethods.plex || authMethods.oidc;
+  // Emby credential login is offered for returning sign-in (an owner + Emby
+  // server already exist). First-run setup stays on local account creation.
+  const showEmbyLogin = authMethods.emby && !needsSetup;
+  const hasPrimaryMethods = authMethods.plex || showEmbyLogin || authMethods.oidc;
 
   return (
     <div className="bg-background flex min-h-screen flex-col items-center justify-center p-4">
@@ -527,6 +567,43 @@ export function Login() {
             </div>
           ) : (
             <>
+              {showEmbyLogin && (
+                <form onSubmit={handleEmbyLogin} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="emby-username">{t('pages:login.embyUsername')}</Label>
+                    <Input
+                      id="emby-username"
+                      type="text"
+                      autoComplete="username"
+                      value={embyUsername}
+                      onChange={(e) => setEmbyUsername(e.target.value)}
+                      required
+                      disabled={embyPending}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="emby-password">{t('settings:account.password')}</Label>
+                    <Input
+                      id="emby-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={embyPassword}
+                      onChange={(e) => setEmbyPassword(e.target.value)}
+                      required
+                      disabled={embyPending}
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" disabled={embyPending}>
+                    {embyPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <MediaServerIcon type="emby" className="mr-2 h-4 w-4" />
+                    )}
+                    {t('pages:login.signInWithEmby')}
+                  </Button>
+                </form>
+              )}
+
               {authMethods.plex && (
                 <Button className={`w-full ${PLEX_COLOR} text-white`} onClick={handlePlexLogin}>
                   <MediaServerIcon type="plex" className="mr-2 h-4 w-4" />

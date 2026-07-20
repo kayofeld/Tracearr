@@ -23,7 +23,7 @@ import {
   assertOAuthSignupClaimCode,
 } from './authGuards.js';
 import { getRedis, closeRedis } from './redisShared.js';
-import { plexPlugin } from './plexPlugin.js';
+import { embyPlugin } from './embyPlugin.js';
 import { betterAuthBasePath } from './basePath.js';
 
 const oidcEnv = {
@@ -258,7 +258,7 @@ function buildAuth(redis: Redis) {
       // pending (see schema.ts users.role) never reach this plugin.
       adminPlugin({ adminRoles: ['owner'], roles: { owner: adminAc } }),
       bearer(),
-      plexPlugin(),
+      embyPlugin(),
       ...(oidcConfigured
         ? [
             genericOAuth({

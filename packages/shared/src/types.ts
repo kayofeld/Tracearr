@@ -235,6 +235,7 @@ export interface SetupStatus {
   authMethods: {
     local: boolean;
     plex: boolean;
+    emby: boolean;
     oidc: boolean;
     oidcProviderName: string | null;
   };
