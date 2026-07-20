@@ -22,14 +22,20 @@ debug delete-all). Scope:
 - "Resync users" action surfaced on the Users page (reuse existing endpoint + hook).
 - Live validation against draner.pet (48 users; deleted-on-Emby users should disappear after resync).
 
-## 3. MERGED (opt-in) — Emby native real-time (no plugin)
+## 3. MERGED to fork main (2ed41fb1, opt-in) — Emby native real-time (no plugin)
 
-Branch `feat/emby-native-websocket`. `JellyfinEmbyWebSocketSource` diffs `SessionsStart`
-snapshots and emits the same `session:event` trigger as the SSE plugin (drop-in; reuses the
-whole poll pipeline). Gated behind `TRACEARR_NATIVE_WS_ENABLED` (default off). 15 unit tests.
-ADR `docs/architecture/adr/0001-...`. REMAINING: live end-to-end validation — flip the flag on
-Paul's instance, confirm sessions flow WS→DB, then make it the default fallback tier + add a
-third connection-status UI state.
+`JellyfinEmbyWebSocketSource` diffs `SessionsStart` snapshots and emits the same `session:event`
+trigger as the SSE plugin (drop-in; reuses the whole poll pipeline). Gated behind
+`TRACEARR_NATIVE_WS_ENABLED` (default off). Fable-reviewed; fixes applied (H1 Jellyfin KeepAlive,
+M2 api-key leak via ctor error, M1 false plugin-update nag, connect timeout, 3-min fallback). 22
+unit tests. ADR `docs/architecture/adr/0001-...`. REMAINING before default-on: live end-to-end on
+Paul's instance (esp. the **Jellyfin** path — only Emby 4.9.5 was validated live), confirm WS→DB
+flow, then make it the default fallback tier + add a third connection-status UI state.
+
+## 6b. MERGED to fork main (4c05b7bc) — Version listener tracks the fork
+
+`TRACEARR_UPDATE_REPO` (strict owner/repo slug validation) makes the update-checker repo
+configurable. Set it to `kayofeld/Tracearr`. 4 new tests. See item 6 note re: releases vs branch-head.
 
 ## 4. TODO — Beta features validation (added by Paul 2026-07-20)
 
@@ -93,6 +99,26 @@ dependency, migration, build step → the script covers it). Scope to design:
   the same change. Encode this as a repo rule once the script exists.
   Needs an OS/runtime-manager confirmation from Paul before building (systemd vs pm2 vs bare node;
   which host OS).
+
+## New feature ideas (brainstorm 2026-07-20, grounded in the codebase)
+
+Ranked by value-for-effort, each reusing infrastructure already present.
+
+1. **Periodic auto user-sync (self-healing rosters)** — HIGH value / LOW effort. The ghost-user
+   pain (item 2) exists only because sync runs at add-time + manual button. A repeatable BullMQ job
+   calling `syncServer(id,{syncUsers:true})` on an interval makes rosters self-heal. Infra exists.
+   Root-cause fix for the whole "stale roster" class.
+2. **VPN / hosting-ASN sharing signal** — HIGH value / MED effort, ON-BRAND. Geo ingestion already
+   captures ASN (`geoAsnNumber`/`geoAsnOrganization`). A new rule type flags datacenter/VPN ASNs — a
+   credential-sharing tell Tautulli/Jellystat lack. Extends the rules-v2 evaluators.
+3. **Notification channels** (ntfy / Gotify / Telegram / generic webhook) — HIGH value / LOW-MED.
+   The notification service is already abstracted (formatters/types); add channels. Homelab-favourite.
+4. **Auto-terminate on rule violation** — MED / MED. A `killQueue` already exists (manual kill); wire
+   an opt-in auto-kill into rule evaluation with a grace period + notification.
+5. **Trust-score timeline** — MED / LOW-MED. Persist + chart per-user trust over time (Highcharts is
+   already in the web stack).
+6. **Server health/status panel** — MED / LOW. Surface each server's SSE/WS/poll tier + last-seen +
+   reachability (data already flows through sseManager + Redis). Pairs with item 3's third status state.
 
 ## Parking lot (from security review of PR 1, out of scope there)
 
