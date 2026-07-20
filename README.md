@@ -136,10 +136,11 @@ COOKIE_SECRET=$(openssl rand -hex 32)
 NODE_ENV=production
 PORT=3000
 HOST=0.0.0.0
+APP_VERSION=$(git describe --tags --always 2>/dev/null | sed 's/^v//')
 EOF
 ```
 
-See `.env.example` for the full list of optional settings (CORS_ORIGIN and `TRUST_PROXY` behind a reverse proxy, OIDC sign-in, the experimental native-WebSocket real-time tier, and more).
+`APP_VERSION` is what the in-app update checker compares against the latest release, so set it to the deployed tag (the update script can re-derive it from `git describe` on each pull). See `.env.example` for the full list of optional settings (CORS_ORIGIN and `TRUST_PROXY` behind a reverse proxy, OIDC sign-in, the experimental native-WebSocket real-time tier, and more).
 
 **Run**
 
