@@ -31,9 +31,23 @@ export class GitHubRateLimitError extends Error {
 }
 
 // GitHub API configuration
-const GITHUB_API_LATEST_URL = 'https://api.github.com/repos/connorgallopo/Tracearr/releases/latest';
-const GITHUB_API_ALL_RELEASES_URL = 'https://api.github.com/repos/connorgallopo/Tracearr/releases';
-const GITHUB_RELEASES_URL = 'https://github.com/connorgallopo/Tracearr/releases';
+const DEFAULT_UPDATE_REPO = 'connorgallopo/Tracearr';
+
+/**
+ * The GitHub `owner/repo` the update checker tracks. Defaults to upstream; set
+ * TRACEARR_UPDATE_REPO to point a fork's own releases (e.g. a self-host running
+ * their own build). Validated to a strict `owner/repo` slug so the value can be
+ * safely interpolated into the api.github.com URL.
+ */
+export function resolveUpdateRepo(raw = process.env.TRACEARR_UPDATE_REPO): string {
+  const slug = raw?.trim();
+  return slug && /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(slug) ? slug : DEFAULT_UPDATE_REPO;
+}
+
+const UPDATE_REPO = resolveUpdateRepo();
+const GITHUB_API_LATEST_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
+const GITHUB_API_ALL_RELEASES_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases`;
+const GITHUB_RELEASES_URL = `https://github.com/${UPDATE_REPO}/releases`;
 
 // Prerelease identifier patterns (beta, alpha, rc, etc.)
 const PRERELEASE_PATTERN = /-(alpha|beta|rc|next|dev|canary)\.?\d*$/i;
