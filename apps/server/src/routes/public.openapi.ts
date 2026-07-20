@@ -89,13 +89,10 @@ const MediaInfo = z.object({
     .string()
     .nullable()
     .openapi({ description: 'Artist name (music tracks only)', example: 'Pink Floyd' }),
-  albumName: z
-    .string()
-    .nullable()
-    .openapi({
-      description: 'Album name (music tracks only)',
-      example: 'The Dark Side of the Moon',
-    }),
+  albumName: z.string().nullable().openapi({
+    description: 'Album name (music tracks only)',
+    example: 'The Dark Side of the Moon',
+  }),
   trackNumber: z
     .number()
     .int()
@@ -818,8 +815,8 @@ Paginated endpoints support \`page\` (1-indexed) and \`pageSize\` (max 100, defa
 Most endpoints support \`serverId\` to filter by media server.
       `.trim(),
       contact: {
-        name: 'Tracearr',
-        url: 'https://github.com/connorgallopo/Tracearr',
+        name: 'Tracearr (kayofeld fork)',
+        url: 'https://github.com/kayofeld/Tracearr',
       },
     },
   });
