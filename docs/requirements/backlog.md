@@ -64,7 +64,7 @@ slug env-configurable (`TRACEARR_UPDATE_REPO`, default `connorgallopo/Tracearr`)
 3 URLs from it, so Paul points it at `kayofeld/Tracearr`. Small, self-contained, unit-testable —
 good standalone branch. Note: the fork must publish GitHub releases for release-based checking to
 find anything; if the updater is git-pull-based (item 7), the version compare may instead track
-the fork's default-branch commit/tag. Confirm which signal Paul wants (releases vs branch head).
+the fork's default-branch commit/tag. RESOLVED 2026-07-20: Paul updates per RELEASES (esp. via the in-app update button), so release-based tracking (as built) is correct — the fork must publish GitHub releases.
 (`routes/public.openapi.ts:822` also hardcodes the upstream URL — cosmetic, fix alongside.)
 
 ## 7. TODO — In-app "Update" button (added by Paul 2026-07-20)
@@ -97,8 +97,8 @@ dependency, migration, build step → the script covers it). Scope to design:
 - KEY CONSTRAINT: the update script is part of the definition-of-done for future changes —
   whenever a change adds a dependency/migration/build/asset step, update.sh must be amended in
   the same change. Encode this as a repo rule once the script exists.
-  Needs an OS/runtime-manager confirmation from Paul before building (systemd vs pm2 vs bare node;
-  which host OS).
+  Update model RESOLVED: per-release (the update button pulls/applies the latest release, not branch head).
+  Still needs OS/runtime-manager confirmation (systemd vs pm2 vs bare node; which host OS).
 
 ## New feature ideas (brainstorm 2026-07-20, grounded in the codebase)
 
