@@ -31,6 +31,12 @@ import {
   JellyfinEmbyEventSource,
   type PluginSessionEvent,
 } from './mediaServer/shared/jellyfinEmbyEventSource.js';
+import { JellyfinEmbyWebSocketSource } from './mediaServer/shared/jellyfinEmbyWebSocketSource.js';
+
+// Opt-in: use the plugin-free native WebSocket session source for Jellyfin/Emby
+// instead of the SSE plugin. Off by default; flip on to validate before it
+// becomes the default fallback tier (see ADR 0001).
+const NATIVE_WS_ENABLED = process.env.TRACEARR_NATIVE_WS_ENABLED === 'true';
 import { broadcastToAll } from '../websocket/index.js';
 import { triggerServerPoll } from '../jobs/poller/index.js';
 import { compareVersions } from '../utils/pluginVersion.js';
@@ -51,7 +57,7 @@ interface ServerConnection {
   serverId: string;
   serverName: string;
   serverType: 'plex' | 'jellyfin' | 'emby';
-  eventSource: PlexEventSource | JellyfinEmbyEventSource | null;
+  eventSource: PlexEventSource | JellyfinEmbyEventSource | JellyfinEmbyWebSocketSource | null;
   state: SSEConnectionState;
   inFallback: boolean;
   connectedAt: Date | null;
@@ -214,14 +220,12 @@ export class SSEManager extends EventEmitter {
           connection.eventSource = eventSource;
           await eventSource.connect();
         } else {
-          // Jellyfin/Emby: attempt plugin SSE connection
-          const eventSource = new JellyfinEmbyEventSource({
-            serverId,
-            serverName,
-            url,
-            serverType,
-            token,
-          });
+          // Jellyfin/Emby: native WebSocket (opt-in) or the SSE plugin. Both emit
+          // the same session:event / connection:state contract, so the handler
+          // wiring below is identical.
+          const eventSource = NATIVE_WS_ENABLED
+            ? new JellyfinEmbyWebSocketSource({ serverId, serverName, url, serverType, token })
+            : new JellyfinEmbyEventSource({ serverId, serverName, url, serverType, token });
 
           this.setupJellyfinEmbyEventHandlers(eventSource, serverId, serverName, serverType);
           connection.eventSource = eventSource;
@@ -482,7 +486,7 @@ export class SSEManager extends EventEmitter {
    * Set up event handlers for a JellyfinEmbyEventSource
    */
   private setupJellyfinEmbyEventHandlers(
-    eventSource: JellyfinEmbyEventSource,
+    eventSource: JellyfinEmbyEventSource | JellyfinEmbyWebSocketSource,
     serverId: string,
     serverName: string,
     serverType: 'jellyfin' | 'emby'
