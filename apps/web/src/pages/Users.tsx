@@ -403,9 +403,13 @@ export function Users() {
             icon: <Trash2 className="h-4 w-4" />,
             variant: 'destructive' as const,
             // Removal takes explicit ids only - select-all could sweep in rows
-            // the user never saw across pages.
-            disabled: selectAllMode,
-            title: selectAllMode ? t('pages:users.removeSelectAllActive') : undefined,
+            // the user never saw across pages - and the endpoint caps at 1000 ids.
+            disabled: selectAllMode || selectedCount > 1000,
+            title: selectAllMode
+              ? t('pages:users.removeSelectAllActive')
+              : selectedCount > 1000
+                ? t('pages:users.removeTooMany')
+                : undefined,
             onClick: () => setRemoveConfirmOpen(true),
             isLoading: bulkRemoveUsers.isPending,
           },
