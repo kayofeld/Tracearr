@@ -87,6 +87,7 @@
       "streamTerminateFailed": "Не вдалося завершити потік",
       "trustScoresResetFailed": "Не вдалося скинути рейтинг довіри",
       "userMergeFailed": "Failed to merge users",
+      "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Тест Webhook не вдався"
     },
     "info": {
@@ -245,6 +246,11 @@
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
+      },
+      "usersRemoved": {
+        "message_one": "{{count}} user removed from the roster",
+        "message_other": "{{count}} users removed from the roster",
+        "title": "Users Removed"
       },
       "violationAcknowledged": {
         "message": "Порушення було позначено як визнане",

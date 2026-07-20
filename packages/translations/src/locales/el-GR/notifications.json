@@ -87,6 +87,7 @@
       "streamTerminateFailed": "Αποτυχία τερματισμού ροής",
       "trustScoresResetFailed": "Αποτυχία επαναφοράς των βαθμολογιών εμπιστοσύνης",
       "userMergeFailed": "Failed to merge users",
+      "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Το τεστ Webhook απέτυχε"
     },
     "info": {
@@ -245,6 +246,11 @@
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
+      },
+      "usersRemoved": {
+        "message_one": "{{count}} user removed from the roster",
+        "message_other": "{{count}} users removed from the roster",
+        "title": "Users Removed"
       },
       "violationAcknowledged": {
         "message": "Η παραβίαση έχει επισημανθεί ως αναγνωρισμένη",

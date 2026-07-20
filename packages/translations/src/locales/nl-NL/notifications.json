@@ -87,6 +87,7 @@
       "streamTerminateFailed": "Stream afbreken mislukt",
       "trustScoresResetFailed": "Vertrouwensscores herstellen mislukt",
       "userMergeFailed": "Failed to merge users",
+      "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Webhook-test mislukt"
     },
     "info": {
@@ -245,6 +246,11 @@
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
+      },
+      "usersRemoved": {
+        "message_one": "{{count}} user removed from the roster",
+        "message_other": "{{count}} users removed from the roster",
+        "title": "Users Removed"
       },
       "violationAcknowledged": {
         "message": "De overtreding is aangemerkt als bevestigd",

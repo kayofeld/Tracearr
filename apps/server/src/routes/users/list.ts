@@ -65,6 +65,11 @@ function getUserOrderBy(orderBy: UserSortField, orderDir: 'asc' | 'desc') {
   }
 }
 
+const bulkRemoveBodySchema = z.object({
+  // Explicit ids only - no selectAll on a destructive action
+  ids: z.array(z.uuid()).min(1).max(1000),
+});
+
 const bulkResetTrustBodySchema = z.object({
   ids: z.array(z.uuid()).max(1000).optional(),
   selectAll: z.boolean().optional(),
@@ -465,6 +470,30 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
    * rollup recomputes over the person's full account set and may land short
    * of 100 if a sibling account outside their access still has a lower score.
    */
+  /**
+   * POST /bulk/remove - Mark server users as removed (hide from the roster)
+   *
+   * Sets removedAt on the selected accounts - the same soft-remove a server
+   * sync applies when an account has disappeared from the media server, so
+   * session history is preserved and "Show removed" still surfaces them.
+   * If an account still exists on the media server, the next user sync
+   * restores it; remove the account on the server itself for a permanent fix.
+   */
+  app.post('/bulk/remove', { preHandler: [app.requireOwner] }, async (request, reply) => {
+    const parsedBody = bulkRemoveBodySchema.safeParse(request.body);
+    if (!parsedBody.success) {
+      return reply.badRequest('ids array of server user IDs is required');
+    }
+
+    const updated = await db
+      .update(serverUsers)
+      .set({ removedAt: new Date() })
+      .where(and(inArray(serverUsers.id, parsedBody.data.ids), isNull(serverUsers.removedAt)))
+      .returning({ id: serverUsers.id });
+
+    return { success: true, removed: updated.length };
+  });
+
   app.post('/bulk/reset-trust', { preHandler: [app.authenticate] }, async (request, reply) => {
     const authUser = request.user;
 

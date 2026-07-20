@@ -54,6 +54,7 @@ export {
   useUserDevices,
   useUserTerminations,
   useBulkResetTrust,
+  useBulkRemoveUsers,
   useMergeSuggestions,
   useMergeUsers,
   useSplitServerUser,

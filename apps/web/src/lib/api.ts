@@ -608,6 +608,11 @@ class ApiClient {
         method: 'POST',
         body: JSON.stringify(params),
       }),
+    bulkRemove: (ids: string[]) =>
+      this.request<{ success: boolean; removed: number }>('/users/bulk/remove', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      }),
     merge: (
       sourceUserId: string,
       data: { targetUserId: string; confirmSameServerCombine?: boolean }

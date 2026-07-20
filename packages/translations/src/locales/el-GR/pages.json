@@ -506,6 +506,12 @@
     "mergeServerAccountRemoved": "Removed",
     "mergeUsers": "Merge users",
     "noUsersFound": "Δεν βρέθηκαν χρήστες.",
+    "removeSelectAllActive": "Clear the select-all selection and pick the users to remove explicitly",
+    "removeTooMany": "Too many users selected - remove at most 1000 at a time",
+    "removeUsers": "Remove users",
+    "removeUsersConfirm": "The selected accounts are hidden from the roster; their session history is kept and \"Show removed\" still lists them. An account that still exists on the media server is usually restored by the next user sync - remove it on the server itself to keep it gone.",
+    "removeUsersTitle_one": "Remove {{count}} user?",
+    "removeUsersTitle_other": "Remove {{count}} users?",
     "resetTrustScore": "Επαναφορά Βαθμού Εμπιστοσύνης",
     "resetTrustScoreConfirm": "Είστε βέβαιοι ότι θέλετε να επαναφέρετε το σκορ εμπιστοσύνης στο 100? Αυτή η ενέργεια δεν μπορεί να αναιρεθεί.",
     "resetTrustScoreTitle_one": "Reset Trust Score for {{count}} User",
@@ -520,6 +526,7 @@
     "suggestionsMatchUsername": "Same username",
     "suggestionsReview": "Review",
     "suggestionsTitle": "Possible duplicate users",
+    "syncUsers": "Sync users",
     "title": "Χρήστες"
   },
   "violations": {

@@ -142,6 +142,11 @@
         "message_one": "{{count}} user reset to 100",
         "message_other": "{{count}} users reset to 100"
       },
+      "usersRemoved": {
+        "title": "Users Removed",
+        "message_one": "{{count}} user removed from the roster",
+        "message_other": "{{count}} users removed from the roster"
+      },
       "claimCodeValidated": {
         "title": "Claim code validated",
         "message": "You can now proceed with setup"
@@ -181,6 +186,7 @@
       "sessionsRevokeFailed": "Failed to revoke sessions",
       "displayNameUpdateFailed": "Failed to update display name",
       "trustScoresResetFailed": "Failed to reset trust scores",
+      "usersRemoveFailed": "Failed to remove users",
       "routingUpdateFailed": "Failed to update routing",
       "clipboardFailed": "Failed to copy to clipboard",
       "plexUnlinkFailed": "Failed to unlink Plex account",
