@@ -87,6 +87,7 @@
       "streamTerminateFailed": "Kunne ikke afslutte stream",
       "trustScoresResetFailed": "Mislykkedes at nulstille trust scores",
       "userMergeFailed": "Failed to merge users",
+      "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Webhook-test mislykkedes"
     },
     "info": {
@@ -245,6 +246,11 @@
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
+      },
+      "usersRemoved": {
+        "message_one": "{{count}} user removed from the roster",
+        "message_other": "{{count}} users removed from the roster",
+        "title": "Users Removed"
       },
       "violationAcknowledged": {
         "message": "Overtrædelsen er markeret som anerkendt",

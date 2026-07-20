@@ -87,6 +87,7 @@
       "streamTerminateFailed": "Falha ao encerrar transmissão",
       "trustScoresResetFailed": "Falha ao redefinir pontuações de confiança",
       "userMergeFailed": "Failed to merge users",
+      "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Teste do Webhook falhou"
     },
     "info": {
@@ -245,6 +246,11 @@
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
+      },
+      "usersRemoved": {
+        "message_one": "{{count}} user removed from the roster",
+        "message_other": "{{count}} users removed from the roster",
+        "title": "Users Removed"
       },
       "violationAcknowledged": {
         "message": "A violação foi marcada como reconhecida",

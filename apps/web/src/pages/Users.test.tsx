@@ -11,8 +11,11 @@ vi.mock('react-i18next', () => ({
 vi.mock('@/hooks/queries', () => ({
   useUsers: vi.fn(),
   useBulkResetTrust: () => ({ mutate: vi.fn(), isPending: false }),
+  useBulkRemoveUsers: () => ({ mutate: vi.fn(), isPending: false }),
   useMergeUsers: () => ({ mutate: vi.fn(), isPending: false }),
   useMergeSuggestions: () => ({ data: undefined, isLoading: false }),
+  useServers: () => ({ data: [], isLoading: false }),
+  useSyncServer: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock('@/hooks/useServer', () => ({

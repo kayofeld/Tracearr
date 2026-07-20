@@ -87,6 +87,7 @@
       "streamTerminateFailed": "Nu s-a putut termina transmisiunea",
       "trustScoresResetFailed": "Resetarea scorurilor de încredere a eșuat",
       "userMergeFailed": "Failed to merge users",
+      "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Testul Webhook a eșuat"
     },
     "info": {
@@ -245,6 +246,11 @@
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
+      },
+      "usersRemoved": {
+        "message_one": "{{count}} user removed from the roster",
+        "message_other": "{{count}} users removed from the roster",
+        "title": "Users Removed"
       },
       "violationAcknowledged": {
         "message": "Încălcarea a fost marcată ca fiind recunoscută",

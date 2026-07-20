@@ -24,12 +24,28 @@ import { getIdentityServers } from '@/components/users/identityServerPills';
 import { RemovedBadge } from '@/components/users/RemovedBadge';
 import { ServerColumnCell } from '@/components/server';
 import { ErrorState } from '@/components/library/ErrorState';
-import { User as UserIcon, Crown, Clock, Search, RotateCcw, Merge } from 'lucide-react';
+import {
+  User as UserIcon,
+  Crown,
+  Clock,
+  Search,
+  RotateCcw,
+  Merge,
+  Trash2,
+  RefreshCw,
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { ServerUserWithIdentity, MergeSuggestion, UserSortField } from '@tracearr/shared';
 import { MERGE_SAME_SERVER_CONFIRMATION_REQUIRED, canLogin } from '@tracearr/shared';
-import { useUsers, useBulkResetTrust, useMergeUsers } from '@/hooks/queries';
+import {
+  useUsers,
+  useBulkResetTrust,
+  useBulkRemoveUsers,
+  useMergeUsers,
+  useServers,
+  useSyncServer,
+} from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { useAuth } from '@/hooks/useAuth';
 import { useRowSelection } from '@/hooks/useRowSelection';
@@ -52,6 +68,7 @@ export function Users() {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'username', desc: false }]);
   const [showRemoved, setShowRemoved] = useState(false);
   const [resetTrustConfirmOpen, setResetTrustConfirmOpen] = useState(false);
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [mergeCandidates, setMergeCandidates] = useState<[MergeCandidate, MergeCandidate] | null>(
     null
@@ -76,7 +93,10 @@ export function Users() {
     orderDir,
   });
   const bulkResetTrust = useBulkResetTrust();
+  const bulkRemoveUsers = useBulkRemoveUsers();
   const mergeUsersMutation = useMergeUsers();
+  const { data: servers } = useServers();
+  const syncServer = useSyncServer();
 
   const users = data?.data ?? [];
   const total = data?.total ?? 0;
@@ -237,6 +257,21 @@ export function Users() {
     });
   };
 
+  const handleBulkRemove = () => {
+    bulkRemoveUsers.mutate(Array.from(selectedIds), {
+      onSuccess: () => {
+        clearSelection();
+        setRemoveConfirmOpen(false);
+      },
+    });
+  };
+
+  const handleSyncUsers = () => {
+    for (const server of servers ?? []) {
+      syncServer.mutate(server.id);
+    }
+  };
+
   const toMergeCandidate = (row: ServerUserWithIdentity): MergeCandidate => ({
     userId: row.userId,
     displayName: `${row.identityName ?? row.username} (${row.serverName})`,
@@ -362,6 +397,18 @@ export function Users() {
             },
             isLoading: mergeUsersMutation.isPending,
           },
+          {
+            key: 'remove',
+            label: t('pages:users.removeUsers'),
+            icon: <Trash2 className="h-4 w-4" />,
+            variant: 'destructive' as const,
+            // Removal takes explicit ids only - select-all could sweep in rows
+            // the user never saw across pages.
+            disabled: selectAllMode,
+            title: selectAllMode ? t('pages:users.removeSelectAllActive') : undefined,
+            onClick: () => setRemoveConfirmOpen(true),
+            isLoading: bulkRemoveUsers.isPending,
+          },
         ]
       : []),
   ];
@@ -371,6 +418,16 @@ export function Users() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">{t('pages:users.title')}</h1>
         <div className="flex flex-wrap items-center gap-4">
+          {isOwner && (
+            <Button
+              variant="outline"
+              onClick={handleSyncUsers}
+              disabled={syncServer.isPending || !servers?.length}
+            >
+              <RefreshCw className={cn('mr-2 h-4 w-4', syncServer.isPending && 'animate-spin')} />
+              {t('pages:users.syncUsers')}
+            </Button>
+          )}
           <div className="relative w-64">
             <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
             <Input
@@ -476,6 +533,18 @@ export function Users() {
         confirmLabel={t('pages:users.resetTrustScore')}
         onConfirm={handleBulkResetTrust}
         isLoading={bulkResetTrust.isPending}
+      />
+
+      {/* Remove Users Confirmation */}
+      <ConfirmDialog
+        open={removeConfirmOpen}
+        onOpenChange={setRemoveConfirmOpen}
+        title={t('pages:users.removeUsersTitle', { count: selectedCount })}
+        description={t('pages:users.removeUsersConfirm')}
+        confirmLabel={t('pages:users.removeUsers')}
+        variant="destructive"
+        onConfirm={handleBulkRemove}
+        isLoading={bulkRemoveUsers.isPending}
       />
 
       {/* Merge Users Dialog */}

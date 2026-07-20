@@ -155,6 +155,25 @@ export function useBulkResetTrust() {
   });
 }
 
+export function useBulkRemoveUsers() {
+  const { t } = useTranslation('notifications');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (ids: string[]) => api.users.bulkRemove(ids),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ['users'] });
+      void queryClient.invalidateQueries({ queryKey: ['stats'] });
+      toast.success(t('toast.success.usersRemoved.title'), {
+        description: t('toast.success.usersRemoved.message', { count: data.removed }),
+      });
+    },
+    onError: (error: Error) => {
+      toast.error(t('toast.error.usersRemoveFailed'), { description: error.message });
+    },
+  });
+}
+
 export function useMergeSuggestions(enabled: boolean) {
   return useQuery({
     queryKey: ['users', 'merge-suggestions'],

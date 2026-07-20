@@ -506,6 +506,11 @@
     "mergeServerAccountRemoved": "Removed",
     "mergeUsers": "Merge users",
     "noUsersFound": "No s'ha trobat cap usuari.",
+    "removeSelectAllActive": "Clear the select-all selection and pick the users to remove explicitly",
+    "removeUsers": "Remove users",
+    "removeUsersConfirm": "The selected accounts are hidden from the roster; their session history is kept and \"Show removed\" still lists them. An account that still exists on the media server is restored by the next user sync - remove it on the server itself to keep it gone.",
+    "removeUsersTitle_one": "Remove {{count}} user?",
+    "removeUsersTitle_other": "Remove {{count}} users?",
     "resetTrustScore": "Reset Trust Score",
     "resetTrustScoreConfirm": "Are you sure you want to reset the trust score to 100? This action cannot be undone.",
     "resetTrustScoreTitle_one": "Reset Trust Score for {{count}} User",
@@ -520,6 +525,7 @@
     "suggestionsMatchUsername": "Same username",
     "suggestionsReview": "Review",
     "suggestionsTitle": "Possible duplicate users",
+    "syncUsers": "Sync users",
     "title": "Usuaris"
   },
   "violations": {
