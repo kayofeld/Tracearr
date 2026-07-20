@@ -34,9 +34,42 @@ third connection-status UI state.
 ## 4. TODO — Beta features validation (added by Paul 2026-07-20)
 
 Strong validation, consolidation, and checks for Tracearr's beta-flagged features.
-First step: inventory which features are flagged beta (repo grep + UI), define per-feature
-validation criteria (functional checks, edge cases, data correctness), consolidate findings,
-then fix/harden per finding. Needs scoping before it becomes branches.
+**Inventory done (2026-07-20)** — the beta-flagged surfaces are:
+
+- **Backup / restore** (`components/settings/BackupSettings.tsx`, 3 BETA badges; `routes/backup.ts`,
+  `jobs/backupQueue.ts`) — highest-risk beta (data safety): backup create/upload/restore + schedule.
+- **Data import** (`components/settings/ImportSettings.tsx`; Tautulli + Jellystat; `routes/import.ts`,
+  `services/tautulli.ts`, `services/jellystat.ts`) — incl. "(BETA)" stream-detail enrichment.
+- **Mobile beta mode** (`routes/mobile.ts` `MOBILE_BETA_MODE`) — reusable tokens, no expiry, unlimited
+  devices; security-sensitive (validate it can NEVER be on in a real deployment by accident).
+- **Beta update channel** (`components/layout/{AppSidebar,UpdateDialog}.tsx`, `jobs/versionCheckQueue.ts`
+  prerelease handling) — opting into alpha/beta/rc updates.
+- (Adjacent) **Rules V2 migration** preview (`routes/rules.ts` `/migrate/preview`) — migration correctness.
+
+Per-feature: define validation criteria (functional happy-path, edge/failure cases, data-correctness &
+idempotency, security posture), consolidate into a checklist doc, then fix/harden per finding. Backup/restore
+and import (data-integrity) rank first. Each becomes its own branch. Ready to start on Paul's go.
+
+## 6. TODO — Version listener tracks the fork, not upstream (added by Paul 2026-07-20)
+
+`jobs/versionCheckQueue.ts` hardcodes `connorgallopo/Tracearr` in 3 constants
+(GITHUB_API_LATEST_URL / GITHUB_API_ALL_RELEASES_URL / GITHUB_RELEASES_URL). Make the repo
+slug env-configurable (`TRACEARR_UPDATE_REPO`, default `connorgallopo/Tracearr`) and build the
+3 URLs from it, so Paul points it at `kayofeld/Tracearr`. Small, self-contained, unit-testable —
+good standalone branch. Note: the fork must publish GitHub releases for release-based checking to
+find anything; if the updater is git-pull-based (item 7), the version compare may instead track
+the fork's default-branch commit/tag. Confirm which signal Paul wants (releases vs branch head).
+(`routes/public.openapi.ts:822` also hardcodes the upstream URL — cosmetic, fix alongside.)
+
+## 7. TODO — In-app "Update" button (added by Paul 2026-07-20)
+
+An update control in the UI (owner-only) that triggers the update flow (item 5's script:
+git pull already done or done by the button? decide — likely button runs pull + update.sh via a
+privileged local runner). Ties directly to item 5 (the script) and item 6 (knowing an update is
+available). Design questions: how the web/server process invokes a host-level update safely
+(the server can't `git pull` + restart itself cleanly while running); likely a small
+supervisor/systemd unit or a detached updater the button signals. Needs item 5's runtime-manager
+decision first. Security: owner-only, no arbitrary command exposure.
 
 ## 5. TODO — Docker-free deployment + git-pull update script (added by Paul 2026-07-20)
 
