@@ -34,5 +34,8 @@ After=network-online.target
 Type=oneshot
 User=tracearr
 WorkingDirectory=/opt/Tracearr
-ExecStart=/opt/Tracearr/scripts/update.sh
+# Invoke via bash (not a direct exec of the script) so the update never depends
+# on update.sh's executable bit — a git checkout can reset that mode, which would
+# otherwise brick the NEXT update with status=203/EXEC.
+ExecStart=/bin/bash /opt/Tracearr/scripts/update.sh
 # Collect the transient state so repeated runs don't accumulate failed units.
