@@ -1079,6 +1079,14 @@ export const libraryStaleQuerySchema = z.object({
   timezone: timezoneSchema,
 });
 
+// Library never-watched statistics query schema
+export const libraryNeverWatchedQuerySchema = z.object({
+  serverId: uuidSchema.optional(),
+  serverIds: serverIdsQuerySchema,
+  libraryId: z.string().optional(),
+  mediaType: z.enum(['movie', 'show', 'all']).default('all'),
+});
+
 // Library watch statistics query schema
 export const libraryWatchQuerySchema = z.object({
   serverId: uuidSchema.optional(),
@@ -1178,6 +1186,7 @@ export type LibraryQualityQueryInput = z.infer<typeof libraryQualityQuerySchema>
 export type LibraryStorageQueryInput = z.infer<typeof libraryStorageQuerySchema>;
 export type LibraryDuplicatesQueryInput = z.infer<typeof libraryDuplicatesQuerySchema>;
 export type LibraryStaleQueryInput = z.infer<typeof libraryStaleQuerySchema>;
+export type LibraryNeverWatchedQueryInput = z.infer<typeof libraryNeverWatchedQuerySchema>;
 export type LibraryWatchQueryInput = z.infer<typeof libraryWatchQuerySchema>;
 export type LibraryRoiQueryInput = z.infer<typeof libraryRoiQuerySchema>;
 export type LibraryPatternsQueryInput = z.infer<typeof libraryPatternsQuerySchema>;
