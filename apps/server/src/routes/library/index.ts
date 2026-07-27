@@ -11,6 +11,7 @@ import { libraryQualityRoute } from './quality.js';
 import { libraryStorageRoute } from './storage.js';
 import { libraryDuplicatesRoute } from './duplicates.js';
 import { libraryStaleRoute } from './stale.js';
+import { libraryNeverWatchedRoute } from './neverWatched.js';
 import { libraryWatchRoute } from './watch.js';
 import { libraryRoiRoute } from './roi.js';
 import { libraryPatternsRoute } from './patterns.js';
@@ -29,6 +30,7 @@ export const libraryStatsRoutes: FastifyPluginAsync = async (app) => {
   await app.register(libraryStorageRoute);
   await app.register(libraryDuplicatesRoute);
   await app.register(libraryStaleRoute);
+  await app.register(libraryNeverWatchedRoute);
   await app.register(libraryWatchRoute);
   await app.register(libraryRoiRoute);
   await app.register(libraryPatternsRoute);
