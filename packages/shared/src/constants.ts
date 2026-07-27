@@ -182,6 +182,9 @@ export const REDIS_KEYS = {
   get LIBRARY_STALE() {
     return `${_redisPrefix}tracearr:library:stale`;
   },
+  get LIBRARY_NEVER_WATCHED() {
+    return `${_redisPrefix}tracearr:library:never-watched`;
+  },
   get LIBRARY_DUPLICATES() {
     return `${_redisPrefix}tracearr:library:duplicates`;
   },
@@ -276,6 +279,7 @@ export const CACHE_TTL = {
   LIBRARY_GROWTH: 300, // 5 minutes
   LIBRARY_QUALITY: 300, // 5 minutes
   LIBRARY_STALE: 3600, // 1 hour (changes slowly)
+  LIBRARY_NEVER_WATCHED: 3600, // 1 hour (changes slowly)
   LIBRARY_DUPLICATES: 3600, // 1 hour (changes slowly)
   LIBRARY_STORAGE: 300, // 5 minutes
   LIBRARY_WATCH: 300, // 5 minutes

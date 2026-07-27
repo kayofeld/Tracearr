@@ -16,6 +16,7 @@ import {
   Sparkles,
   HardDrive,
   Eye,
+  EyeOff,
 } from 'lucide-react';
 import type { NavKey } from '@tracearr/translations';
 
@@ -57,6 +58,7 @@ export const navigation: NavEntry[] = [
       { nameKey: 'quality', href: '/library/quality', icon: Sparkles },
       { nameKey: 'storage', href: '/library/storage', icon: HardDrive },
       { nameKey: 'watch', href: '/library/watch', icon: Eye },
+      { nameKey: 'neverWatched', href: '/library/never-watched', icon: EyeOff },
     ],
   },
   {

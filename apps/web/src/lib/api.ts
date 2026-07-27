@@ -59,6 +59,7 @@ import type {
   LibraryStorageResponse,
   DuplicatesResponse,
   StaleResponse,
+  NeverWatchedStatsResponse,
   WatchResponse,
   CompletionResponse,
   PatternsResponse,
@@ -1211,7 +1212,12 @@ class ApiClient {
       pageSize: number = 20,
       mediaType?: 'movie' | 'show' | 'artist',
       sortBy: 'size' | 'title' | 'days_stale' | 'added_at' = 'size',
-      sortOrder: 'asc' | 'desc' = 'desc'
+      sortOrder: 'asc' | 'desc' = 'desc',
+      // Optional repeated media-type filter. Takes precedence over `mediaType`
+      // server-side - pass this to scope the table to an exact set of media
+      // types (e.g. ['movie', 'show'] to match the stats endpoint's scope,
+      // which never includes 'artist').
+      mediaTypes?: ('movie' | 'show' | 'artist')[]
     ) => {
       const params = new URLSearchParams();
       if (serverIds?.length) {
@@ -1224,10 +1230,31 @@ class ApiClient {
       params.set('category', category);
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
-      if (mediaType) params.set('mediaType', mediaType);
+      if (mediaTypes?.length) {
+        for (const mt of mediaTypes) {
+          params.append('mediaTypes', mt);
+        }
+      } else if (mediaType) {
+        params.set('mediaType', mediaType);
+      }
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       return this.request<StaleResponse>(`/library/stale?${params.toString()}`);
+    },
+    neverWatched: (
+      serverIds?: string[],
+      libraryId?: string,
+      mediaType: 'movie' | 'show' | 'all' = 'all'
+    ) => {
+      const params = new URLSearchParams();
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
+      if (libraryId) params.set('libraryId', libraryId);
+      params.set('mediaType', mediaType);
+      return this.request<NeverWatchedStatsResponse>(`/library/never-watched?${params.toString()}`);
     },
     watch: (serverIds?: string[], libraryId?: string, page: number = 1, pageSize: number = 20) => {
       const params = new URLSearchParams();

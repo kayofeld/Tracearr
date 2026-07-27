@@ -2349,6 +2349,53 @@ export interface StaleResponse {
   pagination: { page: number; pageSize: number; total: number };
 }
 
+// Library Never-Watched Statistics Response (GET /library/never-watched)
+// Aggregate stats over movies + shows that have never been played (no qualifying
+// session >= 2 min, shows rolled up over their episodes). The paginated item list
+// itself comes from GET /library/stale?category=never_watched.
+export type NeverWatchedAgeBucket = 'lt30' | 'd30to90' | 'd90to180' | 'd180to365' | 'gt365';
+
+export interface NeverWatchedTotals {
+  /** Never-watched movies + shows in scope. */
+  count: number;
+  sizeBytes: number;
+  /** Total movies + shows in scope (denominator for pctOfLibrary). */
+  libraryCount: number;
+  /** count / libraryCount * 100, rounded to 1 decimal; 0 when libraryCount is 0. */
+  pctOfLibrary: number;
+}
+
+export interface NeverWatchedByMediaType {
+  mediaType: 'movie' | 'show';
+  count: number;
+  sizeBytes: number;
+}
+
+export interface NeverWatchedByLibrary {
+  serverId: string;
+  serverName: string;
+  libraryId: string;
+  libraryName: string;
+  count: number;
+  sizeBytes: number;
+}
+
+/** Days since the item was added to the media server (library_items.created_at). */
+export interface NeverWatchedAgeDistribution {
+  bucket: NeverWatchedAgeBucket;
+  count: number;
+  sizeBytes: number;
+}
+
+export interface NeverWatchedStatsResponse {
+  totals: NeverWatchedTotals;
+  byMediaType: NeverWatchedByMediaType[];
+  byLibrary: NeverWatchedByLibrary[];
+  ageDistribution: NeverWatchedAgeDistribution[];
+  /** ISO timestamp of the oldest never-watched item's added-at date, null when none. */
+  oldestAddedAt: string | null;
+}
+
 // Library Watch Statistics Response (GET /library/watch)
 
 /**

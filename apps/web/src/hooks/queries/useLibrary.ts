@@ -17,6 +17,7 @@ import type {
   LibraryStorageResponse,
   DuplicatesResponse,
   StaleResponse,
+  NeverWatchedStatsResponse,
   WatchResponse,
   CompletionResponse,
   PatternsResponse,
@@ -130,9 +131,14 @@ export function useLibraryStale(
   pageSize: number = 20,
   mediaType?: 'movie' | 'show' | 'artist',
   sortBy: 'size' | 'title' | 'days_stale' | 'added_at' = 'size',
-  sortOrder: 'asc' | 'desc' = 'desc'
+  sortOrder: 'asc' | 'desc' = 'desc',
+  // Optional repeated media-type filter, takes precedence over `mediaType`.
+  // Use this to scope the item list to an exact set of media types (e.g. to
+  // match a stats endpoint's scope, which may exclude 'artist').
+  mediaTypes?: ('movie' | 'show' | 'artist')[]
 ) {
   const sortedIds = [...serverIds].sort().join(',');
+  const mediaTypesKey = mediaTypes?.length ? [...mediaTypes].sort().join(',') : undefined;
   return useQuery<StaleResponse>({
     queryKey: [
       'library',
@@ -146,6 +152,7 @@ export function useLibraryStale(
       mediaType,
       sortBy,
       sortOrder,
+      mediaTypesKey,
     ],
     queryFn: () =>
       api.library.stale(
@@ -157,8 +164,28 @@ export function useLibraryStale(
         pageSize,
         mediaType,
         sortBy,
-        sortOrder
+        sortOrder,
+        mediaTypes
       ),
+    staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
+  });
+}
+
+/**
+ * Fetch never-watched aggregate statistics (totals, breakdowns, age distribution)
+ * combined across all selected servers. The paginated item list itself comes
+ * from `useLibraryStale(serverIds, ..., 'never_watched')`.
+ */
+export function useLibraryNeverWatched(
+  serverIds: string[],
+  libraryId?: string | null,
+  mediaType: 'movie' | 'show' | 'all' = 'all'
+) {
+  const sortedIds = [...serverIds].sort().join(',');
+  return useQuery<NeverWatchedStatsResponse>({
+    queryKey: ['library', 'never-watched', sortedIds, libraryId, mediaType],
+    queryFn: () => api.library.neverWatched(serverIds, libraryId ?? undefined, mediaType),
     staleTime: LIBRARY_STALE_TIME,
     enabled: serverIds.length > 0,
   });
