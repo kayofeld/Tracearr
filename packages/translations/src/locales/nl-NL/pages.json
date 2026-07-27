@@ -119,6 +119,7 @@
     "description": "Topfilms en -series op je server",
     "neverWatched": {
       "ageChartEmptyDesc": "Everything in this library has been watched at least once.",
+      "ageChartEmptyDescFiltered": "No never-watched content matches this filter.",
       "ageChartEmptyTitle": "No never-watched content",
       "ageDistribution": "Age Distribution",
       "ageDistributionDesc": "How long never-watched content has been sitting on the server",
@@ -150,6 +151,7 @@
       "filterSeries": "Series",
       "itemsDesc": "Sorted with the oldest additions first",
       "itemsTitle": "Never-Watched Items",
+      "libraryKeyLabel": "Library {{id}}",
       "noOldestData": "No data yet",
       "onServerFor": "on server for {{duration}}",
       "statCount": "Never Watched",

@@ -148,7 +148,12 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
             li.server_id,
             s.name AS server_name,
             li.library_id,
-            s.name AS library_name,
+            -- library_name: no library display-name source is persisted in the DB;
+            -- library_id is the server-side section key (Plex/Jellyfin/Emby "library
+            -- ID"), used here as a stand-in so multi-library servers don't collapse
+            -- to one repeated server-name label. Backlog: persist real names during
+            -- librarySync so this can become a proper display name.
+            li.library_id AS library_name,
             li.media_type,
             li.created_at AS added_at,
             CASE
@@ -221,7 +226,9 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
           td.count AS totals_count,
           td.size_bytes::text AS totals_size_bytes,
           td.library_count AS totals_library_count,
-          td.oldest_added_at::text AS totals_oldest_added_at,
+          -- Strict ISO-8601 (with literal T/Z) - the pg default text cast
+          -- ('2023-01-01 00:00:00+00') is rejected by Safari's Date parser.
+          to_char(td.oldest_added_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS totals_oldest_added_at,
           (SELECT COALESCE(json_agg(json_build_object(
               'mediaType', media_type,
               'count', count,

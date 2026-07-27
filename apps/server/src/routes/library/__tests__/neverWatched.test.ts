@@ -94,14 +94,14 @@ function mockRawRow(overrides: Record<string, unknown> = {}) {
         totals_count: 5,
         totals_size_bytes: '536870912000',
         totals_library_count: 20,
-        totals_oldest_added_at: '2023-01-01 00:00:00+00',
+        totals_oldest_added_at: '2023-01-01T00:00:00.000Z',
         by_media_type: [{ mediaType: 'movie', count: 3, sizeBytes: '300000000000' }],
         by_library: [
           {
             serverId: 'server-1',
             serverName: 'Server 1',
             libraryId: 'lib-1',
-            libraryName: 'Server 1',
+            libraryName: 'lib-1',
             count: 5,
             sizeBytes: '536870912000',
           },
@@ -157,7 +157,7 @@ describe('GET /library/never-watched', () => {
         serverId: 'server-1',
         serverName: 'Server 1',
         libraryId: 'lib-1',
-        libraryName: 'Server 1',
+        libraryName: 'lib-1',
         count: 5,
         sizeBytes: 536870912000,
       },
@@ -178,7 +178,7 @@ describe('GET /library/never-watched', () => {
     expect(body.ageDistribution[3]).toEqual({ bucket: 'd180to365', count: 0, sizeBytes: 0 });
     expect(body.ageDistribution[4]).toEqual({ bucket: 'gt365', count: 0, sizeBytes: 0 });
 
-    expect(body.oldestAddedAt).toBe('2023-01-01 00:00:00+00');
+    expect(body.oldestAddedAt).toBe('2023-01-01T00:00:00.000Z');
   });
 
   it('omits show from byMediaType when mediaType=movie filter applied', async () => {

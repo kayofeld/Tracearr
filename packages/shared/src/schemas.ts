@@ -1064,12 +1064,24 @@ export const libraryDuplicatesQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+// Stale-content media type enum (movie/show/artist top-level containers only)
+const staleMediaTypeSchema = z.enum(['movie', 'show', 'artist']);
+
+// Accepts either a single stale media type or a repeated array from query params
+// (?mediaTypes=movie&mediaTypes=show), same shape as serverIdsQuerySchema.
+export const staleMediaTypesQuerySchema = z
+  .union([staleMediaTypeSchema.transform((mt) => [mt]), z.array(staleMediaTypeSchema)])
+  .optional();
+
 // Library stale content query schema
 export const libraryStaleQuerySchema = z.object({
   serverId: z.uuid().optional(),
   serverIds: serverIdsQuerySchema,
   libraryId: z.uuid().optional(),
-  mediaType: z.enum(['movie', 'show', 'artist']).optional(),
+  mediaType: staleMediaTypeSchema.optional(),
+  // Repeated media type filter - takes precedence over `mediaType` when present.
+  // Additive/optional so existing callers (e.g. the Storage page) are unaffected.
+  mediaTypes: staleMediaTypesQuerySchema,
   staleDays: z.coerce.number().int().min(1).default(90), // Configurable threshold
   category: z.enum(['all', 'never_watched', 'stale']).default('all'),
   sortBy: z.enum(['size', 'days_stale', 'title', 'added_at']).default('size'),
@@ -1083,6 +1095,9 @@ export const libraryStaleQuerySchema = z.object({
 export const libraryNeverWatchedQuerySchema = z.object({
   serverId: uuidSchema.optional(),
   serverIds: serverIdsQuerySchema,
+  // Deliberately a plain string, not z.uuid() (unlike libraryStaleQuerySchema.libraryId):
+  // the DB column is a varchar(100) server-side section key (e.g. Plex uses numeric
+  // strings, not UUIDs). Aligning stale's libraryId to this shape is backlogged.
   libraryId: z.string().optional(),
   mediaType: z.enum(['movie', 'show', 'all']).default('all'),
 });

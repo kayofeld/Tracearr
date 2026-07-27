@@ -110,6 +110,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
         serverIds: rawServerIds,
         libraryId,
         mediaType,
+        mediaTypes,
         staleDays,
         category,
         sortBy,
@@ -121,12 +122,17 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
 
       const resolvedIds = resolveServerIds(authUser, serverId, rawServerIds);
 
+      // mediaTypes (repeated param) takes precedence over the single mediaType when present.
+      const mediaTypesSegment = mediaTypes
+        ? mediaTypes.slice().sort().join(',')
+        : (mediaType ?? 'all');
+
       // Build cache key with all varying params
       const serverCacheSegment = resolvedIds ? resolvedIds.slice().sort().join(',') : 'all';
       const cacheKey = buildLibraryCacheKey(
         REDIS_KEYS.LIBRARY_STALE,
         serverCacheSegment,
-        `${libraryId ?? 'all'}-${mediaType ?? 'all'}-${staleDays}-${category}-${sortBy}-${sortOrder}-${page}-${pageSize}`
+        `${libraryId ?? 'all'}-${mediaTypesSegment}-${staleDays}-${category}-${sortBy}-${sortOrder}-${page}-${pageSize}`
       );
 
       // Try cache first
@@ -142,7 +148,16 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
       // Build filters
       const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
       const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
-      const mediaTypeFilter = mediaType ? sql`AND li.media_type = ${mediaType}` : sql``;
+      // mediaTypes (repeated param) takes precedence over the single mediaType; when
+      // neither is provided, behavior is unchanged (no filter - all categories included).
+      const mediaTypeFilter = mediaTypes
+        ? sql`AND li.media_type IN (${sql.join(
+            mediaTypes.map((mt) => sql`${mt}`),
+            sql`, `
+          )})`
+        : mediaType
+          ? sql`AND li.media_type = ${mediaType}`
+          : sql``;
 
       // Category filter for final results
       const categoryFilter =

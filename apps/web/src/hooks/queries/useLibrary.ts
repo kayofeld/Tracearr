@@ -131,9 +131,14 @@ export function useLibraryStale(
   pageSize: number = 20,
   mediaType?: 'movie' | 'show' | 'artist',
   sortBy: 'size' | 'title' | 'days_stale' | 'added_at' = 'size',
-  sortOrder: 'asc' | 'desc' = 'desc'
+  sortOrder: 'asc' | 'desc' = 'desc',
+  // Optional repeated media-type filter, takes precedence over `mediaType`.
+  // Use this to scope the item list to an exact set of media types (e.g. to
+  // match a stats endpoint's scope, which may exclude 'artist').
+  mediaTypes?: ('movie' | 'show' | 'artist')[]
 ) {
   const sortedIds = [...serverIds].sort().join(',');
+  const mediaTypesKey = mediaTypes?.length ? [...mediaTypes].sort().join(',') : undefined;
   return useQuery<StaleResponse>({
     queryKey: [
       'library',
@@ -147,6 +152,7 @@ export function useLibraryStale(
       mediaType,
       sortBy,
       sortOrder,
+      mediaTypesKey,
     ],
     queryFn: () =>
       api.library.stale(
@@ -158,7 +164,8 @@ export function useLibraryStale(
         pageSize,
         mediaType,
         sortBy,
-        sortOrder
+        sortOrder,
+        mediaTypes
       ),
     staleTime: LIBRARY_STALE_TIME,
     enabled: serverIds.length > 0,

@@ -4,6 +4,7 @@ import { HighchartsReact } from 'highcharts-react-official';
 import type { NeverWatchedAgeDistribution, NeverWatchedAgeBucket } from '@tracearr/shared';
 import { ChartSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/library';
+import { formatBytes } from '@/lib/formatters';
 import { Clock } from 'lucide-react';
 
 // Fixed left-to-right ordering; the backend always returns all five buckets.
@@ -115,10 +116,17 @@ export function NeverWatchedAgeChart({
           color: 'hsl(var(--popover-foreground))',
         },
         formatter: function () {
-          // Find item by matching the x-axis category label shown for this point
-          const xValue = String(this.x);
-          const point = chartData.find((d) => bucketLabels[d.bucket] === xValue);
-          return `<b>${xValue}</b><br/>${seriesName}: ${point?.count ?? this.y}`;
+          // Resolve the bucket via the point's category (matches the sibling
+          // pattern in DayOfWeekChart) rather than comparing String(this.x) to
+          // a translated label, which is fragile on category axes.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          const pointIndex = (this as any).point?.index;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+          const category = (this as any).point?.category || this.x;
+          const bucketData = typeof pointIndex === 'number' ? chartData[pointIndex] : undefined;
+          const count = bucketData?.count ?? this.y ?? 0;
+          const sizeLabel = formatBytes(bucketData?.sizeBytes ?? 0);
+          return `<b>${category}</b><br/>${count} ${seriesName.toLowerCase()} &middot; ${sizeLabel}`;
         },
       },
       series: [

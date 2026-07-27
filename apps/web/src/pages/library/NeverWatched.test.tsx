@@ -226,6 +226,63 @@ describe('LibraryNeverWatched', () => {
     expect(refetchItems).toHaveBeenCalled();
   });
 
+  it('keeps the tabs mounted when a filtered tab has zero items (CR-2 regression)', async () => {
+    // The "All" tab has items, so the page renders normally on first mount.
+    // Once the "Movies" tab is selected, the stats/items hooks report a
+    // filtered zero - the global "everything watched" empty state must not
+    // take over and unmount the tab switcher.
+    mockUseLibraryNeverWatched.mockImplementation((_ids, _libraryId, mediaType) => {
+      if (mediaType === 'movie') {
+        return neverWatchedStatsReturn({
+          data: {
+            totals: { count: 0, sizeBytes: 0, libraryCount: 50, pctOfLibrary: 0 },
+            byMediaType: [],
+            byLibrary: [],
+            ageDistribution: [
+              { bucket: 'lt30', count: 0, sizeBytes: 0 },
+              { bucket: 'd30to90', count: 0, sizeBytes: 0 },
+              { bucket: 'd90to180', count: 0, sizeBytes: 0 },
+              { bucket: 'd180to365', count: 0, sizeBytes: 0 },
+              { bucket: 'gt365', count: 0, sizeBytes: 0 },
+            ],
+            oldestAddedAt: null,
+          },
+        });
+      }
+      return neverWatchedStatsReturn();
+    });
+    mockUseLibraryStale.mockImplementation(
+      (_ids, _libraryId, _staleDays, _category, _page, _pageSize, mediaType) => {
+        if (mediaType === 'movie') {
+          return staleItemsReturn({
+            data: {
+              items: [],
+              summary: {
+                neverWatched: { count: 0, sizeBytes: 0 },
+                stale: { count: 0, sizeBytes: 0 },
+                total: { count: 0, sizeBytes: 0 },
+                threshold: { days: 90 },
+              },
+              pagination: { page: 1, pageSize: 20, total: 0 },
+            },
+          });
+        }
+        return staleItemsReturn();
+      }
+    );
+
+    renderPage();
+
+    await userEvent.click(screen.getByText('library.neverWatched.filterMovies'));
+
+    // The tab switcher (and every tab) is still in the document - the page
+    // did not fall back to the global empty state.
+    expect(screen.getByRole('tablist')).toBeInTheDocument();
+    expect(screen.getByText('library.neverWatched.filterAll')).toBeInTheDocument();
+    expect(screen.getByText('library.neverWatched.filterSeries')).toBeInTheDocument();
+    expect(screen.queryByText('Old Forgotten Movie')).not.toBeInTheDocument();
+  });
+
   it('passes the selected media type filter through to both hooks', async () => {
     renderPage();
 

@@ -78,10 +78,15 @@ export function LibraryNeverWatched() {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'addedAt', desc: false }]);
   const pageSize = 20;
 
-  // Reset to page 1 whenever the filter changes so we don't land on a stale/out-of-range page
+  // Stable key for the selected-server-ids array (its reference changes every
+  // render even when its contents don't).
+  const serverIdsKey = selectedServerIds.join(',');
+
+  // Reset to page 1 whenever the filter or the selected servers change so we
+  // don't land on a stale/out-of-range page.
   useEffect(() => {
     setPage(1);
-  }, [mediaTypeFilter]);
+  }, [mediaTypeFilter, serverIdsKey]);
 
   const handleSortingChange = (newSorting: SortingState) => {
     setSorting(newSorting);
@@ -92,6 +97,11 @@ export function LibraryNeverWatched() {
   const sortBy = columnToSortBy[sortColumnId] ?? 'added_at';
   const sortOrder: 'asc' | 'desc' = sorting[0] ? (sorting[0].desc ? 'desc' : 'asc') : 'asc';
   const mediaTypeParam = mediaTypeFilter === 'all' ? undefined : mediaTypeFilter;
+  // The stats endpoint only ever counts movies+shows (never 'artist'/music).
+  // Scope the table's default stale-endpoint query the same way so the table
+  // can never disagree with the stat cards - see CR-1.
+  const mediaTypesParam: ('movie' | 'show')[] =
+    mediaTypeFilter === 'all' ? ['movie', 'show'] : [mediaTypeFilter];
 
   // Check library status - fan out per server to detect which need setup
   const statusResult = useLibraryStatus(selectedServerIds);
@@ -109,7 +119,8 @@ export function LibraryNeverWatched() {
     pageSize,
     mediaTypeParam,
     sortBy,
-    sortOrder
+    sortOrder,
+    mediaTypesParam
   );
 
   const totalPages = Math.ceil((items.data?.pagination.total ?? 0) / pageSize) || 1;
@@ -148,14 +159,6 @@ export function LibraryNeverWatched() {
             } satisfies ColumnDef<StaleItem>,
           ]
         : []),
-      {
-        accessorKey: 'libraryName',
-        header: t('library.neverWatched.colLibrary'),
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">{row.original.libraryName}</span>
-        ),
-      },
       {
         id: 'addedAt',
         accessorKey: 'addedAt',
@@ -247,8 +250,14 @@ export function LibraryNeverWatched() {
     );
   }
 
+  // Only fall back to the full-page "everything watched" state when the
+  // library-wide (unfiltered) totals are zero. On a filtered tab (Movies /
+  // Series) a zero count only means that slice is empty - other media types
+  // may still have never-watched items, so we must keep the tabs mounted and
+  // let the per-section empty states (age chart, table) carry the filtered
+  // zero instead of unmounting the tab switcher entirely - see CR-2.
   const isFullyLoaded = !stats.isLoading && !items.isLoading;
-  if (isFullyLoaded && (stats.data?.totals.count ?? 0) === 0) {
+  if (isFullyLoaded && mediaTypeFilter === 'all' && (stats.data?.totals.count ?? 0) === 0) {
     return (
       <div className="space-y-6">
         {header}
@@ -330,7 +339,11 @@ export function LibraryNeverWatched() {
             bucketLabels={bucketLabels}
             seriesName={t('common:labels.items')}
             emptyTitle={t('library.neverWatched.ageChartEmptyTitle')}
-            emptyDescription={t('library.neverWatched.ageChartEmptyDesc')}
+            emptyDescription={
+              mediaTypeFilter === 'all'
+                ? t('library.neverWatched.ageChartEmptyDesc')
+                : t('library.neverWatched.ageChartEmptyDescFiltered')
+            }
           />
         </CardContent>
       </Card>
@@ -350,6 +363,15 @@ export function LibraryNeverWatched() {
             <div className="divide-border divide-y rounded-md border">
               {stats.data.byLibrary.map((row) => {
                 const widthPct = Math.max((row.count / maxLibraryCount) * 100, 4);
+                // `libraryName` is actually the raw library key (a Plex library
+                // id, or a Jellyfin/Emby GUID) - there's no human-readable
+                // library display name in the DB. Prefix with the server name
+                // when multiple servers are in play so two libraries never
+                // render an identical label; label it explicitly as a library
+                // key otherwise so we don't pass off a raw id as a real name.
+                const libraryLabel = isMultiServer
+                  ? `${row.serverName} · ${row.libraryName}`
+                  : t('library.neverWatched.libraryKeyLabel', { id: row.libraryName });
                 return (
                   <div
                     key={`${row.serverId}-${row.libraryId}`}
@@ -357,7 +379,7 @@ export function LibraryNeverWatched() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-medium">{row.libraryName}</span>
+                        <span className="truncate text-sm font-medium">{libraryLabel}</span>
                         <span className="text-muted-foreground shrink-0 text-xs">
                           {row.count} {t('common:labels.items').toLowerCase()} &middot;{' '}
                           {formatBytes(row.sizeBytes)}
@@ -370,11 +392,6 @@ export function LibraryNeverWatched() {
                         />
                       </div>
                     </div>
-                    {isMultiServer && (
-                      <Badge variant="outline" className="shrink-0">
-                        {row.serverName}
-                      </Badge>
-                    )}
                   </div>
                 );
               })}
