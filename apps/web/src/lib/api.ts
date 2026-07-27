@@ -59,6 +59,7 @@ import type {
   LibraryStorageResponse,
   DuplicatesResponse,
   StaleResponse,
+  NeverWatchedStatsResponse,
   WatchResponse,
   CompletionResponse,
   PatternsResponse,
@@ -1228,6 +1229,21 @@ class ApiClient {
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
       return this.request<StaleResponse>(`/library/stale?${params.toString()}`);
+    },
+    neverWatched: (
+      serverIds?: string[],
+      libraryId?: string,
+      mediaType: 'movie' | 'show' | 'all' = 'all'
+    ) => {
+      const params = new URLSearchParams();
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
+      if (libraryId) params.set('libraryId', libraryId);
+      params.set('mediaType', mediaType);
+      return this.request<NeverWatchedStatsResponse>(`/library/never-watched?${params.toString()}`);
     },
     watch: (serverIds?: string[], libraryId?: string, page: number = 1, pageSize: number = 20) => {
       const params = new URLSearchParams();

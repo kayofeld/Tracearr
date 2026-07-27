@@ -141,6 +141,7 @@ export {
   useLibraryStorage,
   useLibraryDuplicates,
   useLibraryStale,
+  useLibraryNeverWatched,
   useLibraryWatch,
   useLibraryCompletion,
   useLibraryPatterns,

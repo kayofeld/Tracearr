@@ -17,6 +17,7 @@ import type {
   LibraryStorageResponse,
   DuplicatesResponse,
   StaleResponse,
+  NeverWatchedStatsResponse,
   WatchResponse,
   CompletionResponse,
   PatternsResponse,
@@ -159,6 +160,25 @@ export function useLibraryStale(
         sortBy,
         sortOrder
       ),
+    staleTime: LIBRARY_STALE_TIME,
+    enabled: serverIds.length > 0,
+  });
+}
+
+/**
+ * Fetch never-watched aggregate statistics (totals, breakdowns, age distribution)
+ * combined across all selected servers. The paginated item list itself comes
+ * from `useLibraryStale(serverIds, ..., 'never_watched')`.
+ */
+export function useLibraryNeverWatched(
+  serverIds: string[],
+  libraryId?: string | null,
+  mediaType: 'movie' | 'show' | 'all' = 'all'
+) {
+  const sortedIds = [...serverIds].sort().join(',');
+  return useQuery<NeverWatchedStatsResponse>({
+    queryKey: ['library', 'never-watched', sortedIds, libraryId, mediaType],
+    queryFn: () => api.library.neverWatched(serverIds, libraryId ?? undefined, mediaType),
     staleTime: LIBRARY_STALE_TIME,
     enabled: serverIds.length > 0,
   });

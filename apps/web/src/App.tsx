@@ -32,6 +32,9 @@ const LibraryOverview = lazy(named(() => import('@/pages/library/Overview'), 'Li
 const LibraryQuality = lazy(named(() => import('@/pages/library/Quality'), 'LibraryQuality'));
 const LibraryStorage = lazy(named(() => import('@/pages/library/Storage'), 'LibraryStorage'));
 const LibraryWatch = lazy(named(() => import('@/pages/library/Watch'), 'LibraryWatch'));
+const LibraryNeverWatched = lazy(
+  named(() => import('@/pages/library/NeverWatched'), 'LibraryNeverWatched')
+);
 const Users = lazy(named(() => import('@/pages/Users'), 'Users'));
 const UserDetail = lazy(named(() => import('@/pages/UserDetail'), 'UserDetail'));
 const Rules = lazy(named(() => import('@/pages/Rules'), 'Rules'));
@@ -93,6 +96,7 @@ export function App() {
             <Route path="library/quality" element={<LibraryQuality />} />
             <Route path="library/storage" element={<LibraryStorage />} />
             <Route path="library/watch" element={<LibraryWatch />} />
+            <Route path="library/never-watched" element={<LibraryNeverWatched />} />
 
             {/* Other routes */}
             <Route path="history/:sessionId?" element={<History />} />
