@@ -4,6 +4,21 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v1.7.0 — Never Watched dashboard page
+
+- New **Library → Never Watched** page: every movie and series that has never been played, with the
+  date it was added to the server and how long it has been sitting there. Sortable (oldest first by
+  default), paginated, filterable (All / Movies / Series), multi-server aware.
+- Statistics on top: never-watched count, total size, share of the library, oldest item, an age
+  distribution over five "on server since" buckets, and a per-library breakdown. Backed by a new
+  aggregate endpoint `GET /library/never-watched` (auth-gated, server-scoped, cached 1h); the item
+  list reuses the existing `/library/stale?category=never_watched`.
+- The stale endpoint gained an optional repeated `mediaTypes` filter (backward compatible) so the
+  page's table and its stats agree even when music libraries are synced.
+- Quality: independent code review (7 findings fixed, two of them High) and a QA pass; first unit
+  tests for the `routes/library` family (14 route tests + 9 QA interaction tests); translations
+  propagated to all 32 locales.
+
 ## v1.6.5 — Documentation & fork identity
 
 - README rewritten as a fork: states the different direction (bare-metal/source-first, Emby-first,
