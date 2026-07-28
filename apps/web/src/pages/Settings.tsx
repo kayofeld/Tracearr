@@ -13,6 +13,7 @@ import { AccessSettings } from '@/components/settings/AccessSettings';
 import { MobileSettings } from '@/components/settings/MobileSettings';
 import { TailscaleSettings } from '@/components/settings/TailscaleSettings';
 import { ImportSettings } from '@/components/settings/ImportSettings';
+import { OmbiSettings } from '@/components/settings/OmbiSettings';
 import { JobsSettings } from '@/components/settings/JobsSettings';
 import { BackupSettings } from '@/components/settings/BackupSettings';
 import { NotificationAgentsManager } from '@/components/settings/notification-agents';
@@ -30,6 +31,7 @@ function SettingsNav() {
     { href: '/settings/mobile', label: t('tabs.mobile') },
     { href: '/settings/tailscale', label: t('tabs.tailscale') },
     { href: '/settings/import', label: t('tabs.import') },
+    { href: '/settings/ombi', label: t('tabs.ombi') },
     { href: '/settings/jobs', label: t('tabs.jobs') },
     { href: '/settings/backup', label: t('tabs.backup') },
   ];
@@ -89,6 +91,7 @@ export function Settings() {
         <Route path="mobile" element={<MobileSettings />} />
         <Route path="tailscale" element={<TailscaleSettings />} />
         <Route path="import" element={<ImportSettings />} />
+        <Route path="ombi" element={<OmbiSettings />} />
         <Route path="jobs" element={<JobsSettings />} />
         <Route path="backup" element={<BackupSettings />} />
       </Routes>

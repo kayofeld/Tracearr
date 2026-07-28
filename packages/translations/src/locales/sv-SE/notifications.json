@@ -67,6 +67,11 @@
       "jobStartFailed": "Det gick inte att starta jobbet",
       "mobileAccessDisableFailed": "Det gick inte att inaktivera mobilåtkomst",
       "mobileAccessEnableFailed": "Det gick inte att aktivera mobilåtkomst",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Det gick inte att generera partoken",
       "plexDirectUrl": "plex.direct URL:er är reläadresser som inte kan användas här. Använd en direkt IP-adress eller värdnamn istället.",
       "plexUnlinkFailed": "Det gick inte att koppla bort Plex-kontot",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Skanna QR-koden med mobilappen Tracearr för att ansluta",
         "title": "Mobil åtkomst aktiverad"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Skanna QR-koden med din mobila enhet för att koppla",

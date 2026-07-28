@@ -48,6 +48,25 @@ const PUBLIC_DEFAULTS: Settings = {
 };
 
 /**
+ * Last-run bookkeeping for the Ombi sync job — internal only, written by
+ * jobs/ombiSyncQueue.ts, read by GET /ombi/status (routes/ombi.ts). Live
+ * counts/attribution/media-match coverage are computed on demand from
+ * ombi_requests instead of cached here, so they never go stale between runs
+ * (a mapping change or purge takes effect immediately without waiting for
+ * the next sync). See docs/architecture/ombi-connector.md §3, §9.
+ */
+export interface OmbiSyncStatusInternal {
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  /** Cause of the last run's failure; null if the last run had no error. */
+  lastError: string | null;
+  /** Records skipped by Zod validation on the last run (movies + TV combined). */
+  skippedValidation: number;
+  moviePhaseOk: boolean;
+  tvPhaseOk: boolean;
+}
+
+/**
  * Internal-only settings — not exposed in the public Settings API.
  * Add new internal keys here; types, defaults, and filtering are all derived.
  */
@@ -55,6 +74,7 @@ const INTERNAL_DEFAULTS = {
   tailscaleState: null as string | null,
   jwtRevokedBefore: null as string | null, // ISO 8601 — tokens issued before this timestamp are rejected
   localLoginEnabled: true,
+  ombiSyncStatus: null as OmbiSyncStatusInternal | null,
 };
 
 type InternalSettings = typeof INTERNAL_DEFAULTS;
@@ -219,6 +239,17 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
     ...s,
     webhookSecret: null, // TODO: Phase 4
   };
+}
+
+/** "Configured" is derived: both url and apiKey set (Tautulli gate precedent). */
+export interface OmbiSettings {
+  ombiUrl: string | null;
+  ombiApiKey: string | null;
+}
+
+export async function getOmbiSettings(): Promise<OmbiSettings> {
+  const s = await getSettings(['ombiUrl', 'ombiApiKey']);
+  return { ombiUrl: s.ombiUrl, ombiApiKey: s.ombiApiKey };
 }
 
 export async function getBackupScheduleSettings(): Promise<{

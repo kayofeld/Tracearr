@@ -1210,6 +1210,7 @@ export interface ServerToClientEvents {
   'import:jellystat:progress': (progress: JellystatImportProgress) => void;
   'maintenance:progress': (progress: MaintenanceJobProgress) => void;
   'library:sync:progress': (progress: LibrarySyncProgress) => void;
+  'ombi:sync:progress': (event: OmbiSyncProgressEvent) => void;
   'tasks:updated': (tasks: RunningTask[]) => void;
   'version:update': (data: { current: string; latest: string; releaseUrl: string }) => void;
   'server:down': (data: { serverId: string; serverName: string }) => void;

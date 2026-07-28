@@ -67,6 +67,11 @@
       "jobStartFailed": "Pornirea jobului a eșuat",
       "mobileAccessDisableFailed": "Dezactivarea accesului mobil a eșuat",
       "mobileAccessEnableFailed": "Activarea accesului mobil a eșuat",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Generarea token-ului de pereche a eșuat",
       "plexDirectUrl": "URL-urile plex.direct sunt adrese de releu care nu pot fi folosite aici. Vă rugăm să folosiți o adresă IP directă sau numele gazdei.",
       "plexUnlinkFailed": "Deconectarea contului Plex a eșuat",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Scanați codul QR cu aplicația pentru mobil Tracearr pentru a vă conecta",
         "title": "Acces mobil activat"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Scanați codul QR cu dispozitivul dvs. mobil pentru a se asocia",

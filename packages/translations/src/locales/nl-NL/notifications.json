@@ -67,6 +67,11 @@
       "jobStartFailed": "Taak starten mislukt",
       "mobileAccessDisableFailed": "Mobiele toegang uitschakelen mislukt",
       "mobileAccessEnableFailed": "Mobiele toegang inschakelen mislukt",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Koppeltoken genereren mislukt",
       "plexDirectUrl": "Een plex.direct-URL is een relay-adres dat hier niet gebruikt kan worden. Gebruik een direct IP-adres of hostnaam.",
       "plexUnlinkFailed": "Ontkoppelen Plex-account mislukt",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Scan de QR-code met de mobiele Tracearr-app om te verbinden",
         "title": "Mobiele toegang ingeschakeld"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Scan de QR-code met je mobiele apparaat om te koppelen",

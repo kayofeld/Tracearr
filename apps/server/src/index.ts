@@ -41,6 +41,7 @@ import type {
   JellystatImportProgress,
   MaintenanceJobProgress,
   LibrarySyncProgress,
+  OmbiSyncProgressEvent,
 } from '@tracearr/shared';
 
 import authPlugin, { loadJwtRevokeSettings } from './plugins/auth.js';
@@ -70,6 +71,7 @@ import { libraryRoutes } from './routes/library.js';
 import { tailscaleRoutes } from './routes/tailscale.js';
 import { tasksRoutes } from './routes/tasks.js';
 import { backupRoutes } from './routes/backup.js';
+import { ombiRoutes } from './routes/ombi.js';
 import {
   getPollerSettings,
   getNetworkSettings,
@@ -112,6 +114,12 @@ import {
   scheduleAutoSync,
   shutdownLibrarySyncQueue,
 } from './jobs/librarySyncQueue.js';
+import {
+  initOmbiSyncQueue,
+  startOmbiSyncWorker,
+  scheduleOmbiSync,
+  shutdownOmbiSyncQueue,
+} from './jobs/ombiSyncQueue.js';
 import {
   initVersionCheckQueue,
   startVersionCheckWorker,
@@ -432,6 +440,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   await app.register(publicRoutes, { prefix: `${API_BASE_PATH}/public` });
   await app.register(libraryRoutes, { prefix: `${API_BASE_PATH}/library` });
   await app.register(backupRoutes, { prefix: `${API_BASE_PATH}/backup` });
+  await app.register(ombiRoutes, { prefix: `${API_BASE_PATH}/ombi` });
 
   // Serve static frontend in production
   const webDistPath = resolve(PROJECT_ROOT, 'apps/web/dist');
@@ -513,6 +522,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     await shutdownImportQueue();
     await shutdownMaintenanceQueue();
     await shutdownLibrarySyncQueue();
+    await shutdownOmbiSyncQueue();
     await shutdownVersionCheckQueue();
     await shutdownInactivityCheckQueue();
     await shutdownBackupQueue();
@@ -797,6 +807,24 @@ async function initializeServices(app: FastifyInstance) {
     // Don't throw - library sync is non-critical
   }
 
+  // Initialize Ombi sync queue (uses Redis for job storage). Always scheduled
+  // regardless of configuration - each firing self-guards and no-ops silently
+  // when Ombi isn't configured (jobs/ombiSyncQueue.ts runOmbiSync), so
+  // configuring/disconnecting the connector takes effect without a restart.
+  try {
+    initOmbiSyncQueue(redisUrl);
+    startOmbiSyncWorker();
+    setTimeout(() => {
+      scheduleOmbiSync().catch((err) => {
+        app.log.error({ err }, 'Failed to schedule Ombi sync');
+      });
+    }, 5000);
+    app.log.info('Ombi sync queue initialized');
+  } catch (err) {
+    app.log.error({ err }, 'Failed to initialize Ombi sync queue');
+    // Don't throw - the Ombi connector is optional and non-critical
+  }
+
   // Initialize version check queue (uses Redis for job storage and caching)
   try {
     initVersionCheckQueue(redisUrl, app.redis, pubSubService.publish.bind(pubSubService));
@@ -1001,6 +1029,9 @@ async function initializePostListen(app: FastifyInstance) {
           break;
         case WS_EVENTS.LIBRARY_SYNC_PROGRESS:
           broadcastToSessions('library:sync:progress', data as LibrarySyncProgress);
+          break;
+        case WS_EVENTS.OMBI_SYNC_PROGRESS:
+          broadcastToSessions('ombi:sync:progress', data as OmbiSyncProgressEvent);
           break;
         case WS_EVENTS.VERSION_UPDATE:
           broadcastToSessions(

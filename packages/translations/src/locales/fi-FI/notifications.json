@@ -67,6 +67,11 @@
       "jobStartFailed": "Työn aloittaminen epäonnistui",
       "mobileAccessDisableFailed": "Mobiiliyhteyden käyttöoikeuden poistaminen käytöstä epäonnistui",
       "mobileAccessEnableFailed": "Mobiiliyhteyden käyttöoikeuden käyttöönotto epäonnistui",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Parin tunnuksen luonti epäonnistui",
       "plexDirectUrl": "plex.direct URL-osoitteet ovat releosoitteita, joita ei voi käyttää tässä. Käytä sen sijaan suoraa IP-osoitetta tai isäntänimeä.",
       "plexUnlinkFailed": "Plex tilin poisto epäonnistui",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Skannaa QR-koodi Tracearr mobiilisovelluksella, jotta voit muodostaa yhteyden",
         "title": "Mobiilikäyttö Käytössä"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Skannaa QR-koodi mobiililaitteellasi, jotta voit muodostaa parin",

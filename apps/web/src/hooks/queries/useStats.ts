@@ -297,3 +297,18 @@ export function useBandwidthSummary(timeRange?: StatsTimeRange, serverIds?: stri
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
+
+/**
+ * Fetch per-requester statistics from the Ombi connector (GET /stats/requesters).
+ * Server-side cached (Redis, 1h); `configured: false` in the response means the
+ * connector is off - the page renders an empty state rather than treating it as
+ * an error.
+ */
+export function useRequesterStats(serverIds: string[], mediaType: 'all' | 'movie' | 'tv' = 'all') {
+  const serverIdsKey = serverIds.length ? [...serverIds].sort().join(',') : 'all';
+  return useQuery({
+    queryKey: ['stats', 'requesters', serverIdsKey, mediaType],
+    queryFn: () => api.stats.requesters(serverIds, mediaType),
+    staleTime: 1000 * 60 * 5, // 5 minutes - matches server Redis TTL cadence
+  });
+}

@@ -67,6 +67,11 @@
       "jobStartFailed": "Aufgabe starten fehlgeschlagen",
       "mobileAccessDisableFailed": "Mobilen Zugriff deaktivieren fehlgeschlagen",
       "mobileAccessEnableFailed": "Mobilen Zugriff aktivieren fehlgeschlagen",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Pairing-Token generieren fehlgeschlagen",
       "plexDirectUrl": "plex.direct URLs sind Relayadressen, die hier nicht verwendet werden können. Bitte verwenden Sie stattdessen eine direkte IP-Adresse oder einen Hostnamen.",
       "plexUnlinkFailed": "Plex-Konto trennen fehlgeschlagen",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Scannen Sie den QR-Code mit der Tracearr Mobile App um sich zu verbinden",
         "title": "Mobiler Zugriff aktiviert"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Scannen Sie den QR-Code mit Ihrem Mobilgerät",

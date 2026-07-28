@@ -67,6 +67,11 @@
       "jobStartFailed": "Nepodařilo se spustit zakázku",
       "mobileAccessDisableFailed": "Nepodařilo se zakázat mobilní přístup",
       "mobileAccessEnableFailed": "Nepodařilo se povolit mobilní přístup",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Generování tokenu páru se nezdařilo",
       "plexDirectUrl": "plex.direct URL jsou překladové adresy, které zde nelze použít. Použijte prosím přímou IP adresu nebo název hostitele.",
       "plexUnlinkFailed": "Nepodařilo se odpojit Plex účet",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Naskenujte QR kód pomocí mobilní aplikace Tracearr pro připojení",
         "title": "Mobilní přístup povolen"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Naskenujte QR kód pomocí vašeho mobilního zařízení pro párování",
