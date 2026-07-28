@@ -329,7 +329,11 @@ describe('SeerrService.fetchAllRequests', () => {
     });
   });
 
-  it('derives status from the integer vocabulary (1=pending,2=approved,3=denied,4=approved/processing,5=available)', async () => {
+  it('derives status from the integer vocabulary (1=pending,2=approved,3=denied,4=FAILED->denied,5=available) - CR-2', async () => {
+    // 4 = FAILED (verified against seerr-team/seerr's MediaRequestStatus enum,
+    // not the count-endpoint field-order guess this design originally made -
+    // see docs/architecture/seerr-connector.md). Mapped onto 'denied', the
+    // closest bucket the shipped 4-value vocabulary offers.
     const requests = [1, 2, 3, 4, 5].map((status, i) => ({
       ...validRequest,
       id: 200 + i,
@@ -346,7 +350,7 @@ describe('SeerrService.fetchAllRequests', () => {
       'pending',
       'approved',
       'denied',
-      'approved', // processing folds into approved
+      'denied', // FAILED folds into denied, not approved
       'available',
     ]);
   });
@@ -459,6 +463,71 @@ describe('SeerrService.fetchAllRequests', () => {
   });
 
   // ==========================================================================
+  // SEERR-02: the SEC-05 lesson applied to numbers, not just strings -
+  // tmdbId/tvdbId/id land in Postgres `integer` columns; an out-of-range
+  // value must be SKIPPED (fail Zod validation), never reach the multi-row
+  // upsert where it would throw `integer out of range` for the WHOLE batch.
+  // ==========================================================================
+
+  it('skips a record with an out-of-int32-range tmdbId rather than letting it reach the integer column (SEERR-02)', async () => {
+    const bad = { ...validRequest, media: { ...validRequest.media, tmdbId: 2 ** 40 } };
+    mockFetch.mockResolvedValue(
+      jsonResponse({ pageInfo: pageInfo({ results: 1 }), results: [bad] })
+    );
+
+    const service = new SeerrService('http://localhost:5055', 'key');
+    const { records, skipped } = await service.fetchAllRequests();
+
+    // Fails without the SEERR-02 fix: z.number() alone accepts 2**40, so the
+    // record would be valid (records.length===1, skipped===0).
+    expect(records).toHaveLength(0);
+    expect(skipped).toBe(1);
+  });
+
+  it('skips a record with an out-of-int32-range tvdbId (SEERR-02)', async () => {
+    const bad = { ...validRequest, media: { ...validRequest.media, tvdbId: -(2 ** 40) } };
+    mockFetch.mockResolvedValue(
+      jsonResponse({ pageInfo: pageInfo({ results: 1 }), results: [bad] })
+    );
+
+    const service = new SeerrService('http://localhost:5055', 'key');
+    const { records, skipped } = await service.fetchAllRequests();
+
+    expect(records).toHaveLength(0);
+    expect(skipped).toBe(1);
+  });
+
+  it('skips a record with an out-of-int32-range request id (SEERR-02)', async () => {
+    const bad = { ...validRequest, id: 2 ** 40 };
+    mockFetch.mockResolvedValue(
+      jsonResponse({ pageInfo: pageInfo({ results: 1 }), results: [bad] })
+    );
+
+    const service = new SeerrService('http://localhost:5055', 'key');
+    const { records, skipped } = await service.fetchAllRequests();
+
+    // Fails without the fix: z.number() accepts 2**40 as `id`, which becomes
+    // media_requests.source_request_id (integer column) - would throw
+    // `integer out of range` for the whole multi-row upsert in the job.
+    expect(records).toHaveLength(0);
+    expect(skipped).toBe(1);
+  });
+
+  it('skips a tv record whose seasons array exceeds the sane length cap (SEERR-02)', async () => {
+    const manySeasons = Array.from({ length: 1001 }, (_, i) => ({ seasonNumber: i }));
+    const bad = { ...validRequest, id: 999, type: 'tv' as const, seasons: manySeasons };
+    mockFetch.mockResolvedValue(
+      jsonResponse({ pageInfo: pageInfo({ results: 1 }), results: [bad] })
+    );
+
+    const service = new SeerrService('http://localhost:5055', 'key');
+    const { records, skipped } = await service.fetchAllRequests();
+
+    expect(records).toHaveLength(0);
+    expect(skipped).toBe(1);
+  });
+
+  // ==========================================================================
   // Pagination safety (design §6)
   // ==========================================================================
 
@@ -532,8 +601,56 @@ describe('SeerrService.fetchAllRequests', () => {
     const { paginationConsistent } = await service.fetchAllRequests();
 
     expect(paginationConsistent).toBe(false);
-    // Hard cap = ceil(100000/100)+1 = 1001 - bounded, not infinite.
-    expect(mockFetch).toHaveBeenCalledTimes(1001);
+    // computed cap = ceil(100000/100)+1 = 1001, but SEERR-01's absolute
+    // MAX_PAGES=1000 ceiling wins via min(...) - bounded independent of the
+    // (still Zod-legal, <=1,000,000) reported total, not just "not infinite".
+    expect(mockFetch).toHaveBeenCalledTimes(1000);
+  });
+
+  // ==========================================================================
+  // SEERR-01: pageInfo.results is attacker-controlled and previously fed
+  // directly into the hard-cap computation (`ceil(results/take)+1`), so a
+  // hostile total scaled the cap right along with it and never bounded
+  // anything - a fresh 100-record page with distinct ids on every request
+  // (defeating the dedupe) would grow `collected` without bound -> Node OOM.
+  // ==========================================================================
+
+  it('rejects immediately when pageInfo.results exceeds the sane maximum (hostile/pathological total, SEERR-01a)', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ pageInfo: pageInfo({ results: 1e15 }), results: [validRequest] })
+    );
+
+    const service = new SeerrService('http://localhost:5055', 'key');
+
+    // Fails without the fix: pre-SEERR-01 `results: z.number()` accepts 1e15,
+    // so this would instead loop toward hardCap = ceil(1e15/100)+1 ≈ 10^13.
+    await expect(service.fetchAllRequests()).rejects.toBeInstanceOf(SeerrInvalidResponseError);
+    expect(mockFetch).toHaveBeenCalledTimes(1); // terminates immediately, not after thousands of pages
+  });
+
+  it('never prunes when the reported total is hostile (SEERR-01a interaction with the prune gate)', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ pageInfo: pageInfo({ results: 1e15 }), results: [validRequest] })
+    );
+
+    const service = new SeerrService('http://localhost:5055', 'key');
+
+    // fetchAllRequests() throws rather than returning a paginationConsistent
+    // flag - the caller (jobs/seerrSyncQueue.ts) catches this as a failed
+    // phase, so allowPrune is never reached and no rows are ever deleted.
+    await expect(service.fetchAllRequests()).rejects.toThrow();
+  });
+
+  it('rejects a page whose results array exceeds the sane per-page cap (oversized/hostile page, SEERR-01c)', async () => {
+    const hugePage = Array.from({ length: 1001 }, (_, i) => ({ ...validRequest, id: i + 1 }));
+    mockFetch.mockResolvedValue(
+      jsonResponse({ pageInfo: pageInfo({ results: 1001 }), results: hugePage })
+    );
+
+    const service = new SeerrService('http://localhost:5055', 'key');
+
+    await expect(service.fetchAllRequests()).rejects.toBeInstanceOf(SeerrInvalidResponseError);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('marks pagination inconsistent when the reported total drops mid-pagination (concurrent Seerr write - design §6 step 6)', async () => {

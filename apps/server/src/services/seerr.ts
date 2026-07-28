@@ -37,6 +37,19 @@ const RETRY_DELAY_MS = 1_000;
 const MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
 /** Page size for GET /api/v1/request pagination (design §6). */
 export const SEERR_PAGE_SIZE = 100;
+/**
+ * Absolute pagination ceiling (SEERR-01), independent of anything Seerr
+ * reports. `pageInfo.results` is attacker-controlled (only `z.number()`
+ * before this fix): a compromised/hostile instance can report an arbitrarily
+ * large total while serving a fresh page of distinct ids on every request
+ * (defeating the in-memory dedupe), and a cap computed FROM that value -
+ * `ceil(pageInfo.results / SEERR_PAGE_SIZE) + 1` - scales right along with
+ * it, so it never actually bounds the loop. This ceiling does not scale with
+ * any reported number - at SEERR_PAGE_SIZE=100 it bounds the run to 100k
+ * fetched records, well above any real instance (108 requests measured) but
+ * far short of Node OOM territory.
+ */
+const MAX_PAGES = 1000;
 
 // ============================================================================
 // Column-width caps (SEC-05 precedent) - mirrors db/schema.ts `media_requests`
@@ -51,6 +64,18 @@ export const SEERR_PAGE_SIZE = 100;
 const SEERR_USER_ID_MAX = 64; // media_requests.source_user_id / .source_external_user_id
 const DISPLAY_NAME_MAX = 255; // media_requests.source_username / .source_alias
 const IMDB_ID_MAX = 20; // media_requests.imdb_id
+
+// SEERR-02: the SEC-05 lesson applied to strings (above) but not numbers -
+// tmdbId/tvdbId/id land in Postgres `integer` columns (media_requests.tmdb_id
+// / .tvdb_id / the composite upsert key derived from request `id`), and a
+// hostile out-of-range value (e.g. 2**40) throws `integer out of range` for
+// the WHOLE multi-row upsert statement, not just that row - failing every
+// later run identically until the offending record disappears upstream.
+// Bound every int-column-bound field so it fails Zod validation and is
+// SKIPPED instead (never truncated - these are join/identity keys).
+const PG_INTEGER_MIN = -2147483648;
+const PG_INTEGER_MAX = 2147483647;
+const pgInteger = () => z.number().int().min(PG_INTEGER_MIN).max(PG_INTEGER_MAX);
 
 /**
  * Seerr sends explicit `null` for several optional fields (media.imdbId on
@@ -90,11 +115,16 @@ export class SeerrInvalidResponseError extends Error {
 // Zod schemas - Seerr 3.4.0 payload shapes (verified ground truth, see design §1)
 // ============================================================================
 
+// SEERR-01: pageInfo is attacker-controlled (it drives the pagination hard
+// cap below) - bound every field to a sane non-negative integer range so a
+// hostile/pathological total (e.g. 1e15) is rejected outright rather than
+// flowing into the cap computation.
+const MAX_SANE_COUNT = 1_000_000;
 const seerrPageInfoSchema = z.object({
-  pages: z.number(),
-  pageSize: z.number(),
-  results: z.number(),
-  page: z.number(),
+  pages: z.number().int().nonnegative().max(MAX_SANE_COUNT),
+  pageSize: z.number().int().nonnegative().max(MAX_SANE_COUNT),
+  results: z.number().int().nonnegative().max(MAX_SANE_COUNT),
+  page: z.number().int().nonnegative().max(MAX_SANE_COUNT),
 });
 
 const seerrCountSchema = z.object({
@@ -114,17 +144,23 @@ export type SeerrRequestCount = z.infer<typeof seerrCountSchema>;
  * carries other fields (commitTag, updateAvailable, ...) we don't need. */
 const seerrStatusEndpointSchema = z.object({ version: z.string().optional() });
 
+// Per-page array length cap (SEERR-01c) - a hostile server could otherwise
+// return an oversized `results` array (within the MAX_RESPONSE_BYTES body
+// cap) regardless of what `take=N` asked for; bounded well above any real
+// page (we request SEERR_PAGE_SIZE=100) but far short of unbounded growth.
+const MAX_RESULTS_PER_PAGE = 1000;
+
 const seerrUserListSchema = z.object({
   pageInfo: seerrPageInfoSchema,
-  results: z.array(z.unknown()),
+  results: z.array(z.unknown()).max(MAX_RESULTS_PER_PAGE),
 });
 
 const seerrMediaSchema = z.object({
   // tmdbId is 100/108-measured but not guaranteed by the API shape - treat as
   // possibly absent rather than assume presence (defensive, no observed
   // counterexample).
-  tmdbId: z.number().nullable().optional(),
-  tvdbId: z.number().nullable().optional(),
+  tmdbId: pgInteger().nullable().optional(),
+  tvdbId: pgInteger().nullable().optional(),
   // Identifier - oversized value fails validation, record is skipped (SEC-05).
   imdbId: z.string().max(IMDB_ID_MAX).nullable().optional(),
   mediaAddedAt: z.coerce.date().nullable().optional(),
@@ -163,11 +199,11 @@ const seerrRequestedBySchema = z.object({
 });
 
 const seerrSeasonSchema = z.object({
-  seasonNumber: z.number(),
+  seasonNumber: pgInteger(),
 });
 
 const seerrRequestSchema = z.object({
-  id: z.number(),
+  id: pgInteger(),
   status: z.number(),
   type: z.enum(['movie', 'tv']),
   // Explicit null observed nowhere in the probe, but permissive per the Ombi
@@ -180,12 +216,14 @@ const seerrRequestSchema = z.object({
   createdAt: z.coerce.date(),
   media: seerrMediaSchema,
   requestedBy: seerrRequestedBySchema,
-  seasons: z.array(seerrSeasonSchema).nullable().optional(),
+  // Array length capped (SEERR-02) - display-only list, no legitimate
+  // request needs anywhere near this many seasons.
+  seasons: z.array(seerrSeasonSchema).max(1000).nullable().optional(),
 });
 
 const seerrRequestListSchema = z.object({
   pageInfo: seerrPageInfoSchema,
-  results: z.array(z.unknown()),
+  results: z.array(z.unknown()).max(MAX_RESULTS_PER_PAGE),
 });
 
 export type SeerrRequest = z.infer<typeof seerrRequestSchema>;
@@ -223,7 +261,18 @@ export interface SeerrSyncRecord {
 
 /** Derives the single status enum from Seerr's status integer (design §4.1).
  * Unknown values default to 'pending' + a warning - never skip the row over
- * status fidelity (attribution outranks status accuracy). */
+ * status fidelity (attribution outranks status accuracy).
+ *
+ * Vocabulary verified against seerr-team/seerr's own source
+ * (`server/constants/media.ts`, `MediaRequestStatus`): PENDING=1, APPROVED=2,
+ * DECLINED=3, FAILED=4, COMPLETED=5. The design doc's original 4=processing
+ * guess (inferred from GET /api/v1/request/count's field order, not the
+ * enum) was wrong - the count endpoint's `processing`/`available` fields are
+ * derived display aggregates, not raw status values. FAILED has no dedicated
+ * bucket in the shipped 4-value vocabulary; 'denied' is the closest one (a
+ * failed Radarr/Sonarr grab did not proceed, same as a decline), and is far
+ * less wrong than 'approved' (which would show a permanently-failed request
+ * as still in flight). */
 function deriveStatus(status: number, requestId: number): SeerrSyncRecord['status'] {
   switch (status) {
     case 1:
@@ -232,8 +281,8 @@ function deriveStatus(status: number, requestId: number): SeerrSyncRecord['statu
       return 'approved';
     case 3:
       return 'denied';
-    case 4: // processing - approved-and-fetching, mapped onto the shipped 4-bucket vocabulary
-      return 'approved';
+    case 4: // FAILED - mapped onto 'denied', the closest bucket the shipped vocabulary offers
+      return 'denied';
     case 5:
       return 'available';
     default:
@@ -332,8 +381,14 @@ export class SeerrService {
   }
 
   /** Strips the API key from any string before it can reach a log line or an
-   * error surfaced to the client (ADR 0005 - the key must never leak). */
-  private redact(message: string): string {
+   * error surfaced to the client (ADR 0005 - the key must never leak).
+   * Public (SEERR-04) so jobs/seerrSyncQueue.ts can redact the sync path's
+   * error messages too - classifyError() below is only used by
+   * testConnection(), so redaction was previously not literally guaranteed
+   * on every failure path (the only attacker-reachable text there is a
+   * hostile response.statusText, e.g. a key echoed back as the HTTP reason
+   * phrase - low impact, but the invariant should hold everywhere). */
+  redact(message: string): string {
     return this.apiKey ? message.split(this.apiKey).join('<redacted>') : message;
   }
 
@@ -511,8 +566,11 @@ export class SeerrService {
    * validation with skip-on-failure (never abort the run for one malformed
    * row); in-memory dedupe by request id (offset paging can duplicate a row
    * if requests land mid-iteration); hard page cap
-   * ceil(pageInfo.results / take) + 1 guards against a pathological/moving
-   * total that never lets the loop terminate.
+   * min(ceil(pageInfo.results / take) + 1, MAX_PAGES) guards against a
+   * pathological/moving total that never lets the loop terminate - bounded
+   * by the absolute MAX_PAGES ceiling (SEERR-01), since a cap computed ONLY
+   * from the reported total scales right along with a hostile value and
+   * never actually bounds anything.
    */
   async fetchAllRequests(): Promise<SeerrFetchResult> {
     const collected = new Map<number, SeerrSyncRecord>();
@@ -561,9 +619,12 @@ export class SeerrService {
         break;
       }
 
-      // Hard cap: guards against a pathological/hostile pageInfo.results that
-      // never lets the loop terminate (design §6).
-      const hardCap = Math.ceil(pageInfo.results / SEERR_PAGE_SIZE) + 1;
+      // Hard cap (SEERR-01): bounded by the ABSOLUTE MAX_PAGES ceiling, not
+      // just the total-derived figure - pageInfo.results is attacker-
+      // controlled, so a cap computed only from it (the pre-fix behavior)
+      // scales right along with a hostile value and never actually
+      // terminates the loop. min(...) is what makes this a real guard.
+      const hardCap = Math.min(Math.ceil(pageInfo.results / SEERR_PAGE_SIZE) + 1, MAX_PAGES);
       if (pagesFetched >= hardCap) {
         hitHardCap = true;
         break;

@@ -165,6 +165,22 @@ interface PhaseResult {
   error: string | null;
 }
 
+// CR-3 sibling fix (jobs/seerrSyncQueue.ts): node-postgres caps a single bind
+// message at 65,535 parameters; each row here binds ~20 values, so one
+// unchunked multi-row INSERT hard-fails around ~3,200 requests per phase.
+// Less urgent here (movies/tv are independent phases, so the practical
+// per-phase row count is roughly half Seerr's single-phase count), but the
+// same exposure exists, so fixed the same way.
+const INSERT_CHUNK_SIZE = 1000;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 function emptyPhase(error: string | null = null): PhaseResult {
   return { ok: error === null, processed: 0, skipped: 0, pruned: 0, error };
 }
@@ -206,32 +222,36 @@ async function upsertPhase(
     });
 
     await db.transaction(async (tx) => {
-      await tx
-        .insert(mediaRequests)
-        .values(rows)
-        .onConflictDoUpdate({
-          target: [mediaRequests.source, mediaRequests.mediaType, mediaRequests.sourceRequestId],
-          set: {
-            sourceParentRequestId: sqlExcluded('source_parent_request_id'),
-            title: sqlExcluded('title'),
-            releaseYear: sqlExcluded('release_year'),
-            imdbId: sqlExcluded('imdb_id'),
-            tmdbId: sqlExcluded('tmdb_id'),
-            tvdbId: sqlExcluded('tvdb_id'),
-            seasons: sqlExcluded('seasons'),
-            is4k: sqlExcluded('is_4k'),
-            status: sqlExcluded('status'),
-            requestedAt: sqlExcluded('requested_at'),
-            availableAt: sqlExcluded('available_at'),
-            sourceUserId: sqlExcluded('source_user_id'),
-            sourceUsername: sqlExcluded('source_username'),
-            sourceAlias: sqlExcluded('source_alias'),
-            userId: sqlExcluded('user_id'),
-            matchMethod: sqlExcluded('match_method'),
-            syncedAt: sqlExcluded('synced_at'),
-            updatedAt: new Date(),
-          },
-        });
+      // Chunked (CR-3 sibling fix) - all chunks run inside this one
+      // transaction, same as the prune below: still all-or-nothing per phase.
+      for (const rowChunk of chunk(rows, INSERT_CHUNK_SIZE)) {
+        await tx
+          .insert(mediaRequests)
+          .values(rowChunk)
+          .onConflictDoUpdate({
+            target: [mediaRequests.source, mediaRequests.mediaType, mediaRequests.sourceRequestId],
+            set: {
+              sourceParentRequestId: sqlExcluded('source_parent_request_id'),
+              title: sqlExcluded('title'),
+              releaseYear: sqlExcluded('release_year'),
+              imdbId: sqlExcluded('imdb_id'),
+              tmdbId: sqlExcluded('tmdb_id'),
+              tvdbId: sqlExcluded('tvdb_id'),
+              seasons: sqlExcluded('seasons'),
+              is4k: sqlExcluded('is_4k'),
+              status: sqlExcluded('status'),
+              requestedAt: sqlExcluded('requested_at'),
+              availableAt: sqlExcluded('available_at'),
+              sourceUserId: sqlExcluded('source_user_id'),
+              sourceUsername: sqlExcluded('source_username'),
+              sourceAlias: sqlExcluded('source_alias'),
+              userId: sqlExcluded('user_id'),
+              matchMethod: sqlExcluded('match_method'),
+              syncedAt: sqlExcluded('synced_at'),
+              updatedAt: new Date(),
+            },
+          });
+      }
 
       if (allowPrune) {
         const deleted = await tx
@@ -278,7 +298,8 @@ async function runPhase(
   fetcher: () => Promise<{ records: OmbiSyncRecord[]; skipped: number }>,
   mediaType: 'movie' | 'tv',
   resolver: RequesterResolver,
-  runStartedAt: Date
+  runStartedAt: Date,
+  ombi: OmbiService
 ): Promise<PhaseResult> {
   try {
     const { records, skipped } = await fetcher();
@@ -294,7 +315,10 @@ async function runPhase(
     );
     return { ok: true, processed, skipped, pruned, error: null };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
+    // Redacted (SEERR-04 sibling fix) - same reasoning as jobs/seerrSyncQueue.ts:
+    // this message is persisted to ombiSyncStatus.lastError and surfaced by
+    // GET /ombi/status, so the redaction invariant must hold here too.
+    const message = ombi.redact(error instanceof Error ? error.message : 'Unknown error');
     console.warn(`[OmbiSync] ${mediaType} phase failed: ${message}`);
     return { ok: false, processed: 0, skipped: 0, pruned: 0, error: message };
   }
@@ -339,10 +363,16 @@ export async function runOmbiSync(
   const resolver = await buildRequesterResolver();
 
   onProgress?.({ jobId, phase: 'movies', progress: null });
-  const moviePhase = await runPhase(() => ombi.getMovieRequests(), 'movie', resolver, runStartedAt);
+  const moviePhase = await runPhase(
+    () => ombi.getMovieRequests(),
+    'movie',
+    resolver,
+    runStartedAt,
+    ombi
+  );
 
   onProgress?.({ jobId, phase: 'tv', progress: null });
-  const tvPhase = await runPhase(() => ombi.getTvRequests(), 'tv', resolver, runStartedAt);
+  const tvPhase = await runPhase(() => ombi.getTvRequests(), 'tv', resolver, runStartedAt, ombi);
 
   onProgress?.({ jobId, phase: 'resolve', progress: null });
 

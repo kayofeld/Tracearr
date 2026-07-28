@@ -20,12 +20,20 @@ import type { OmbiSyncStatusInternal } from '../../services/settings.js';
 
 const mockGetMovieRequests = vi.fn();
 const mockGetTvRequests = vi.fn();
+// Identity by default (SEERR-04 sibling fix - runPhase() now calls
+// ombi.redact() on the failure path); tests that care about actual
+// redaction override this per-test.
+const mockRedact = vi.fn((message: string) => message);
 
 vi.mock('../../services/ombi.js', () => ({
   // Must be a `function`, not an arrow, so `new OmbiService(...)` works -
   // an explicit object return from a constructor function replaces `this`.
   OmbiService: vi.fn().mockImplementation(function () {
-    return { getMovieRequests: mockGetMovieRequests, getTvRequests: mockGetTvRequests };
+    return {
+      getMovieRequests: mockGetMovieRequests,
+      getTvRequests: mockGetTvRequests,
+      redact: mockRedact,
+    };
   }),
 }));
 
@@ -246,6 +254,52 @@ describe('runOmbiSync', () => {
       'ombiSyncStatus',
       expect.objectContaining({ lastError: expect.stringContaining('500') })
     );
+  });
+
+  it('redacts the API key from a phase failure message before persisting/logging it (SEERR-04 sibling fix)', async () => {
+    vi.mocked(getOmbiSettings).mockResolvedValue({
+      ombiUrl: 'http://localhost:5420',
+      ombiApiKey: 'super-secret-key',
+    });
+    vi.mocked(getSetting).mockResolvedValue(null);
+    mockGetMovieRequests.mockRejectedValue(
+      new Error('Ombi API error: 500 super-secret-key-as-reason-phrase')
+    );
+    mockGetTvRequests.mockResolvedValue({ records: [], skipped: 0 });
+    mockRedact.mockImplementationOnce((message: string) =>
+      message.split('super-secret-key').join('<redacted>')
+    );
+
+    const result = await runOmbiSync('scheduled');
+
+    expect(mockRedact).toHaveBeenCalledWith(
+      expect.stringContaining('super-secret-key-as-reason-phrase')
+    );
+    expect(result.moviePhase.error).not.toContain('super-secret-key');
+    expect(result.moviePhase.error).toContain('<redacted>');
+  });
+
+  it('chunks the insert into batches of 1000 rows to stay under the bind-parameter limit (CR-3 sibling fix)', async () => {
+    vi.mocked(getOmbiSettings).mockResolvedValue({
+      ombiUrl: 'http://localhost:5420',
+      ombiApiKey: 'secret-key',
+    });
+    vi.mocked(getSetting).mockResolvedValue(null);
+    const records = Array.from({ length: 1500 }, (_, i) => movieRecord({ ombiRequestId: i + 1 }));
+    mockGetMovieRequests.mockResolvedValue({ records, skipped: 0 });
+    mockGetTvRequests.mockResolvedValue({ records: [], skipped: 0 });
+    const tx = mockTransaction([]);
+
+    const result = await runOmbiSync('manual');
+
+    expect(result.moviePhase.processed).toBe(1500);
+    expect(tx.insert).toHaveBeenCalledTimes(2); // 1500 / 1000-row chunks
+    const firstChunk = (tx.insert.mock.results[0]?.value as { values: ReturnType<typeof vi.fn> })
+      .values.mock.calls[0]?.[0] as unknown[];
+    const secondChunk = (tx.insert.mock.results[1]?.value as { values: ReturnType<typeof vi.fn> })
+      .values.mock.calls[0]?.[0] as unknown[];
+    expect(firstChunk).toHaveLength(1000);
+    expect(secondChunk).toHaveLength(500);
   });
 
   it('preserves the previous lastSuccessAt when the run fails', async () => {

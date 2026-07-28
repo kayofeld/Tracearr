@@ -200,6 +200,23 @@ interface PhaseResult {
   error: string | null;
 }
 
+// CR-3: node-postgres caps a single bind message at 65,535 parameters. Each
+// row here binds ~21 values, so one unchunked multi-row INSERT hard-fails at
+// roughly 3,100 requests - it would work today (108 rows) and break
+// permanently the moment a larger instance is connected, with only a
+// generic driver error surfaced. Chunking keeps each INSERT well under the
+// limit (1000 rows * 21 params ≈ 21k) while staying inside the SAME
+// transaction as the prune, so atomicity is unchanged.
+const INSERT_CHUNK_SIZE = 1000;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 function emptyPhase(error: string | null = null): PhaseResult {
   return { ok: error === null, processed: 0, skipped: 0, pruned: 0, error };
 }
@@ -241,33 +258,38 @@ async function upsertAndPrune(
     });
 
     await db.transaction(async (tx) => {
-      await tx
-        .insert(mediaRequests)
-        .values(rows)
-        .onConflictDoUpdate({
-          target: [mediaRequests.source, mediaRequests.mediaType, mediaRequests.sourceRequestId],
-          set: {
-            sourceParentRequestId: sqlExcluded('source_parent_request_id'),
-            title: sqlExcluded('title'),
-            releaseYear: sqlExcluded('release_year'),
-            imdbId: sqlExcluded('imdb_id'),
-            tmdbId: sqlExcluded('tmdb_id'),
-            tvdbId: sqlExcluded('tvdb_id'),
-            seasons: sqlExcluded('seasons'),
-            is4k: sqlExcluded('is_4k'),
-            status: sqlExcluded('status'),
-            requestedAt: sqlExcluded('requested_at'),
-            availableAt: sqlExcluded('available_at'),
-            sourceUserId: sqlExcluded('source_user_id'),
-            sourceUsername: sqlExcluded('source_username'),
-            sourceAlias: sqlExcluded('source_alias'),
-            sourceExternalUserId: sqlExcluded('source_external_user_id'),
-            userId: sqlExcluded('user_id'),
-            matchMethod: sqlExcluded('match_method'),
-            syncedAt: sqlExcluded('synced_at'),
-            updatedAt: new Date(),
-          },
-        });
+      // Chunked (CR-3) - see INSERT_CHUNK_SIZE comment above. All chunks run
+      // inside this one transaction, same as the prune below: still
+      // all-or-nothing for the run.
+      for (const rowChunk of chunk(rows, INSERT_CHUNK_SIZE)) {
+        await tx
+          .insert(mediaRequests)
+          .values(rowChunk)
+          .onConflictDoUpdate({
+            target: [mediaRequests.source, mediaRequests.mediaType, mediaRequests.sourceRequestId],
+            set: {
+              sourceParentRequestId: sqlExcluded('source_parent_request_id'),
+              title: sqlExcluded('title'),
+              releaseYear: sqlExcluded('release_year'),
+              imdbId: sqlExcluded('imdb_id'),
+              tmdbId: sqlExcluded('tmdb_id'),
+              tvdbId: sqlExcluded('tvdb_id'),
+              seasons: sqlExcluded('seasons'),
+              is4k: sqlExcluded('is_4k'),
+              status: sqlExcluded('status'),
+              requestedAt: sqlExcluded('requested_at'),
+              availableAt: sqlExcluded('available_at'),
+              sourceUserId: sqlExcluded('source_user_id'),
+              sourceUsername: sqlExcluded('source_username'),
+              sourceAlias: sqlExcluded('source_alias'),
+              sourceExternalUserId: sqlExcluded('source_external_user_id'),
+              userId: sqlExcluded('user_id'),
+              matchMethod: sqlExcluded('match_method'),
+              syncedAt: sqlExcluded('synced_at'),
+              updatedAt: new Date(),
+            },
+          });
+      }
 
       if (allowPrune) {
         const deleted = await tx
@@ -360,7 +382,12 @@ export async function runSeerrSync(
 
     phase = { ok: true, processed, skipped, pruned, error: null };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
+    // Redacted (SEERR-04) - the only attacker-reachable text here is a
+    // hostile response.statusText (e.g. the key echoed back as the HTTP
+    // reason phrase); this message is persisted to seerrSyncStatus.lastError
+    // and surfaced by GET /seerr/status, so the redaction invariant must
+    // hold on this path too, not just the retry-warning/testConnection paths.
+    const message = seerr.redact(error instanceof Error ? error.message : 'Unknown error');
     console.warn(`[SeerrSync] Fetch/resolve phase failed: ${message}`);
     phase = { ok: false, processed: 0, skipped: 0, pruned: 0, error: message };
   }

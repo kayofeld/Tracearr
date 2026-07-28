@@ -468,6 +468,50 @@ describe('Seerr connector routes', () => {
       expect(row.suggestions).toHaveLength(2); // external-id candidates preferred over username's single match
     });
 
+    it('does not flag a resolved requester as ambiguous just because its username separately collides (CR-4)', async () => {
+      // Resolved via the external-id tier (unique match), but its username
+      // happens to collide with another Tracearr user - the auto-match
+      // still succeeded, so contract §5.1's "auto-match refused" must be
+      // false here (pre-fix: ambiguous was true purely from the username
+      // collision, regardless of the already-successful resolution).
+      app = await buildTestApp(createOwnerUser());
+      vi.mocked(db.execute)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              seerrUserId: 'seerr-4',
+              seerrUsername: 'bob',
+              seerrAlias: null,
+              sourceExternalUserId: 'ext-guid-5',
+              userId: 'user-5',
+              matchMethod: 'provider',
+            },
+          ],
+        } as never)
+        .mockResolvedValueOnce({ rows: [{ seerrUserId: 'seerr-4', requestCount: 2 }] } as never);
+      vi.mocked(db.select)
+        .mockReturnValueOnce(selectFromWhereOnly([]) as never)
+        .mockReturnValueOnce(
+          selectFromOnly([
+            { id: 'user-5', username: 'bob' },
+            { id: 'user-6', username: 'BOB' },
+          ]) as never
+        )
+        .mockReturnValueOnce(
+          selectFromOnly([
+            { externalId: 'ext-guid-5', plexAccountId: null, userId: 'user-5' },
+          ]) as never
+        );
+
+      const response = await app.inject({ method: 'GET', url: '/seerr/mappings' });
+
+      const body = response.json();
+      const row = body.requesters.find((r: { seerrUserId: string }) => r.seerrUserId === 'seerr-4');
+      expect(row.resolution).toEqual({ type: 'provider', userId: 'user-5', username: 'bob' });
+      expect(row.ambiguous).toBe(false);
+      expect(row.suggestions).toEqual([]);
+    });
+
     it('flags a mapping row with no current requests as stale', async () => {
       app = await buildTestApp(createOwnerUser());
       vi.mocked(db.execute)

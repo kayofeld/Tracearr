@@ -254,7 +254,11 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
           userId: row.userId,
           username: row.userId ? (usernameById.get(row.userId) ?? null) : null,
         },
-        ambiguous: candidates.length > 1,
+        // CR-4 sibling fix (routes/seerr.ts): gated on !resolved - a
+        // requester that already resolved (manual/provider/username) isn't
+        // "refused" just because its username separately collides with
+        // another user.
+        ambiguous: !resolved && candidates.length > 1,
         suggestions: resolved ? [] : candidates,
         stale: false,
       };

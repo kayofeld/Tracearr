@@ -499,6 +499,44 @@ describe('Ombi connector routes', () => {
       expect(row.suggestions).toEqual([{ userId: 'user-new', username: 'alice' }]);
     });
 
+    it('does not flag a resolved requester as ambiguous just because its username separately collides (CR-4)', async () => {
+      // Resolved (matchMethod='provider', userId set) - the auto-match
+      // already succeeded, so contract §5.1's "auto-match refused" must be
+      // false even though another Tracearr user happens to share the
+      // requester's username (pre-fix: ambiguous was true purely from the
+      // username collision, regardless of the already-successful resolution).
+      app = await buildTestApp(createOwnerUser());
+      vi.mocked(db.execute)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              ombiUserId: 'ombi-5',
+              ombiUsername: 'bob',
+              ombiAlias: null,
+              userId: 'user-5',
+              matchMethod: 'provider',
+            },
+          ],
+        } as never)
+        .mockResolvedValueOnce({ rows: [{ ombiUserId: 'ombi-5', requestCount: 2 }] } as never);
+      vi.mocked(db.select)
+        .mockReturnValueOnce(selectFromWhere([]) as never)
+        .mockReturnValueOnce(
+          selectFromOnly([
+            { id: 'user-5', username: 'bob' },
+            { id: 'user-6', username: 'BOB' },
+          ]) as never
+        );
+
+      const response = await app.inject({ method: 'GET', url: '/ombi/mappings' });
+
+      const body = response.json();
+      const row = body.requesters.find((r: { ombiUserId: string }) => r.ombiUserId === 'ombi-5');
+      expect(row.resolution).toEqual({ type: 'provider', userId: 'user-5', username: 'bob' });
+      expect(row.ambiguous).toBe(false);
+      expect(row.suggestions).toEqual([]);
+    });
+
     it('flags a mapping row with no current requests as stale', async () => {
       app = await buildTestApp(createOwnerUser());
       vi.mocked(db.execute)

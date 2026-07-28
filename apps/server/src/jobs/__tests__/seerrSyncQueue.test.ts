@@ -21,12 +21,20 @@ import type { SeerrSyncStatusInternal } from '../../services/settings.js';
 
 const mockFetchAllRequests = vi.fn();
 const mockGetRequestCount = vi.fn();
+// Identity by default (SEERR-04 - the fetch/resolve catch block now calls
+// seerr.redact() on the failure message); tests that care about actual
+// redaction override this per-test.
+const mockRedact = vi.fn((message: string) => message);
 
 vi.mock('../../services/seerr.js', () => ({
   // Must be a `function`, not an arrow, so `new SeerrService(...)` works -
   // an explicit object return from a constructor function replaces `this`.
   SeerrService: vi.fn().mockImplementation(function () {
-    return { fetchAllRequests: mockFetchAllRequests, getRequestCount: mockGetRequestCount };
+    return {
+      fetchAllRequests: mockFetchAllRequests,
+      getRequestCount: mockGetRequestCount,
+      redact: mockRedact,
+    };
   }),
 }));
 
@@ -323,6 +331,41 @@ describe('runSeerrSync', () => {
     );
   });
 
+  it('redacts the API key from the fetch/resolve failure message before persisting/logging it (SEERR-04)', async () => {
+    vi.mocked(getSeerrSettings).mockResolvedValue({
+      seerrUrl: 'http://localhost:5055',
+      seerrApiKey: 'super-secret-key',
+    });
+    vi.mocked(getSetting).mockResolvedValue(null);
+    mockGetRequestCount.mockResolvedValue({
+      total: 0,
+      movie: 0,
+      tv: 0,
+      pending: 0,
+      approved: 0,
+      declined: 0,
+      processing: 0,
+      available: 0,
+      completed: 0,
+    });
+    // Only response.statusText is attacker-controlled text that can reach
+    // this path - simulated here directly on the thrown error message.
+    mockFetchAllRequests.mockRejectedValue(
+      new Error('Seerr API error: 500 super-secret-key-as-reason-phrase')
+    );
+    mockRedact.mockImplementationOnce((message: string) =>
+      message.split('super-secret-key').join('<redacted>')
+    );
+
+    const result = await runSeerrSync('scheduled');
+
+    expect(mockRedact).toHaveBeenCalledWith(
+      expect.stringContaining('super-secret-key-as-reason-phrase')
+    );
+    expect(result.phase.error).not.toContain('super-secret-key');
+    expect(result.phase.error).toContain('<redacted>');
+  });
+
   it('preserves the previous lastSuccessAt when the run fails', async () => {
     vi.mocked(getSeerrSettings).mockResolvedValue({
       seerrUrl: 'http://localhost:5055',
@@ -405,6 +448,46 @@ describe('runSeerrSync', () => {
     const insertedRows = (tx.insert.mock.results[0]?.value as { values: ReturnType<typeof vi.fn> })
       .values.mock.calls[0]?.[0] as Array<{ source: string }>;
     expect(insertedRows.every((r) => r.source === 'seerr')).toBe(true);
+  });
+
+  it('chunks the insert into batches of 1000 rows to stay under the bind-parameter limit (CR-3)', async () => {
+    vi.mocked(getSeerrSettings).mockResolvedValue({
+      seerrUrl: 'http://localhost:5055',
+      seerrApiKey: 'secret-key',
+    });
+    vi.mocked(getSetting).mockResolvedValue(null);
+    mockGetRequestCount.mockResolvedValue({
+      total: 1500,
+      movie: 1500,
+      tv: 0,
+      pending: 0,
+      approved: 0,
+      declined: 0,
+      processing: 0,
+      available: 1500,
+      completed: 0,
+    });
+    const records = Array.from({ length: 1500 }, (_, i) => seerrRecord({ seerrRequestId: i + 1 }));
+    mockFetchAllRequests.mockResolvedValue({
+      records,
+      skipped: 0,
+      paginationConsistent: true,
+    });
+    const tx = mockTransaction([]);
+
+    const result = await runSeerrSync('manual');
+
+    expect(result.phase.processed).toBe(1500);
+    // 1500 rows / 1000-row chunk size = 2 insert calls, not 1 unchunked call
+    // that would bind 1500*21 ≈ 31,500 parameters (fine here, but the same
+    // shape hard-fails node-postgres's 65,535-param limit above ~3,100 rows).
+    expect(tx.insert).toHaveBeenCalledTimes(2);
+    const firstChunk = (tx.insert.mock.results[0]?.value as { values: ReturnType<typeof vi.fn> })
+      .values.mock.calls[0]?.[0] as unknown[];
+    const secondChunk = (tx.insert.mock.results[1]?.value as { values: ReturnType<typeof vi.fn> })
+      .values.mock.calls[0]?.[0] as unknown[];
+    expect(firstChunk).toHaveLength(1000);
+    expect(secondChunk).toHaveLength(500);
   });
 });
 

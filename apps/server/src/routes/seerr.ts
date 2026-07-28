@@ -279,7 +279,13 @@ export const seerrRoutes: FastifyPluginAsync = async (app) => {
         ? (externalIdCandidates.get(row.sourceExternalUserId) ?? [])
         : [];
       const usernameCands = usernameCandidates.get(row.seerrUsername.toLowerCase()) ?? [];
-      const ambiguous = externalCandidates.length > 1 || usernameCands.length > 1;
+      // CR-4: gated on !resolved (contract §5.1 - "auto-match refused"). A
+      // requester that already resolved deterministically (e.g. via its
+      // persisted external id) is not "refused" just because its username
+      // separately happens to collide with another user - that used to mark
+      // it ambiguous anyway, which pushed already-resolved rows above
+      // genuinely unresolved ones in the mappings dialog's sort.
+      const ambiguous = !resolved && (externalCandidates.length > 1 || usernameCands.length > 1);
       const suggestions = resolved
         ? []
         : externalCandidates.length > 0
