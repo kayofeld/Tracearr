@@ -43,23 +43,23 @@ describe('EmbyClient.authenticate', () => {
     // it must be `Pw` (verified live). Getting this wrong breaks Emby login entirely.
     mockFetchJson.mockResolvedValue({
       AccessToken: 'tok',
-      User: { Id: 'u1', Name: 'draner', Policy: { IsAdministrator: true } },
+      User: { Id: 'u1', Name: 'demo', Policy: { IsAdministrator: true } },
     });
 
-    const result = await EmbyClient.authenticate(URL, 'draner', 's3cret!!');
+    const result = await EmbyClient.authenticate(URL, 'demo', 's3cret!!');
 
     const call = mockFetchJson.mock.calls[0];
     expect(call?.[0]).toBe(`${URL}/Users/AuthenticateByName`);
     const body = JSON.parse((call?.[1]?.body as string) ?? '{}') as Record<string, unknown>;
     expect(body.Pw).toBe('s3cret!!');
-    expect(body.Username).toBe('draner');
+    expect(body.Username).toBe('demo');
     expect(body).not.toHaveProperty('Password');
     expect(result?.isAdmin).toBe(true);
   });
 
   it('returns null on a 401 (bad credentials)', async () => {
     mockFetchJson.mockRejectedValue(new Error('emby request failed: 401 Unauthorized'));
-    const result = await EmbyClient.authenticate(URL, 'draner', 'wrong');
+    const result = await EmbyClient.authenticate(URL, 'demo', 'wrong');
     expect(result).toBeNull();
   });
 });

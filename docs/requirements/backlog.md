@@ -20,7 +20,7 @@ debug delete-all). Scope:
 
 - Per-user delete endpoint (owner-only) + row action w/ confirm in the Users page.
 - "Resync users" action surfaced on the Users page (reuse existing endpoint + hook).
-- Live validation against draner.pet (48 users; deleted-on-Emby users should disappear after resync).
+- Live validation against the reference Emby server (48 users; deleted-on-Emby users should disappear after resync).
 
 ## 3. MERGED to fork main (2ed41fb1, opt-in) — Emby native real-time (no plugin)
 

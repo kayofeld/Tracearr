@@ -10,7 +10,7 @@ without it, Emby falls back to HTTP polling (`jellyfinEmbyEventSource.ts`, 3-min
 Emby's closed plugin ecosystem makes the plugin path more fragile than on Jellyfin.
 Emby ships a native WebSocket at `/embywebsocket` that clients use for live session data.
 
-## Spike (validated 2026-07-20 against draner.pet, Emby 4.9.5.0, 39 sessions / 1 playing)
+## Spike (validated 2026-07-20 against a private reference Emby server, Emby 4.9.5.0, 39 sessions / 1 playing)
 
 - `wss://<host>/embywebsocket?api_key=<key>&deviceId=<id>` connects with a plain API key.
 - Sending `{"MessageType":"SessionsStart","Data":"0,1500"}` subscribes to session pushes.
