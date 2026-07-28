@@ -255,6 +255,8 @@
     "createAccountFailed": "فشل في إنشاء الحساب",
     "createAccountHeading": "أنشئ حسابك للبدء",
     "displayNamePlaceholder": "اختر اسم العرض",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "خاصتك @email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

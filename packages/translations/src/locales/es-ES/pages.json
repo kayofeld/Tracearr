@@ -255,6 +255,8 @@
     "createAccountFailed": "Error al crear la cuenta",
     "createAccountHeading": "Crea tu cuenta para empezar",
     "displayNamePlaceholder": "Elige un nombre para mostrar",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "tu@email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

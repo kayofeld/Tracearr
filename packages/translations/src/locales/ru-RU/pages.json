@@ -255,6 +255,8 @@
     "createAccountFailed": "Не удалось создать аккаунт",
     "createAccountHeading": "Создайте свой аккаунт, чтобы начать",
     "displayNamePlaceholder": "Выберите отображаемое имя",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "ваш@email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

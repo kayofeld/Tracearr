@@ -255,6 +255,8 @@
     "createAccountFailed": "Kunne ikke opprette konto",
     "createAccountHeading": "Opprett din konto for å komme i gang",
     "displayNamePlaceholder": "Velg et visningsnavn",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "din@epost.no",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

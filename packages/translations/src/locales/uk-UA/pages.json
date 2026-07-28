@@ -255,6 +255,8 @@
     "createAccountFailed": "Не вдалося створити обліковий запис",
     "createAccountHeading": "Створіть обліковий запис, щоб розпочати",
     "displayNamePlaceholder": "Виберіть ім'я для відображення",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "your@email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

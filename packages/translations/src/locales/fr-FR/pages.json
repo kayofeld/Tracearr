@@ -255,6 +255,8 @@
     "createAccountFailed": "Échec de la création du compte",
     "createAccountHeading": "Créez votre compte pour démarrer",
     "displayNamePlaceholder": "Choisissez un nom d'utilisateur",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "votre@courriel.fr",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

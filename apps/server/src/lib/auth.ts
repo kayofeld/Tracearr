@@ -24,6 +24,7 @@ import {
 } from './authGuards.js';
 import { getRedis, closeRedis } from './redisShared.js';
 import { embyPlugin } from './embyPlugin.js';
+import { signupPlugin } from './signupPlugin.js';
 import { betterAuthBasePath } from './basePath.js';
 
 const oidcEnv = {
@@ -234,7 +235,12 @@ function buildAuth(redis: Redis) {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path === '/sign-up/email') {
+        // Both local sign-up variants (email-required core endpoint, and the
+        // email-optional /sign-up/username from signupPlugin) gate on the
+        // same claim code - centralized here rather than duplicated in the
+        // plugin, matching how the built-in endpoint's own handler carries
+        // no claim-code logic either.
+        if (ctx.path === '/sign-up/email' || ctx.path === '/sign-up/username') {
           assertClaimCode((ctx.body as { claimCode?: string } | undefined)?.claimCode);
         }
         if (ctx.path === '/sign-in/oauth2') {
@@ -259,6 +265,7 @@ function buildAuth(redis: Redis) {
       adminPlugin({ adminRoles: ['owner'], roles: { owner: adminAc } }),
       bearer(),
       embyPlugin(),
+      signupPlugin(),
       ...(oidcConfigured
         ? [
             genericOAuth({

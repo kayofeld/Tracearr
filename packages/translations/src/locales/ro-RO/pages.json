@@ -255,6 +255,8 @@
     "createAccountFailed": "Crearea contului a eșuat",
     "createAccountHeading": "Creează-ți un cont pentru a începe",
     "displayNamePlaceholder": "Alegeți un nume afișat",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "adresa@email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",
