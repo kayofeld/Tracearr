@@ -1030,9 +1030,15 @@ async function initializePostListen(app: FastifyInstance) {
         case WS_EVENTS.LIBRARY_SYNC_PROGRESS:
           broadcastToSessions('library:sync:progress', data as LibrarySyncProgress);
           break;
-        case WS_EVENTS.OMBI_SYNC_PROGRESS:
-          broadcastToSessions('ombi:sync:progress', data as OmbiSyncProgressEvent);
+        case WS_EVENTS.OMBI_SYNC_PROGRESS: {
+          // Broadcast phase/progress only - `error` can include the configured
+          // Ombi URL (e.g. from SsrfBlockedError) and must stay owner-only via
+          // GET /ombi/status rather than going out to every authenticated
+          // socket (SEC-04, topology/info disclosure).
+          const { jobId, phase, progress } = data as OmbiSyncProgressEvent;
+          broadcastToSessions('ombi:sync:progress', { jobId, phase, progress });
           break;
+        }
         case WS_EVENTS.VERSION_UPDATE:
           broadcastToSessions(
             'version:update',

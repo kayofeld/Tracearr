@@ -308,9 +308,14 @@ export function OmbiSettings() {
     const willBeConfigured = Boolean(ombiUrl) && Boolean(ombiApiKey);
     // The repeatable sync runs every 6h, so without this a freshly configured
     // connector would show nothing until the next scheduled run and read as broken.
-    // Kick off one sync on the transition into "configured"; a 409 (already running)
-    // is a no-op and is swallowed by the mutation's own error handling.
-    const wasConfigured = status.data?.configured ?? false;
+    // Kick off one sync on the transition into "configured". Derive `wasConfigured`
+    // from the loaded `settings` (not `status`, which can still be loading/stale
+    // when this fires and would then wrongly treat an already-configured connector
+    // as unconfigured, firing a redundant sync) - settings are guaranteed loaded
+    // here by the `settingsLoading` gate and are the same source the form
+    // initializes from. Pass `silent: true` so a 409 (a scheduled sync already
+    // running) doesn't surface as an error toast right after a successful save.
+    const wasConfigured = Boolean(settings?.ombiUrl && settings?.ombiApiKey);
     updateSettings.mutate(
       {
         ombiUrl: ombiUrl || null,
@@ -320,7 +325,7 @@ export function OmbiSettings() {
         onSuccess: () => {
           if (willBeConfigured && !wasConfigured) {
             setSyncPhase(null);
-            syncNow.mutate();
+            syncNow.mutate({ silent: true });
           }
         },
       }
@@ -329,7 +334,7 @@ export function OmbiSettings() {
 
   const handleSyncNow = () => {
     setSyncPhase(null);
-    syncNow.mutate();
+    syncNow.mutate({});
   };
 
   const handlePurgeConfirm = async () => {

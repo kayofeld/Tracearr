@@ -29,6 +29,12 @@ import {
   invalidateOmbiCaches,
 } from '../jobs/ombiSyncQueue.js';
 
+/** Matches ombi_requests.ombi_user_id / ombi_user_mappings.ombi_user_id
+ * (varchar(64), db/schema.ts). A longer :ombiUserId path param otherwise
+ * reaches an insert/update unvalidated and produces an unhandled Postgres
+ * error -> 500 (SEC-05) - reject it at the route boundary instead. */
+const OMBI_USER_ID_MAX_LENGTH = 64;
+
 export const ombiRoutes: FastifyPluginAsync = async (app) => {
   /**
    * POST /ombi/test-connection - validates the SUBMITTED url/apiKey, not the
@@ -103,10 +109,14 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
     }
     const total = movieRequests + tvRequests;
 
+    // user_id IS NOT NULL is required alongside match_method (OMB-6): the FK is
+    // ON DELETE SET NULL, so a deleted Tracearr user leaves match_method
+    // populated but user_id null - without this guard the row double-counts as
+    // both matched/manual AND unattributed (matched+manual+unattributed > total).
     const attributionResult = await db.execute(sql`
       SELECT
-        COUNT(*) FILTER (WHERE match_method IN ('username', 'provider'))::int AS "matched",
-        COUNT(*) FILTER (WHERE match_method = 'manual')::int AS "manual",
+        COUNT(*) FILTER (WHERE match_method IN ('username', 'provider') AND user_id IS NOT NULL)::int AS "matched",
+        COUNT(*) FILTER (WHERE match_method = 'manual' AND user_id IS NOT NULL)::int AS "manual",
         COUNT(*) FILTER (WHERE user_id IS NULL)::int AS "unattributed"
       FROM ombi_requests
     `);
@@ -138,6 +148,14 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
       unmatched: number;
     };
 
+    // Purge (DELETE /ombi/data) also deletes ombi_user_mappings (OMB-5) - if
+    // every request row was pruned but manual override mappings remain, the
+    // purge control must still surface or those rows are unpurgeable forever.
+    const mappingCountResult = await db.execute(sql`
+      SELECT COUNT(*)::int AS "count" FROM ombi_user_mappings
+    `);
+    const mappingCount = (mappingCountResult.rows[0] as { count: number } | undefined)?.count ?? 0;
+
     const response: OmbiStatusResponse = {
       configured,
       running,
@@ -150,7 +168,7 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
         total,
         skippedValidation: status?.skippedValidation ?? 0,
       },
-      purgeAvailable: !configured && total > 0,
+      purgeAvailable: !configured && (total > 0 || mappingCount > 0),
       attribution,
       mediaMatch,
     };
@@ -207,10 +225,16 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
 
     const liveRequesters: OmbiRequesterMapping[] = requesterRows.map((row) => {
       const type: OmbiRequesterResolutionType = row.matchMethod ?? 'unattributed';
+      // userId !== null is required for ALL match methods, not just 'manual'
+      // (OMB-6): the FK is ON DELETE SET NULL, so a deleted Tracearr user
+      // leaves match_method populated (e.g. still 'username') with userId
+      // null - without this guard the requester shows as "resolved" with no
+      // actual user and suggestions are wrongly suppressed.
       const resolved =
-        row.matchMethod === 'username' ||
-        row.matchMethod === 'provider' ||
-        (row.matchMethod === 'manual' && row.userId !== null);
+        row.userId !== null &&
+        (row.matchMethod === 'username' ||
+          row.matchMethod === 'provider' ||
+          row.matchMethod === 'manual');
       const candidates = usernameCandidates.get(row.ombiUsername.toLowerCase()) ?? [];
 
       return {
@@ -264,6 +288,9 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
         return reply.badRequest('Invalid request body');
       }
       const { ombiUserId } = request.params;
+      if (ombiUserId.length > OMBI_USER_ID_MAX_LENGTH) {
+        return reply.badRequest(`ombiUserId must be at most ${OMBI_USER_ID_MAX_LENGTH} characters`);
+      }
       const { userId } = body.data;
 
       if (userId !== null) {
@@ -325,6 +352,9 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: [app.requireOwner] },
     async (request, reply) => {
       const { ombiUserId } = request.params;
+      if (ombiUserId.length > OMBI_USER_ID_MAX_LENGTH) {
+        return reply.badRequest(`ombiUserId must be at most ${OMBI_USER_ID_MAX_LENGTH} characters`);
+      }
 
       const deleted = await db
         .delete(ombiUserMappings)

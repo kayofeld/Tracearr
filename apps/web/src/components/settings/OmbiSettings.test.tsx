@@ -194,4 +194,106 @@ describe('OmbiSettings', () => {
 
     expect(screen.getByRole('button', { name: /settings:ombi.syncNow/ })).toBeDisabled();
   });
+
+  describe('handleSave auto-sync-on-configure transition', () => {
+    /** updateSettings.mutate stub that immediately fires the caller's onSuccess,
+     * mirroring a successful settings save. */
+    function updateSettingsCallingOnSuccess() {
+      const mutate = vi.fn((_vars: unknown, opts?: { onSuccess?: () => void }) =>
+        opts?.onSuccess?.()
+      );
+      mockUseUpdateSettings.mockReturnValue(
+        mutationReturn({ mutate }) as unknown as ReturnType<typeof useUpdateSettings>
+      );
+      return mutate;
+    }
+
+    function syncSpy() {
+      const mutate = vi.fn();
+      mockUseOmbiSync.mockReturnValue(
+        mutationReturn({ mutate }) as unknown as ReturnType<typeof useOmbiSync>
+      );
+      return mutate;
+    }
+
+    it('triggers one sync when saving takes the connector from unconfigured to configured', async () => {
+      const { default: userEvent } = await import('@testing-library/user-event');
+      updateSettingsCallingOnSuccess();
+      const sync = syncSpy();
+      // status.configured=false (default statusReturn) -> this save IS the transition.
+      renderPanel();
+
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText('settings:ombi.url'), 'http://localhost:5000');
+      await user.type(screen.getByLabelText('common:labels.apiKey'), 'secret-key');
+      await user.click(screen.getByRole('button', { name: 'common:actions.save' }));
+
+      expect(sync).toHaveBeenCalledTimes(1);
+      // Auto-triggered sync must pass silent:true so a 409 (already running)
+      // doesn't surface as a misleading "save failed" error toast.
+      expect(sync).toHaveBeenCalledWith({ silent: true });
+    });
+
+    it('does NOT re-trigger a sync when re-saving while already configured', async () => {
+      const { default: userEvent } = await import('@testing-library/user-event');
+      mockUseSettings.mockReturnValue(
+        settingsReturn({
+          data: { ombiUrl: 'http://localhost:5000', ombiApiKey: 'secret-key' },
+        } as never)
+      );
+      mockUseOmbiStatus.mockReturnValue(statusReturn({ configured: true }));
+      const updateMutate = updateSettingsCallingOnSuccess();
+      const sync = syncSpy();
+      renderPanel();
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: 'common:actions.save' }));
+
+      expect(updateMutate).toHaveBeenCalledTimes(1); // the save itself went through
+      expect(sync).not.toHaveBeenCalled(); // but no auto-sync on a re-save
+    });
+
+    it('does NOT trigger a sync when saving a disconnect (fields cleared)', async () => {
+      const { default: userEvent } = await import('@testing-library/user-event');
+      mockUseSettings.mockReturnValue(
+        settingsReturn({
+          data: { ombiUrl: 'http://localhost:5000', ombiApiKey: 'secret-key' },
+        } as never)
+      );
+      mockUseOmbiStatus.mockReturnValue(statusReturn({ configured: true }));
+      const updateMutate = updateSettingsCallingOnSuccess();
+      const sync = syncSpy();
+      renderPanel();
+
+      const user = userEvent.setup();
+      await user.clear(screen.getByLabelText('settings:ombi.url'));
+      await user.clear(screen.getByLabelText('common:labels.apiKey'));
+      await user.click(screen.getByRole('button', { name: 'common:actions.save' }));
+
+      // Disconnect persists null/null and never fires the transition sync.
+      expect(updateMutate).toHaveBeenCalledWith(
+        { ombiUrl: null, ombiApiKey: null },
+        expect.anything()
+      );
+      expect(sync).not.toHaveBeenCalled();
+    });
+
+    it('does NOT trigger a sync when the save fails (onSuccess never fires)', async () => {
+      const { default: userEvent } = await import('@testing-library/user-event');
+      const mutate = vi.fn(); // never calls onSuccess - simulates a failed save
+      mockUseUpdateSettings.mockReturnValue(
+        mutationReturn({ mutate }) as unknown as ReturnType<typeof useUpdateSettings>
+      );
+      const sync = syncSpy();
+      renderPanel();
+
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText('settings:ombi.url'), 'http://localhost:5000');
+      await user.type(screen.getByLabelText('common:labels.apiKey'), 'secret-key');
+      await user.click(screen.getByRole('button', { name: 'common:actions.save' }));
+
+      expect(mutate).toHaveBeenCalledTimes(1);
+      expect(sync).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -142,8 +142,12 @@ function buildRequesterMatchCondition(requestAlias: string): SQL {
  * Attribution columns for the final SELECT. When unconfigured, these are
  * constant NULL/0 literals (no join, no query cost) so the row shape and
  * mapping logic below never need to branch per-row.
+ *
+ * Exported (only) so a test can pin the exact ISO-8601 `to_char(...)` format
+ * emitted for `request_requested_at` (OMB-2 contract §7 - requestedAt is
+ * documented as ISO-8601) without mocking the whole route + a live Postgres.
  */
-function buildRequestedBySelectFragment(configured: boolean): SQL {
+export function buildRequestedBySelectFragment(configured: boolean): SQL {
   if (!configured) {
     return sql`
       NULL::uuid AS request_user_id,
@@ -159,7 +163,11 @@ function buildRequestedBySelectFragment(configured: boolean): SQL {
     rb.username AS request_username,
     rb.ombi_username AS request_ombi_username,
     rb.ombi_alias AS request_ombi_alias,
-    rb.requested_at::text AS request_requested_at,
+    -- ISO-8601 to match the frozen contract (StaleItemRequestedBy.requestedAt) -
+    -- a bare text cast of the timestamp column alone emits Postgres' native
+    -- "YYYY-MM-DD HH:MI:SS.US+00" format, not ISO-8601 (OMB-2). Mirrors
+    -- routes/stats/requesters.ts.
+    to_char(rb.requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS request_requested_at,
     (
       SELECT COUNT(DISTINCT r2.ombi_user_id)::int
       FROM ombi_requests r2

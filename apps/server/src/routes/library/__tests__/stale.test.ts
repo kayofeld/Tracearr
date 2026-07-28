@@ -42,9 +42,24 @@ vi.mock('../../../utils/serverFiltering.js', async () => {
   };
 });
 
+import type { SQL } from 'drizzle-orm';
 import { db } from '../../../db/client.js';
 import { getSettings } from '../../../services/settings.js';
-import { libraryStaleRoute } from '../stale.js';
+import { libraryStaleRoute, buildRequestedBySelectFragment } from '../stale.js';
+
+// Renders a drizzle `sql` template's literal chunks back to a string so the
+// exact emitted SQL text can be pinned without a live Postgres (mirrors
+// routes/stats/__tests__/utils.test.ts's getSqlStrings helper).
+function renderSqlLiteral(fragment: SQL): string {
+  return (fragment as unknown as { queryChunks: unknown[] }).queryChunks
+    .map((chunk) => {
+      if (chunk && typeof chunk === 'object' && 'value' in chunk) {
+        return (chunk as { value: string[] }).value.join('');
+      }
+      return '';
+    })
+    .join('');
+}
 
 async function buildTestApp(
   authUser: AuthUser,
@@ -113,6 +128,27 @@ function mockRow(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe('buildRequestedBySelectFragment - request_requested_at format (OMB-2)', () => {
+  it('emits an ISO-8601 to_char() expression, not a bare ::text cast', () => {
+    const sqlText = renderSqlLiteral(buildRequestedBySelectFragment(true));
+
+    // Pins the exact expression - a bare `rb.requested_at::text` cast (the
+    // OMB-2 regression) emits Postgres' native "YYYY-MM-DD HH:MI:SS.US+00"
+    // format, which is not ISO-8601 per the frozen contract.
+    expect(sqlText).toContain(
+      `to_char(rb.requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS request_requested_at`
+    );
+    expect(sqlText).not.toContain('rb.requested_at::text');
+  });
+
+  it('stays a NULL literal (no to_char, no join) when unconfigured', () => {
+    const sqlText = renderSqlLiteral(buildRequestedBySelectFragment(false));
+
+    expect(sqlText).toContain('NULL::text AS request_requested_at');
+    expect(sqlText).not.toContain('to_char');
+  });
+});
 
 describe('GET /library/stale - requestedBy attribution', () => {
   let app: FastifyInstance;

@@ -26,6 +26,25 @@ export const OMBI_TEST_CONNECTION_TIMEOUT_MS = 10_000;
 /** 3 attempts, linear backoff (1s, 2s), matches services/tautulli.ts. */
 export const OMBI_MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1_000;
+/** Response body cap (SEC-03) - payloads are measured at 1.5-3.4MB; 50MB is a
+ * generous ceiling that still bounds unbounded memory growth from a hostile
+ * or misbehaving server. Best-effort: only enforced when Content-Length is sent. */
+const MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
+
+// ============================================================================
+// Column-width caps (SEC-05) - mirrors db/schema.ts `ombi_requests` /
+// `ombi_user_mappings` varchar widths. Zod strings are otherwise uncapped
+// while the Postgres columns are fixed-width, so a single over-long value
+// throws at insert and rolls back the WHOLE per-media-type transaction,
+// silently stalling the mirror. Identifiers used for joins/matching are
+// SKIPPED when oversized (never truncated - a truncated join key corrupts
+// matching); free-text display fields are TRUNCATED so the record still
+// syncs.
+// ============================================================================
+const TITLE_MAX = 500; // ombi_requests.title
+const DISPLAY_NAME_MAX = 255; // ombi_requests.ombi_username / ombi_alias
+const IMDB_ID_MAX = 20; // ombi_requests.imdb_id
+const OMBI_USER_ID_MAX = 64; // ombi_requests.ombi_user_id / ombi_user_mappings.ombi_user_id
 
 // ============================================================================
 // Errors
@@ -57,9 +76,15 @@ export class OmbiInvalidResponseError extends Error {
 // ============================================================================
 
 const ombiRequestedUserSchema = z.object({
-  id: z.string(),
-  userName: z.string(),
-  alias: z.string().nullable().optional(),
+  // Identifier (ombi_user_id) - oversized values fail validation so the
+  // record is skipped rather than truncated (SEC-05: never corrupt a join key).
+  id: z.string().max(OMBI_USER_ID_MAX),
+  userName: z.string().transform((s) => s.slice(0, DISPLAY_NAME_MAX)),
+  alias: z
+    .string()
+    .transform((s) => s.slice(0, DISPLAY_NAME_MAX))
+    .nullable()
+    .optional(),
   email: z.string().nullable().optional(),
   userType: z.number().nullable().optional(),
   providerUserId: z.string().nullable().optional(),
@@ -71,12 +96,17 @@ const ombiRequestedUserSchema = z.object({
 const ombiMovieRequestSchema = z.object({
   id: z.number(),
   theMovieDbId: z.number().nullable().optional(),
-  imdbId: z.string().nullable().optional(),
-  title: z.string(),
+  // Identifier - oversized value fails validation, record is skipped (SEC-05).
+  imdbId: z.string().max(IMDB_ID_MAX).nullable().optional(),
+  title: z.string().transform((s) => s.slice(0, TITLE_MAX)),
   releaseDate: z.coerce.date().nullable().optional(),
   requestedDate: z.coerce.date(),
   requestedUser: ombiRequestedUserSchema,
-  requestedByAlias: z.string().nullable().optional(),
+  requestedByAlias: z
+    .string()
+    .transform((s) => s.slice(0, DISPLAY_NAME_MAX))
+    .nullable()
+    .optional(),
   approved: z.boolean().default(false),
   denied: z.boolean().default(false),
   available: z.boolean().default(false),
@@ -106,8 +136,9 @@ const ombiChildRequestSchema = z.object({
 const ombiTvParentSchema = z.object({
   id: z.number(),
   tvDbId: z.number().nullable().optional(),
-  imdbId: z.string().nullable().optional(),
-  title: z.string(),
+  // Identifier - oversized value fails validation, record is skipped (SEC-05).
+  imdbId: z.string().max(IMDB_ID_MAX).nullable().optional(),
+  title: z.string().transform((s) => s.slice(0, TITLE_MAX)),
 });
 
 export type OmbiMovieRequest = z.infer<typeof ombiMovieRequestSchema>;
@@ -183,9 +214,14 @@ function mapMovieRecord(record: OmbiMovieRequest): OmbiSyncRecord {
       ...toRequesterInfo(record.requestedUser),
       // requestedByAlias is a secondary field Ombi carries at top level; prefer
       // the requestedUser.alias (design §4.1: "preferred fallback display name").
+      // Ombi commonly sends requestedByAlias: "" - treat blank as absent so an
+      // empty string never wins over null and renders as a blank requester name
+      // (OMB-1; both UI sites do `ombiAlias ?? ombiUsername`, so "" ?? null keeps "").
       ombiAlias: record.requestedUser.alias?.trim()
         ? record.requestedUser.alias
-        : (record.requestedByAlias ?? null),
+        : record.requestedByAlias?.trim()
+          ? record.requestedByAlias
+          : null,
     },
   };
 }
@@ -261,17 +297,44 @@ export class OmbiService {
       const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs);
 
       try {
+        // redirect: 'manual' (SEC-02) - undici does NOT strip custom headers
+        // cross-origin, so a 30x from the Ombi host would otherwise forward
+        // the ApiKey header to an arbitrary target and perform an unvalidated
+        // server-side GET, bypassing assertSafeProbeUrl's SSRF check. Ombi API
+        // endpoints don't legitimately redirect, so treat any redirect as an error.
         const response = await fetch(`${this.baseUrl}${path}`, {
           headers: { ApiKey: this.apiKey, Accept: 'application/json' },
           signal: controller.signal,
+          redirect: 'manual',
         });
-        clearTimeout(timeoutId);
+        // NOTE: the abort timer stays armed past this point (cleared in the
+        // `finally` below) so it also covers response.json() below (SEC-03) -
+        // a slow/endless body must not hang indefinitely or buffer unbounded
+        // memory. Do not add an early clearTimeout(timeoutId) here.
 
         if (response.status === 401 || response.status === 403) {
           throw new OmbiAuthError(`Ombi rejected the API key (HTTP ${response.status})`);
         }
+        // With redirect: 'manual', a same-origin-filtered redirect response has
+        // type 'opaqueredirect' and status 0 - the real 3xx status/Location are
+        // deliberately not exposed by the Fetch spec, so we key off `type`.
+        if (response.type === 'opaqueredirect') {
+          throw new OmbiInvalidResponseError(
+            'Ombi returned a redirect - refusing to follow it (check the configured URL)'
+          );
+        }
         if (!response.ok) {
           throw new Error(`Ombi API error: ${response.status} ${response.statusText}`);
+        }
+
+        // Best-effort body-size cap (SEC-03) - only enforced when the server
+        // sends Content-Length; a chunked/unknown-length body still relies on
+        // the abort timer above to bound worst-case hang time.
+        const contentLength = response.headers?.get?.('content-length');
+        if (contentLength && Number(contentLength) > MAX_RESPONSE_BYTES) {
+          throw new OmbiInvalidResponseError(
+            `Ombi response body (${contentLength} bytes) exceeds the ${MAX_RESPONSE_BYTES} byte limit`
+          );
         }
 
         // Ombi's SPA serves index.html for unknown/paged routes instead of
@@ -286,14 +349,18 @@ export class OmbiService {
 
         try {
           return await response.json();
-        } catch {
+        } catch (parseError) {
+          // A body-read abort (SEC-03 - the timer now covers response.json())
+          // must fall through to the outer AbortError handling below so it is
+          // classified/retried as a timeout, not mislabeled as a parse failure.
+          if (parseError instanceof Error && parseError.name === 'AbortError') {
+            throw parseError;
+          }
           throw new OmbiInvalidResponseError(
             'Ombi returned a response that could not be parsed as JSON (check the URL)'
           );
         }
       } catch (error) {
-        clearTimeout(timeoutId);
-
         // Never retry - retrying gets the same auth failure or the same HTML again.
         if (error instanceof OmbiAuthError || error instanceof OmbiInvalidResponseError) {
           throw error;
@@ -312,6 +379,10 @@ export class OmbiService {
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
+      } finally {
+        // Cleared exactly once per attempt, after the body has been fully
+        // consumed (success or failure) - not right after headers (SEC-03).
+        clearTimeout(timeoutId);
       }
     }
 

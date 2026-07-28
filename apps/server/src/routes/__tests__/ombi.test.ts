@@ -273,7 +273,8 @@ describe('Ombi connector routes', () => {
       vi.mocked(db.execute)
         .mockResolvedValueOnce({ rows: [{ mediaType: 'movie', count: 5 }] } as never) // counts
         .mockResolvedValueOnce({ rows: [{ matched: 2, manual: 1, unattributed: 2 }] } as never) // attribution
-        .mockResolvedValueOnce({ rows: [{ matched: 3, unmatched: 2 }] } as never); // mediaMatch
+        .mockResolvedValueOnce({ rows: [{ matched: 3, unmatched: 2 }] } as never) // mediaMatch
+        .mockResolvedValueOnce({ rows: [{ count: 0 }] } as never); // mappingCount
 
       const response = await app.inject({ method: 'GET', url: '/ombi/status' });
 
@@ -309,7 +310,8 @@ describe('Ombi connector routes', () => {
       vi.mocked(db.execute)
         .mockResolvedValueOnce({ rows: [{ mediaType: 'movie', count: 1 }] } as never)
         .mockResolvedValueOnce({ rows: [{ matched: 1, manual: 0, unattributed: 0 }] } as never)
-        .mockResolvedValueOnce({ rows: [{ matched: 1, unmatched: 0 }] } as never);
+        .mockResolvedValueOnce({ rows: [{ matched: 1, unmatched: 0 }] } as never)
+        .mockResolvedValueOnce({ rows: [{ count: 3 }] } as never); // mappingCount - irrelevant while configured
 
       const response = await app.inject({ method: 'GET', url: '/ombi/status' });
 
@@ -318,6 +320,24 @@ describe('Ombi connector routes', () => {
       expect(body.running).toBe(true);
       expect(body.purgeAvailable).toBe(false);
       expect(body.lastRunAt).toBe('2025-01-01T00:00:00.000Z');
+    });
+
+    it('reports purgeAvailable=true when disconnected with zero requests but orphaned mappings remain (OMB-5)', async () => {
+      app = await buildTestApp(createOwnerUser());
+      vi.mocked(getOmbiSettings).mockResolvedValue({ ombiUrl: null, ombiApiKey: null });
+      vi.mocked(getSetting).mockResolvedValue(null);
+      vi.mocked(isOmbiSyncRunning).mockResolvedValue(false);
+      vi.mocked(db.execute)
+        .mockResolvedValueOnce({ rows: [] } as never) // counts - zero requests
+        .mockResolvedValueOnce({ rows: [{ matched: 0, manual: 0, unattributed: 0 }] } as never)
+        .mockResolvedValueOnce({ rows: [{ matched: 0, unmatched: 0 }] } as never)
+        .mockResolvedValueOnce({ rows: [{ count: 2 }] } as never); // mappingCount - orphaned overrides
+
+      const response = await app.inject({ method: 'GET', url: '/ombi/status' });
+
+      const body = response.json();
+      expect(body.counts.total).toBe(0);
+      expect(body.purgeAvailable).toBe(true);
     });
   });
 
@@ -384,6 +404,36 @@ describe('Ombi connector routes', () => {
         stale: false,
       });
       expect(shared.suggestions).toHaveLength(2); // 'shared' and 'SHARED' users
+    });
+
+    it('surfaces suggestions for a deleted-user requester when a same-username candidate exists (OMB-6)', async () => {
+      app = await buildTestApp(createOwnerUser());
+      vi.mocked(db.execute)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              ombiUserId: 'ombi-3',
+              ombiUsername: 'alice',
+              ombiAlias: null,
+              userId: null, // deleted user - FK SET NULL
+              matchMethod: 'username',
+            },
+          ],
+        } as never)
+        .mockResolvedValueOnce({ rows: [{ ombiUserId: 'ombi-3', requestCount: 2 }] } as never);
+      vi.mocked(db.select)
+        .mockReturnValueOnce(selectFromOnly([]) as never)
+        .mockReturnValueOnce(selectFromOnly([{ id: 'user-new', username: 'alice' }]) as never);
+
+      const response = await app.inject({ method: 'GET', url: '/ombi/mappings' });
+
+      const body = response.json();
+      const row = body.requesters.find((r: { ombiUserId: string }) => r.ombiUserId === 'ombi-3');
+      // Without the OMB-6 fix, matchMethod='username' alone marks this
+      // "resolved" and suggestions stay empty even though a live candidate
+      // (user-new) exists to re-attribute to.
+      expect(row.resolution).toEqual({ type: 'username', userId: null, username: null });
+      expect(row.suggestions).toEqual([{ userId: 'user-new', username: 'alice' }]);
     });
 
     it('flags a mapping row with no current requests as stale', async () => {
@@ -483,6 +533,17 @@ describe('Ombi connector routes', () => {
       });
       expect(response.statusCode).toBe(400);
     });
+
+    it('rejects an ombiUserId longer than the column width (64 chars) with 400 instead of a DB error (SEC-05)', async () => {
+      app = await buildTestApp(createOwnerUser());
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/ombi/mappings/${'x'.repeat(65)}`,
+        payload: { userId: null },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(db.select).not.toHaveBeenCalled(); // rejected before any DB lookup
+    });
   });
 
   // ==========================================================================
@@ -497,6 +558,18 @@ describe('Ombi connector routes', () => {
       const response = await app.inject({ method: 'DELETE', url: '/ombi/mappings/ombi-1' });
 
       expect(response.statusCode).toBe(404);
+    });
+
+    it('rejects an ombiUserId longer than the column width (64 chars) with 400 instead of a DB error (SEC-05)', async () => {
+      app = await buildTestApp(createOwnerUser());
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/ombi/mappings/${'x'.repeat(65)}`,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(db.delete).not.toHaveBeenCalled();
     });
 
     it('re-resolves via the automatic pipeline and invalidates caches', async () => {

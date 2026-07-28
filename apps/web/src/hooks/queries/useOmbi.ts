@@ -30,22 +30,30 @@ export function useOmbiMappings(enabled: boolean = true) {
 }
 
 /**
- * POST /ombi/sync - manual sync trigger.
+ * POST /ombi/sync - manual sync trigger, also used for the auto-sync fired
+ * on connector configure (see OmbiSettings.handleSave).
  * Callers should branch on `ApiError.status` (409 = already running,
  * 400 = connector not configured) rather than the message text.
+ *
+ * Pass `{ silent: true }` for a sync triggered automatically (not by the
+ * user clicking "Sync now") so a 409 - a scheduled/other sync merely beating
+ * this one to it, not a failure - doesn't surface an error toast. The manual
+ * "Sync now" button always wants that toast, since there it is informative.
  */
 export function useOmbiSync() {
   const { t } = useTranslation(['notifications', 'common']);
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: api.ombi.sync,
+    mutationFn: (_variables: { silent?: boolean }) => api.ombi.sync(),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['ombi', 'status'] });
     },
-    onError: (err) => {
+    onError: (err, variables) => {
       if (err instanceof ApiError && err.status === 409) {
-        toast.error(t('notifications:toast.error.ombiSyncAlreadyRunning'));
+        if (!variables?.silent) {
+          toast.error(t('notifications:toast.error.ombiSyncAlreadyRunning'));
+        }
         return;
       }
       if (err instanceof ApiError && err.status === 400) {
