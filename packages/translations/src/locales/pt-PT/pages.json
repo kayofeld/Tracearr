@@ -557,8 +557,13 @@
     "noViolationsFound": "Sem violações para este usuário.",
     "overallTrust": "Overall Trust",
     "requestsCard": {
+      "byCountDetail": "{{neverWatched}} of {{matched}} in your library",
+      "byCountLabel": "Never Watched",
+      "bySizeDetail": "{{wasted}} of {{total}} in your library",
+      "bySizeLabel": "Storage",
       "neverWatchedOf_one": "{{neverWatched}} of {{count}} request never watched",
       "neverWatchedOf_other": "{{neverWatched}} of {{count}} requests never watched",
+      "noLibraryMatch": "No requests matched to your library yet",
       "notLinked": "No requests linked to this user",
       "title": "Ombi Requests"
     },

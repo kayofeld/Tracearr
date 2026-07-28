@@ -123,8 +123,11 @@
     "requestsCard": {
       "title": "Ombi Requests",
       "notLinked": "No requests linked to this user",
-      "neverWatchedOf_one": "{{neverWatched}} of {{count}} request never watched",
-      "neverWatchedOf_other": "{{neverWatched}} of {{count}} requests never watched"
+      "byCountLabel": "Never Watched",
+      "byCountDetail": "{{neverWatched}} of {{matched}} in your library",
+      "bySizeLabel": "Storage",
+      "bySizeDetail": "{{wasted}} of {{total}} in your library",
+      "noLibraryMatch": "No requests matched to your library yet"
     }
   },
   "history": {

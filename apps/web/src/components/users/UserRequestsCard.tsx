@@ -3,9 +3,15 @@ import { format } from 'date-fns';
 import { Film, Tv, HardDrive, EyeOff } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
 import { useRequesterStats } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { formatBytes } from '@/lib/formatters';
+
+/** Rounded whole-number percentage, or null when the denominator is zero (never NaN/Infinity). */
+function ratioPercent(numerator: number, denominator: number): number | null {
+  return denominator > 0 ? Math.round((numerator / denominator) * 100) : null;
+}
 
 interface UserRequestsCardProps {
   /** The profile's identity id (`fullData?.identity.userId`); matched against `RequesterStatsRow.userId`. */
@@ -17,10 +23,12 @@ function formatDate(iso: string | null): string {
 }
 
 /**
- * Surfaces this person's Ombi "wasted usage" - requests never watched by
- * anyone, and the storage they occupy - on their profile page. Sources the
- * same GET /stats/requesters dataset as the Requesters stats page and picks
- * the row matching this profile's identity id; no dedicated endpoint.
+ * Surfaces the proportion of this person's Ombi requests that went
+ * unwatched, on their profile page - by count (of requests matched to the
+ * library) and by size (of the storage those matched requests occupy), since
+ * the two can diverge sharply. Sources the same GET /stats/requesters dataset
+ * as the Requesters stats page and picks the row matching this profile's
+ * identity id; no dedicated endpoint.
  */
 export function UserRequestsCard({ userId }: UserRequestsCardProps) {
   const { t } = useTranslation(['pages', 'common']);
@@ -60,6 +68,16 @@ export function UserRequestsCard({ userId }: UserRequestsCardProps) {
     ? (stats.data?.requesters.find((requester) => requester.userId === userId) ?? null)
     : null;
 
+  // Denominator honesty: neverWatchedCount/totalSizeBytes/neverWatchedSizeBytes are all
+  // computed over requests that matched a library item (matchedToLibraryCount), NOT over
+  // every request row (requestCount includes pending/denied/unmatched requests that have no
+  // watched state at all). Dividing by requestCount would understate the ratio whenever some
+  // requests aren't in the library, so both percentages below use matchedToLibraryCount /
+  // totalSizeBytes as their denominators, and the copy says "in your library" to make that
+  // explicit rather than implying the ratio covers every request ever made.
+  const pctByCount = row ? ratioPercent(row.neverWatchedCount, row.matchedToLibraryCount) : null;
+  const pctBySize = row ? ratioPercent(row.neverWatchedSizeBytes, row.totalSizeBytes) : null;
+
   return (
     <Card>
       <CardHeader>
@@ -78,22 +96,51 @@ export function UserRequestsCard({ userId }: UserRequestsCardProps) {
           </p>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-center gap-3 rounded-lg border p-3">
-              <div className="bg-primary/10 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full">
-                <HardDrive className="text-primary h-4 w-4" />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground flex items-center gap-1.5 text-sm font-medium">
+                    <EyeOff className="h-4 w-4" />
+                    {t('pages:userDetail.requestsCard.byCountLabel')}
+                  </span>
+                  <span className="text-sm font-medium tabular-nums">
+                    {pctByCount !== null ? `${pctByCount}%` : '-'}
+                  </span>
+                </div>
+                {pctByCount !== null && <Progress value={pctByCount} className="my-2 h-2" />}
+                <p className="text-muted-foreground text-xs">
+                  {row.matchedToLibraryCount > 0
+                    ? t('pages:userDetail.requestsCard.byCountDetail', {
+                        neverWatched: row.neverWatchedCount,
+                        matched: row.matchedToLibraryCount,
+                      })
+                    : t('pages:userDetail.requestsCard.noLibraryMatch')}
+                </p>
               </div>
-              <div>
-                <p className="text-2xl font-bold">{formatBytes(row.neverWatchedSizeBytes)}</p>
-                <p className="text-muted-foreground text-sm">
-                  {t('pages:userDetail.requestsCard.neverWatchedOf', {
-                    count: row.requestCount,
-                    neverWatched: row.neverWatchedCount,
-                  })}
+
+              <div className="rounded-lg border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground flex items-center gap-1.5 text-sm font-medium">
+                    <HardDrive className="h-4 w-4" />
+                    {t('pages:userDetail.requestsCard.bySizeLabel')}
+                  </span>
+                  <span className="text-sm font-medium tabular-nums">
+                    {pctBySize !== null ? `${pctBySize}%` : '-'}
+                  </span>
+                </div>
+                {pctBySize !== null && <Progress value={pctBySize} className="my-2 h-2" />}
+                <p className="text-muted-foreground text-xs">
+                  {row.totalSizeBytes > 0
+                    ? t('pages:userDetail.requestsCard.bySizeDetail', {
+                        wasted: formatBytes(row.neverWatchedSizeBytes),
+                        total: formatBytes(row.totalSizeBytes),
+                      })
+                    : t('pages:userDetail.requestsCard.noLibraryMatch')}
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <div className="grid grid-cols-3 gap-3 text-sm">
               <div>
                 <p className="text-muted-foreground flex items-center gap-1">
                   <Film className="h-3 w-3" />
@@ -107,13 +154,6 @@ export function UserRequestsCard({ userId }: UserRequestsCardProps) {
                   {t('pages:statsRequesters.colTv')}
                 </p>
                 <p className="font-medium tabular-nums">{row.tvCount}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground flex items-center gap-1">
-                  <EyeOff className="h-3 w-3" />
-                  {t('pages:statsRequesters.colNeverWatched')}
-                </p>
-                <p className="font-medium tabular-nums">{row.neverWatchedCount}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">
