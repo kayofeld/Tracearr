@@ -249,6 +249,7 @@ export type {
   OmbiTestConnectionRequest,
   OmbiTestConnectionResponse,
   OmbiStatusResponse,
+  OmbiPurgeResponse,
   OmbiRequesterResolutionType,
   OmbiRequesterMapping,
   OmbiMappingsResponse,

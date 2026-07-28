@@ -180,6 +180,26 @@ interface OmbiMappingUpsertRequest {
 
 ---
 
+## 5.4 `DELETE /ombi/data` — purge mirrored data
+
+Added by owner decision 2026-07-28, before build fan-out (not a mid-wave patch).
+
+- **Auth:** owner. **Caching:** none.
+- **Precondition:** the connector must be **disconnected** (`ombiUrl`/`ombiApiKey` cleared).
+  Returns `409` while still configured — otherwise the next scheduled sync would simply
+  repopulate what was just deleted, which reads as the purge having failed.
+- **Behavior:** deletes all `ombi_requests` rows and all `ombi_user_mappings` rows in one
+  transaction, then invalidates `LIBRARY_STALE` + `OMBI_REQUESTER_STATS` caches so
+  attribution disappears from library rows immediately.
+- **Response 200:** `OmbiPurgeResponse { deletedRequests, deletedMappings }`.
+
+`GET /ombi/status` carries `purgeAvailable: boolean` (true iff disconnected AND rows remain)
+so the settings panel can reveal the control exactly when it is actionable, per the owner's
+"show it once the connection is removed" requirement. Disconnecting still **retains** data by
+default; purging is always an explicit, separate act.
+
+---
+
 ## 6. `GET /stats/requesters` — per-user request statistics
 
 - **Auth:** authenticated (read-only stats, same level as other stats routes).

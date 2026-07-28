@@ -2459,6 +2459,8 @@ export interface OmbiStatusResponse {
     total: number;
     skippedValidation: number;
   };
+  /** True when the connector is disconnected but mirrored rows remain - drives the purge control. */
+  purgeAvailable: boolean;
   attribution: {
     matched: number;
     manual: number;
@@ -2468,6 +2470,17 @@ export interface OmbiStatusResponse {
     matched: number;
     unmatched: number;
   };
+}
+
+/**
+ * DELETE /ombi/data - purge the mirrored request data.
+ * Surfaced in the connector settings panel, and only once the connector has been
+ * disconnected (url/key cleared) while mirrored rows still exist, so it can never be
+ * hit while a sync could immediately repopulate.
+ */
+export interface OmbiPurgeResponse {
+  deletedRequests: number;
+  deletedMappings: number;
 }
 
 export type OmbiRequesterResolutionType = 'manual' | 'provider' | 'username' | 'unattributed';
