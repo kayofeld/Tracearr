@@ -16,11 +16,13 @@ import type {
   ViolationContext,
   SessionContext,
   PluginUpdateContext,
+  AppUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
 import { formatViolationMessage } from '../formatters/violation.js';
 import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
+import { formatAppUpdateMessage } from '../formatters/appUpdate.js';
 
 interface TelegramMessage {
   title: string;
@@ -82,6 +84,8 @@ export class TelegramAgent extends BaseAgent {
         return { title: 'Server Online', body: `${payload.context.serverName} is back online` };
       case 'plugin_update_available':
         return this.buildPluginUpdate(payload.context);
+      case 'app_update_available':
+        return this.buildAppUpdate(payload.context);
       case 'new_device':
         return this.buildNewDevice(payload.context);
       case 'trust_score_changed':
@@ -118,6 +122,10 @@ export class TelegramAgent extends BaseAgent {
       title: 'Plugin Update Available',
       body: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
     };
+  }
+
+  private buildAppUpdate(ctx: AppUpdateContext): TelegramMessage {
+    return { title: 'Tracearr Update Available', body: formatAppUpdateMessage(ctx) };
   }
 
   private buildNewDevice(ctx: NewDeviceContext): TelegramMessage {

@@ -75,6 +75,10 @@ const INTERNAL_DEFAULTS = {
   jwtRevokedBefore: null as string | null, // ISO 8601 — tokens issued before this timestamp are rejected
   localLoginEnabled: true,
   ombiSyncStatus: null as OmbiSyncStatusInternal | null,
+  // Version already announced via the app_update_available notification (jobs/versionCheckQueue.ts).
+  // Notify once per new version; re-arms when a newer version appears. Persisted (not in-memory)
+  // so a server restart does not re-notify for a version already announced.
+  lastNotifiedAppUpdateVersion: null as string | null,
 };
 
 type InternalSettings = typeof INTERNAL_DEFAULTS;

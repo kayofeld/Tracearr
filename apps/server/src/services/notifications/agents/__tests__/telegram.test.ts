@@ -24,6 +24,20 @@ const serverDownPayload: NotificationPayload = {
   context: { type: 'server_down', serverName: 'My Emby' },
 };
 
+const appUpdatePayload: NotificationPayload = {
+  event: 'app_update_available',
+  title: 'Tracearr Update Available',
+  message: 'A new Tracearr release is available (current 1.4.0, latest 1.5.0)',
+  severity: 'low',
+  timestamp: new Date().toISOString(),
+  context: {
+    type: 'app_update_available',
+    currentVersion: '1.4.0',
+    latestVersion: '1.5.0',
+    releaseUrl: 'https://github.com/kayofeld/Tracearr/releases/tag/v1.5.0',
+  },
+};
+
 describe('TelegramAgent', () => {
   const agent = new TelegramAgent();
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -65,6 +79,18 @@ describe('TelegramAgent', () => {
       const result = await agent.send(serverDownPayload, baseSettings({ telegramChatId: null }));
       expect(result.success).toBe(false);
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('renders an app update message containing both versions and the release link', async () => {
+      const result = await agent.send(appUpdatePayload, baseSettings());
+      expect(result.success).toBe(true);
+
+      const [, init] = fetchMock.mock.calls[0]!;
+      const body = JSON.parse((init as { body: string }).body) as { text: string };
+      expect(body.text).toContain('Tracearr Update Available');
+      expect(body.text).toContain('1.4.0');
+      expect(body.text).toContain('1.5.0');
+      expect(body.text).toContain('https://github.com/kayofeld/Tracearr/releases/tag/v1.5.0');
     });
 
     it("surfaces Telegram's error description on a non-ok response", async () => {

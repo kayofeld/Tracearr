@@ -1454,7 +1454,9 @@ export type NotificationEventType =
   | 'trust_score_changed'
   | 'server_down'
   | 'server_up'
-  | 'plugin_update_available';
+  | 'plugin_update_available'
+  /** A newer Tracearr release is available (from the 6-hourly version check). */
+  | 'app_update_available';
 
 // Notification preferences (per-device settings)
 export interface NotificationPreferences {

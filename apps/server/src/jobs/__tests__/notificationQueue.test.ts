@@ -16,6 +16,7 @@ const {
   mockNotificationManagerSendAll,
   mockPushNotificationServiceNotifyViolation,
   mockNotifyViolation,
+  mockNotifyAppUpdateAvailable,
   mockGetServerUserDisplayNames,
 } = vi.hoisted(() => ({
   mockGetNotificationSettings: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockNotificationManagerSendAll: vi.fn().mockResolvedValue([]),
   mockPushNotificationServiceNotifyViolation: vi.fn().mockResolvedValue(undefined),
   mockNotifyViolation: vi.fn().mockResolvedValue([]),
+  mockNotifyAppUpdateAvailable: vi.fn().mockResolvedValue([]),
   mockGetServerUserDisplayNames: vi.fn(),
 }));
 
@@ -39,6 +41,7 @@ vi.mock('../../services/notifications/index.js', () => ({
   notificationManager: {
     sendAll: mockNotificationManagerSendAll,
     notifyViolation: mockNotifyViolation,
+    notifyAppUpdateAvailable: mockNotifyAppUpdateAvailable,
   },
 }));
 
@@ -411,5 +414,68 @@ describe('processNotificationJob - user_id condition regression', () => {
     await processNotificationJob(job);
 
     expect(mockNotifyViolation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('processNotificationJob - app_update_available routing', () => {
+  const makeJob = () =>
+    ({
+      data: {
+        type: 'app_update_available' as const,
+        payload: {
+          currentVersion: '1.4.0',
+          latestVersion: '1.5.0',
+          releaseUrl: 'https://github.com/kayofeld/Tracearr/releases/tag/v1.5.0',
+        },
+      },
+    }) as any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetNotificationSettings.mockResolvedValue({
+      discordWebhookUrl: null,
+      customWebhookUrl: null,
+      webhookFormat: 'telegram',
+      ntfyTopic: null,
+      ntfyAuthToken: null,
+      pushoverUserKey: null,
+      pushoverApiToken: null,
+      telegramBotToken: 'BOT:TOKEN',
+      telegramChatId: '12345',
+    });
+  });
+
+  it('dispatches to notificationManager when discord or webhook routing is enabled', async () => {
+    mockGetChannelRouting.mockResolvedValue({
+      discordEnabled: false,
+      webhookEnabled: true,
+      pushEnabled: false,
+      webToastEnabled: false,
+    });
+
+    await processNotificationJob(makeJob());
+
+    expect(mockNotifyAppUpdateAvailable).toHaveBeenCalledTimes(1);
+    expect(mockNotifyAppUpdateAvailable).toHaveBeenCalledWith(
+      {
+        currentVersion: '1.4.0',
+        latestVersion: '1.5.0',
+        releaseUrl: 'https://github.com/kayofeld/Tracearr/releases/tag/v1.5.0',
+      },
+      expect.any(Object)
+    );
+  });
+
+  it('is silent when no channel is routed for this event', async () => {
+    mockGetChannelRouting.mockResolvedValue({
+      discordEnabled: false,
+      webhookEnabled: false,
+      pushEnabled: false,
+      webToastEnabled: false,
+    });
+
+    await processNotificationJob(makeJob());
+
+    expect(mockNotifyAppUpdateAvailable).not.toHaveBeenCalled();
   });
 });

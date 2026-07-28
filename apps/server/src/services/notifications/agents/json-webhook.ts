@@ -16,6 +16,7 @@ import type {
   SessionContext,
   ServerContext,
   PluginUpdateContext,
+  AppUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
@@ -84,6 +85,8 @@ export class JsonWebhookAgent extends BaseAgent {
         return this.buildServerPayload(payload, payload.context);
       case 'plugin_update_available':
         return this.buildPluginUpdatePayload(payload, payload.context);
+      case 'app_update_available':
+        return this.buildAppUpdatePayload(payload, payload.context);
       case 'new_device':
         return this.buildNewDevicePayload(payload, payload.context);
       case 'trust_score_changed':
@@ -211,6 +214,23 @@ export class JsonWebhookAgent extends BaseAgent {
         installedVersion: ctx.installedVersion,
         latestVersion: ctx.latestVersion,
         downloadUrl: ctx.downloadUrl,
+      },
+    };
+  }
+
+  private buildAppUpdatePayload(
+    payload: NotificationPayload,
+    ctx: AppUpdateContext
+  ): JsonWebhookPayload {
+    // No NOTIFICATION_EVENTS entry for this event yet (packages/shared out of scope for
+    // this change); the literal matches NotificationEventType exactly.
+    return {
+      event: 'app_update_available',
+      timestamp: payload.timestamp,
+      data: {
+        currentVersion: ctx.currentVersion,
+        latestVersion: ctx.latestVersion,
+        releaseUrl: ctx.releaseUrl,
       },
     };
   }

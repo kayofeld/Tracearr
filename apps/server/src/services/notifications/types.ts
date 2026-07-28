@@ -20,7 +20,8 @@ export type NotificationEventType =
   | 'trust_score_changed'
   | 'server_down'
   | 'server_up'
-  | 'plugin_update_available';
+  | 'plugin_update_available'
+  | 'app_update_available';
 
 /**
  * Severity levels for notifications
@@ -66,6 +67,16 @@ export interface PluginUpdateContext {
 }
 
 /**
+ * Context provided with app (Tracearr release) update notifications
+ */
+export interface AppUpdateContext {
+  type: 'app_update_available';
+  currentVersion: string;
+  latestVersion: string;
+  releaseUrl: string;
+}
+
+/**
  * Context provided with new device notifications
  */
 export interface NewDeviceContext {
@@ -95,6 +106,7 @@ export type NotificationContext =
   | SessionContext
   | ServerContext
   | PluginUpdateContext
+  | AppUpdateContext
   | NewDeviceContext
   | TrustScoreChangedContext;
 
@@ -282,6 +294,21 @@ export const PayloadBuilders = {
         latestVersion,
         downloadUrl,
       },
+    };
+  },
+
+  fromAppUpdate(
+    currentVersion: string,
+    latestVersion: string,
+    releaseUrl: string
+  ): NotificationPayload {
+    return {
+      event: 'app_update_available',
+      title: 'Tracearr Update Available',
+      message: `A new Tracearr release is available (current ${currentVersion}, latest ${latestVersion})`,
+      severity: 'low',
+      timestamp: new Date().toISOString(),
+      context: { type: 'app_update_available', currentVersion, latestVersion, releaseUrl },
     };
   },
 
