@@ -572,7 +572,7 @@ describe('better auth security (integration)', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('plex login guard rejects a non-owner even with an allowLogin=true plex_accounts row (only plex.tv mocked)', async () => {
+  it('plex login stays removed: check-pin is unmounted (404) and cannot mint a session, even for an allowLogin=true plex_accounts row', async () => {
     await signUpOwner(app);
 
     const [nonOwner] = await db
@@ -594,13 +594,19 @@ describe('better auth security (integration)', () => {
       plexEmail: nonOwner!.email!,
       plexThumbnail: '',
       plexToken: 'fake-plex-token',
-      // allowLogin: true on its own must not be enough to authorize login -
-      // the plexPlugin's role !== 'owner' check is the actual gate.
+      // allowLogin: true on its own must not be enough to authorize login.
+      // The Plex login method was removed outright in 65447795 ("Emby
+      // credential login; remove Plex login method"): lib/plexPlugin.ts is no
+      // longer registered in lib/auth.ts, so no gate even runs - the whole
+      // login surface is gone.
       allowLogin: true,
     });
 
-    // Only the plex.tv client is mocked (per contract); db and the plugin's
-    // own guard logic run for real against the live database.
+    // Only the plex.tv client is mocked (per contract). Today the endpoint is
+    // unmounted so this spy must never fire; if plexPlugin is ever remounted,
+    // the mock lets the request reach the owner-only gate instead of failing
+    // on a real plex.tv call, so this test then fails on the 404 assertion
+    // and forces a deliberate re-point at whatever the gate returns.
     const spy = vi.spyOn(PlexClient, 'checkOAuthPin').mockResolvedValue({
       id: plexAccountId,
       username: 'nonowner',
@@ -619,7 +625,21 @@ describe('better auth security (integration)', () => {
         headers: { 'content-type': 'application/json' },
         payload: { pinId: 'fake-pin-id' },
       });
-      expect(res.statusCode).toBe(403);
+      // Better Auth's wildcard answers 404 for everyone: the endpoint no
+      // longer exists (fail closed - a stronger guarantee than the 403 the
+      // mounted plugin's role gate used to return). Anything other than 404
+      // here means the Plex login surface has been remounted; re-point this
+      // assertion at the owner-only gate's real status before going green.
+      expect(res.statusCode).toBe(404);
+      expect(spy).not.toHaveBeenCalled();
+      // And the attempt must not have minted a session or a cookie for the
+      // non-owner, however the request was answered.
+      expect(setCookieArray(res)).toEqual([]);
+      const nonOwnerSessions = await db
+        .select()
+        .from(authSessions)
+        .where(eq(authSessions.userId, nonOwner!.id));
+      expect(nonOwnerSessions).toHaveLength(0);
     } finally {
       spy.mockRestore();
     }
