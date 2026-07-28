@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 import { EyeOff, HardDrive, Percent, CalendarClock, Film, Tv } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { StaleItem, NeverWatchedAgeBucket } from '@tracearr/shared';
@@ -44,6 +45,45 @@ function formatDuration(days: number, t: Translate): string {
   const months = Math.floor(remainingDays / 30);
   if (months === 0) return t('library.neverWatched.durationYears', { count: years });
   return t('library.neverWatched.durationYearsMonths', { years, months });
+}
+
+/**
+ * "Requested by" cell - sourced from the Ombi connector's attribution
+ * (StaleItem.requestedBy). Degrades to a muted dash whenever the connector
+ * is off, the item matched no request, or requestedBy is otherwise null -
+ * never hides the column or errors.
+ */
+function RequestedByCell({
+  requestedBy,
+  t,
+}: {
+  requestedBy: StaleItem['requestedBy'];
+  t: Translate;
+}) {
+  if (!requestedBy) {
+    return (
+      <span className="text-muted-foreground">{t('library.neverWatched.requestedByNone')}</span>
+    );
+  }
+
+  const label = requestedBy.ombiAlias ?? requestedBy.ombiUsername;
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {requestedBy.username ? (
+        <Link to={`/users`} className="hover:underline">
+          {requestedBy.username}
+        </Link>
+      ) : (
+        <span>{label}</span>
+      )}
+      {requestedBy.otherRequesterCount > 0 && (
+        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+          {t('library.neverWatched.requestedByOthers', { count: requestedBy.otherRequesterCount })}
+        </Badge>
+      )}
+    </span>
+  );
 }
 
 function MediaTypeCell({ mediaType, t }: { mediaType: string; t: Translate }) {
@@ -182,6 +222,12 @@ export function LibraryNeverWatched() {
         accessorKey: 'fileSize',
         header: t('common:labels.size'),
         cell: ({ row }) => formatBytes(row.original.fileSize),
+      },
+      {
+        id: 'requestedBy',
+        header: t('library.neverWatched.colRequestedBy'),
+        enableSorting: false,
+        cell: ({ row }) => <RequestedByCell requestedBy={row.original.requestedBy} t={translate} />,
       },
     ],
     [t, translate, isMultiServer]

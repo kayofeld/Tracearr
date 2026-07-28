@@ -67,6 +67,11 @@
       "jobStartFailed": "Не вдалося розпочати роботу",
       "mobileAccessDisableFailed": "Не вдалося вимкнути доступ до мережі",
       "mobileAccessEnableFailed": "Не вдалося увімкнути доступ до мобільного зв'язку",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Не вдалося створити токен пари",
       "plexDirectUrl": "plex.direct URL - це естафетні адреси, які не можуть бути використані тут. Замість цього використовуйте пряму IP адресу або ім'я хосту.",
       "plexUnlinkFailed": "Не вдалося від'єднати акаунт Plex",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Відскануйте QR-код за допомогою мобільного додатку Tracearr для підключення",
         "title": "Мобільний доступ увімкнено"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Відскануйте QR-код мобільним пристроєм для підключення",

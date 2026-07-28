@@ -12,7 +12,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import {
   REDIS_KEYS,
   CACHE_TTL,
@@ -20,11 +20,30 @@ import {
   type LibraryStaleQueryInput,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
+import { getSettings } from '../../services/settings.js';
 import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 import { buildLibraryCacheKey } from './utils.js';
 
 /** Category for stale content */
 type StaleCategory = 'never_watched' | 'stale';
+
+/**
+ * Requester attribution from the Ombi connector (mirrors
+ * `@tracearr/shared`'s `StaleItemRequestedBy` - contract §7; kept in sync by
+ * hand since this route re-declares its response shapes locally rather than
+ * importing them). Null when the connector is unconfigured, the item matched
+ * no request, or the request is unattributed to a Tracearr user (then
+ * ombiUsername still identifies the raw requester).
+ */
+interface StaleItemRequestedBy {
+  userId: string | null;
+  username: string | null;
+  ombiUsername: string;
+  ombiAlias: string | null;
+  requestedAt: string;
+  otherRequesterCount: number;
+  source: 'ombi';
+}
 
 /** Individual stale content item */
 interface StaleItem {
@@ -43,6 +62,8 @@ interface StaleItem {
   watchCount: number;
   category: StaleCategory;
   daysStale: number;
+  /** Ombi requester attribution. Additive: null when the connector is off or nothing matched. */
+  requestedBy: StaleItemRequestedBy | null;
 }
 
 /** Summary statistics for stale content */
@@ -77,6 +98,14 @@ interface RawStaleItemRow {
   watch_count: string;
   category: StaleCategory;
   days_stale: string;
+  // Ombi attribution columns - always present in the row shape (NULL/0 literals
+  // when the connector is unconfigured, so mapping logic never branches per-row).
+  request_user_id: string | null;
+  request_username: string | null;
+  request_ombi_username: string | null;
+  request_ombi_alias: string | null;
+  request_requested_at: string | null;
+  request_distinct_requester_count: number;
 }
 
 /** Raw row from database for summary */
@@ -87,6 +116,85 @@ interface RawSummaryRow {
   stale_bytes: string;
   total_stale_items: string;
   total_stale_bytes: string;
+}
+
+/**
+ * Match condition joining a paginated stale item (`pi`, from the `paginated_items`
+ * CTE - carries imdb_id/tmdb_id/tvdb_id/media_type) to an `ombi_requests` row
+ * under the given alias. Mirrors the /stats/requesters join and ADR 0003:
+ * imdb -> tmdb -> tvdb precedence, no title fallback (wrong attribution is worse
+ * than none). TV requests (`media_type = 'tv'`) match the SHOW item.
+ */
+function buildRequesterMatchCondition(requestAlias: string): SQL {
+  const r = sql.raw(requestAlias);
+  return sql`(
+    (pi.media_type = 'movie' AND ${r}.media_type = 'movie')
+    OR (pi.media_type = 'show' AND ${r}.media_type = 'tv')
+  )
+  AND (
+    (pi.imdb_id IS NOT NULL AND pi.imdb_id <> '' AND ${r}.imdb_id = pi.imdb_id)
+    OR (pi.tmdb_id IS NOT NULL AND pi.tmdb_id <> 0 AND ${r}.tmdb_id = pi.tmdb_id)
+    OR (pi.tvdb_id IS NOT NULL AND pi.tvdb_id <> 0 AND ${r}.tvdb_id = pi.tvdb_id)
+  )`;
+}
+
+/**
+ * Attribution columns for the final SELECT. When unconfigured, these are
+ * constant NULL/0 literals (no join, no query cost) so the row shape and
+ * mapping logic below never need to branch per-row.
+ *
+ * Exported (only) so a test can pin the exact ISO-8601 `to_char(...)` format
+ * emitted for `request_requested_at` (OMB-2 contract §7 - requestedAt is
+ * documented as ISO-8601) without mocking the whole route + a live Postgres.
+ */
+export function buildRequestedBySelectFragment(configured: boolean): SQL {
+  if (!configured) {
+    return sql`
+      NULL::uuid AS request_user_id,
+      NULL::text AS request_username,
+      NULL::text AS request_ombi_username,
+      NULL::text AS request_ombi_alias,
+      NULL::text AS request_requested_at,
+      0::int AS request_distinct_requester_count,
+    `;
+  }
+  return sql`
+    rb.user_id AS request_user_id,
+    rb.username AS request_username,
+    rb.ombi_username AS request_ombi_username,
+    rb.ombi_alias AS request_ombi_alias,
+    -- ISO-8601 to match the frozen contract (StaleItemRequestedBy.requestedAt) -
+    -- a bare text cast of the timestamp column alone emits Postgres' native
+    -- "YYYY-MM-DD HH:MI:SS.US+00" format, not ISO-8601 (OMB-2). Mirrors
+    -- routes/stats/requesters.ts.
+    to_char(rb.requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS request_requested_at,
+    (
+      SELECT COUNT(DISTINCT r2.ombi_user_id)::int
+      FROM ombi_requests r2
+      WHERE ${buildRequesterMatchCondition('r2')}
+    ) AS request_distinct_requester_count,
+  `;
+}
+
+/**
+ * LEFT JOIN LATERAL picking the EARLIEST matching request (contract §7:
+ * "earliest matching request wins"). Empty fragment when unconfigured - the
+ * join is skipped entirely, not merely filtered.
+ */
+function buildRequestedByJoinFragment(configured: boolean): SQL {
+  if (!configured) {
+    return sql``;
+  }
+  return sql`
+    LEFT JOIN LATERAL (
+      SELECT r.user_id, u.username, r.ombi_username, r.ombi_alias, r.requested_at
+      FROM ombi_requests r
+      LEFT JOIN users u ON u.id = r.user_id
+      WHERE ${buildRequesterMatchCondition('r')}
+      ORDER BY r.requested_at ASC
+      LIMIT 1
+    ) rb ON true
+  `;
 }
 
 export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
@@ -144,6 +252,14 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           // Fall through to compute
         }
       }
+
+      // Ombi attribution (contract §7): single cheap settings check, then either a
+      // real LEFT JOIN LATERAL + correlated subquery, or zero-cost NULL/0 literals.
+      // This must not add query cost for the common case of no Ombi connector.
+      const ombiSettings = await getSettings(['ombiUrl', 'ombiApiKey']);
+      const ombiConfigured = Boolean(ombiSettings.ombiUrl && ombiSettings.ombiApiKey);
+      const requestedBySelect = buildRequestedBySelectFragment(ombiConfigured);
+      const requestedByJoin = buildRequestedByJoinFragment(ombiConfigured);
 
       // Build filters
       const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
@@ -224,6 +340,11 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             li.title,
             li.media_type,
             li.year,
+            -- Carried through to stale_items/paginated_items purely for the Ombi
+            -- attribution join below (never returned to the client as columns).
+            li.imdb_id,
+            li.tmdb_id,
+            li.tvdb_id,
             -- For shows/artists: use aggregated child size, otherwise use item's file_size
             CASE
               WHEN li.media_type IN ('show', 'artist') THEN COALESCE(cs.total_size, li.file_size)
@@ -270,7 +391,8 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             ${libraryFilter}
             ${mediaTypeFilter}
           GROUP BY li.id, li.server_id, s.name, li.library_id, li.title,
-                   li.media_type, li.year, li.file_size, li.video_resolution, li.created_at,
+                   li.media_type, li.year, li.imdb_id, li.tmdb_id, li.tvdb_id,
+                   li.file_size, li.video_resolution, li.created_at,
                    cs.total_size, cs.best_resolution_tier, cws.last_watched, cws.watch_count
         ),
         stale_items AS (
@@ -283,6 +405,9 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             title,
             media_type,
             year,
+            imdb_id,
+            tmdb_id,
+            tvdb_id,
             file_size,
             video_resolution,
             added_at,
@@ -342,6 +467,9 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           pi.watch_count::text AS watch_count,
           pi.category,
           pi.days_stale::text AS days_stale,
+          -- Ombi attribution (contract §7) - NULL/0 literals when unconfigured (see
+          -- buildRequestedBySelectFragment), a real earliest-request join otherwise.
+          ${requestedBySelect}
           -- Summary fields (same for all rows)
           ss.never_watched_count::text AS _never_watched_count,
           ss.stale_count::text AS _stale_count,
@@ -351,6 +479,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           ss.total_stale_bytes::text AS _total_stale_bytes
         FROM paginated_items pi
         CROSS JOIN summary_stats ss
+        ${requestedByJoin}
       `);
 
       // Extract items and summary from combined result
@@ -381,6 +510,17 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
         watchCount: parseInt(row.watch_count, 10),
         category: row.category,
         daysStale: parseInt(row.days_stale, 10),
+        requestedBy: row.request_ombi_username
+          ? {
+              userId: row.request_user_id,
+              username: row.request_username,
+              ombiUsername: row.request_ombi_username,
+              ombiAlias: row.request_ombi_alias,
+              requestedAt: row.request_requested_at!,
+              otherRequesterCount: Math.max(0, (row.request_distinct_requester_count || 0) - 1),
+              source: 'ombi' as const,
+            }
+          : null,
       }));
 
       // Extract summary from first row (or fetch separately if no items)
@@ -469,7 +609,11 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
         pagination: { page, pageSize, total },
       };
 
-      // Cache for 1 hour (stale content changes slowly)
+      // Cache for 1 hour (stale content changes slowly).
+      // SEAM: this cached payload now embeds Ombi requestedBy attribution
+      // (contract §7). Invalidating REDIS_KEYS.LIBRARY_STALE on Ombi sync
+      // completion and mapping changes is owned by the Ombi sync/mapping code
+      // (services/ombi.ts, jobs/ombiSyncQueue.ts) - NOT implemented here.
       await app.redis.setex(cacheKey, CACHE_TTL.LIBRARY_STALE, JSON.stringify(response));
 
       return response;

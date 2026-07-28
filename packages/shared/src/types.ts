@@ -1043,6 +1043,10 @@ export interface Settings {
   // Tautulli integration
   tautulliUrl: string | null;
   tautulliApiKey: string | null;
+  /** Ombi connector base URL, e.g. "http://localhost:5420". Null when unconfigured. */
+  ombiUrl: string | null;
+  /** Ombi API key. Plaintext per repo convention (ADR 0005); MUST be redacted in logs. */
+  ombiApiKey: string | null;
   // Network/access settings
   externalUrl: string | null;
   trustProxy: boolean;
@@ -1206,6 +1210,7 @@ export interface ServerToClientEvents {
   'import:jellystat:progress': (progress: JellystatImportProgress) => void;
   'maintenance:progress': (progress: MaintenanceJobProgress) => void;
   'library:sync:progress': (progress: LibrarySyncProgress) => void;
+  'ombi:sync:progress': (event: OmbiSyncProgressEvent) => void;
   'tasks:updated': (tasks: RunningTask[]) => void;
   'version:update': (data: { current: string; latest: string; releaseUrl: string }) => void;
   'server:down': (data: { serverId: string; serverName: string }) => void;
@@ -1817,7 +1822,7 @@ export interface MaintenanceJobResult {
 // =============================================================================
 
 export type RunningTaskType =
-  'library_sync' | 'tautulli_import' | 'jellystat_import' | 'maintenance';
+  'library_sync' | 'tautulli_import' | 'jellystat_import' | 'maintenance' | 'ombi_sync';
 
 export interface RunningTask {
   /** Unique task identifier */
@@ -2334,6 +2339,33 @@ export interface StaleItem {
   watchCount: number;
   category: StaleCategory;
   daysStale: number;
+  /**
+   * Ombi requester attribution. Additive in v1.8.0: always present going forward,
+   * null whenever the connector is off or nothing matched. Older clients ignore it.
+   */
+  requestedBy: StaleItemRequestedBy | null;
+}
+
+/**
+ * Requester attribution from the Ombi connector, attached to library rows.
+ * Null when the connector is unconfigured, the item matched no request, or the
+ * request could not be attributed to a Tracearr user (ombiUsername still identifies
+ * the raw requester in that case).
+ */
+export interface StaleItemRequestedBy {
+  /** Resolved Tracearr users.id; null when unattributed. */
+  userId: string | null;
+  /** Tracearr username; null when unattributed. */
+  username: string | null;
+  /** Raw Ombi identity; clients render `ombiAlias ?? ombiUsername`. */
+  ombiUsername: string;
+  ombiAlias: string | null;
+  /** ISO-8601 date of the EARLIEST matching request. */
+  requestedAt: string;
+  /** Additional distinct requesters of the same media; 0 in the common case. */
+  otherRequesterCount: number;
+  /** Future-proofs sibling request connectors. */
+  source: 'ombi';
 }
 
 export interface StaleSummary {
@@ -2394,6 +2426,141 @@ export interface NeverWatchedStatsResponse {
   ageDistribution: NeverWatchedAgeDistribution[];
   /** ISO timestamp of the oldest never-watched item's added-at date, null when none. */
   oldestAddedAt: string | null;
+}
+
+// =============================================================================
+// Ombi connector (optional integration - who requested which media)
+// Contract: docs/architecture/ombi-api-contract.md, ADRs 0002-0005.
+// =============================================================================
+
+/** POST /ombi/test-connection - validates the SUBMITTED values, not the saved ones. */
+export interface OmbiTestConnectionRequest {
+  url: string;
+  apiKey: string;
+}
+
+export interface OmbiTestConnectionResponse {
+  success: boolean;
+  /** Present on success; the user payload is counted, never returned. */
+  userCount?: number;
+  /** Human-readable cause on failure (auth vs network vs bad URL). */
+  error?: string;
+}
+
+/** GET /ombi/status - connector configuration and sync health. */
+export interface OmbiStatusResponse {
+  configured: boolean;
+  running: boolean;
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  counts: {
+    movieRequests: number;
+    tvRequests: number;
+    total: number;
+    skippedValidation: number;
+  };
+  /** True when the connector is disconnected but mirrored rows remain - drives the purge control. */
+  purgeAvailable: boolean;
+  attribution: {
+    matched: number;
+    manual: number;
+    unattributed: number;
+  };
+  mediaMatch: {
+    matched: number;
+    unmatched: number;
+  };
+}
+
+/**
+ * DELETE /ombi/data - purge the mirrored request data.
+ * Surfaced in the connector settings panel, and only once the connector has been
+ * disconnected (url/key cleared) while mirrored rows still exist, so it can never be
+ * hit while a sync could immediately repopulate.
+ */
+export interface OmbiPurgeResponse {
+  deletedRequests: number;
+  deletedMappings: number;
+}
+
+export type OmbiRequesterResolutionType = 'manual' | 'provider' | 'username' | 'unattributed';
+
+export interface OmbiRequesterMapping {
+  ombiUserId: string;
+  ombiUsername: string;
+  ombiAlias: string | null;
+  requestCount: number;
+  resolution: {
+    type: OmbiRequesterResolutionType;
+    /** users.id when resolved; null for 'unattributed' and forced-unattributed overrides. */
+    userId: string | null;
+    username: string | null;
+  };
+  /** True when >1 case-insensitive username candidate exists - auto-match refuses, owner decides. */
+  ambiguous: boolean;
+  suggestions: Array<{ userId: string; username: string }>;
+  /** Mapping row exists but the requester is absent from Ombi. */
+  stale: boolean;
+}
+
+export interface OmbiMappingsResponse {
+  requesters: OmbiRequesterMapping[];
+}
+
+/** PUT /ombi/mappings/:ombiUserId - null userId forces "unattributed" (ignore this requester). */
+export interface OmbiMappingUpsertRequest {
+  userId: string | null;
+}
+
+export interface OmbiSyncProgressEvent {
+  jobId: string;
+  phase: 'movies' | 'tv' | 'resolve' | 'done' | 'error';
+  /** 0-100; null when indeterminate. */
+  progress: number | null;
+  error?: string;
+}
+
+/** One row of GET /stats/requesters. The unattributed bucket uses null userId/username. */
+export interface RequesterStatsRow {
+  userId: string | null;
+  username: string | null;
+  requestCount: number;
+  movieCount: number;
+  tvCount: number;
+  statusCounts: {
+    pending: number;
+    approved: number;
+    denied: number;
+    available: number;
+  };
+  /** Rows whose media matched a library item via the query-time external-id join. */
+  matchedToLibraryCount: number;
+  totalSizeBytes: number;
+  /** Matched items with no qualifying play by ANYONE (session duration >= 120s, as /stale). */
+  neverWatchedCount: number;
+  /** "Wasted storage" attributable to this requester. */
+  neverWatchedSizeBytes: number;
+  /** Matched items played by THIS identity's own server accounts; 0 for the unattributed bucket. */
+  watchedByRequesterCount: number;
+  firstRequestAt: string | null;
+  lastRequestAt: string | null;
+}
+
+export interface RequesterStatsResponse {
+  /** Attributed identities, sorted by requestCount desc. */
+  requesters: RequesterStatsRow[];
+  /** ALWAYS present, zeroed when empty - never silently omitted. */
+  unattributed: RequesterStatsRow;
+  totals: {
+    requestCount: number;
+    requesterCount: number;
+    unattributedCount: number;
+    neverWatchedSizeBytes: number;
+  };
+  /** False => feature off; payload is empty/zeroed and the UI hides the page. */
+  configured: boolean;
+  generatedAt: string;
 }
 
 // Library Watch Statistics Response (GET /library/watch)

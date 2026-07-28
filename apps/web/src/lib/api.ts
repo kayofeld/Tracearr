@@ -82,6 +82,14 @@ import type {
   MergeSuggestion,
   ServerUserSplitResult,
   UserSortField,
+  // Ombi connector types
+  OmbiTestConnectionRequest,
+  OmbiTestConnectionResponse,
+  OmbiStatusResponse,
+  OmbiPurgeResponse,
+  OmbiMappingsResponse,
+  OmbiMappingUpsertRequest,
+  RequesterStatsResponse,
 } from '@tracearr/shared';
 
 // Re-export shared types needed by frontend components
@@ -238,6 +246,23 @@ export const tokenStorage = {
 // Used by both ApiClient and authClient so they always target the same origin/basePath.
 export const API_BASE_URL = `${BASE_PATH}${API_BASE_PATH}`;
 
+/**
+ * Thrown by `ApiClient.request` for any non-2xx response. Extends `Error` so
+ * every existing `err instanceof Error` / `err.message` call site keeps
+ * working unchanged; `status` lets callers that need to branch on the exact
+ * HTTP status (e.g. 409 "already running" vs 400 "not configured" on the
+ * Ombi sync trigger) do so without string-matching the message.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -296,8 +321,9 @@ class ApiClient {
 
     if (!response.ok) {
       const errorBody = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-      throw new Error(
-        ((errorBody.message ?? errorBody.error) as string) ?? `Request failed: ${response.status}`
+      throw new ApiError(
+        ((errorBody.message ?? errorBody.error) as string) ?? `Request failed: ${response.status}`,
+        response.status
       );
     }
 
@@ -1145,6 +1171,18 @@ class ApiClient {
       const params = this.buildStatsParamsMulti(timeRange ?? { period: 'month' }, serverIds);
       return this.request<BandwidthSummary>(`/stats/bandwidth/summary?${params.toString()}`);
     },
+
+    // Ombi connector - per-requester statistics (GET /stats/requesters)
+    requesters: (serverIds?: string[], mediaType: 'all' | 'movie' | 'tv' = 'all') => {
+      const params = new URLSearchParams();
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
+      params.set('mediaType', mediaType);
+      return this.request<RequesterStatsResponse>(`/stats/requesters?${params.toString()}`);
+    },
   };
 
   // Library statistics - data fetching for library analytics pages
@@ -1409,6 +1447,33 @@ class ApiClient {
       this.request<{ token: string }>('/settings/api-key/regenerate', { method: 'POST' }),
     getIpWarning: () =>
       this.request<{ showWarning: boolean; stateHash: string }>('/settings/ip-warning'),
+  };
+
+  // Ombi connector - owner-gated connection/sync/mapping management.
+  // Contract: docs/architecture/ombi-api-contract.md
+  ombi = {
+    testConnection: (data: OmbiTestConnectionRequest) =>
+      this.request<OmbiTestConnectionResponse>('/ombi/test-connection', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    // 202 -> { jobId }; the request() helper throws ApiError(409|400) for the
+    // "already running" / "not configured" cases per the contract.
+    sync: () => this.request<{ jobId: string }>('/ombi/sync', { method: 'POST' }),
+    status: () => this.request<OmbiStatusResponse>('/ombi/status'),
+    purge: () => this.request<OmbiPurgeResponse>('/ombi/data', { method: 'DELETE' }),
+    mappings: {
+      list: () => this.request<OmbiMappingsResponse>('/ombi/mappings'),
+      upsert: (ombiUserId: string, data: OmbiMappingUpsertRequest) =>
+        this.request<{ updated: number }>(`/ombi/mappings/${encodeURIComponent(ombiUserId)}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+      revert: (ombiUserId: string) =>
+        this.request<{ updated: number }>(`/ombi/mappings/${encodeURIComponent(ombiUserId)}`, {
+          method: 'DELETE',
+        }),
+    },
   };
 
   // Channel Routing

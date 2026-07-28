@@ -9,6 +9,7 @@ import {
   Settings,
   TrendingUp,
   UserCircle,
+  ClipboardList,
   Gauge,
   Smartphone,
   Activity,
@@ -48,6 +49,7 @@ export const navigation: NavEntry[] = [
     children: [
       { nameKey: 'activity', href: '/stats/activity', icon: TrendingUp },
       { nameKey: 'users', href: '/stats/users', icon: UserCircle },
+      { nameKey: 'requesters', href: '/stats/requesters', icon: ClipboardList },
     ],
   },
   {

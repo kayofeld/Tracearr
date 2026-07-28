@@ -26,6 +26,7 @@ const Dashboard = lazy(named(() => import('@/pages/Dashboard'), 'Dashboard'));
 const Map = lazy(named(() => import('@/pages/Map'), 'Map'));
 const StatsActivity = lazy(named(() => import('@/pages/stats/Activity'), 'StatsActivity'));
 const StatsUsers = lazy(named(() => import('@/pages/stats/Users'), 'StatsUsers'));
+const StatsRequesters = lazy(named(() => import('@/pages/stats/Requesters'), 'StatsRequesters'));
 const StatsDevices = lazy(named(() => import('@/pages/stats/Devices'), 'StatsDevices'));
 const StatsBandwidth = lazy(named(() => import('@/pages/stats/Bandwidth'), 'StatsBandwidth'));
 const LibraryOverview = lazy(named(() => import('@/pages/library/Overview'), 'LibraryOverview'));
@@ -86,6 +87,7 @@ export function App() {
             <Route path="stats/activity" element={<StatsActivity />} />
             <Route path="stats/library" element={<Navigate to="/library" replace />} />
             <Route path="stats/users" element={<StatsUsers />} />
+            <Route path="stats/requesters" element={<StatsRequesters />} />
 
             {/* Performance routes */}
             <Route path="stats/devices" element={<StatsDevices />} />

@@ -67,6 +67,11 @@
       "jobStartFailed": "فشل في بدء المهمة",
       "mobileAccessDisableFailed": "فشل في تعطيل الوصول إلى الجوال",
       "mobileAccessEnableFailed": "فشل في تمكين الوصول إلى الجوال",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "فشل في إنشاء الرمز المميز للزوج",
       "plexDirectUrl": "plex.direct URLs هي عناوين إعادة الإرسال التي لا يمكن استخدامها هنا. الرجاء استخدام عنوان IP مباشر أو اسم المضيف بدلاً من ذلك.",
       "plexUnlinkFailed": "فشل فك ربط حساب Plex",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "امسح رمز QR باستخدام تطبيق Tracearr المحمول للاتصال",
         "title": "تمكين الوصول إلى الجوال"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "قم بمسح رمز QR باستخدام جهازك المحمول للإقران",

@@ -4,6 +4,21 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v1.8.0 — Ombi connector: who requested what
+
+- New **optional Ombi connector**. Point it at your Ombi instance and Tracearr mirrors the request
+  history, so library items can be attributed to whoever asked for them. Off until you configure it;
+  installs that don't use Ombi see no change anywhere.
+- **Requested By** on the Never Watched page, a **per-requester statistics** page (requests made, how
+  many were never watched, and the storage those unwatched requests occupy), and the same
+  requested-but-never-watched figure on each **user profile**.
+- Requesters are matched to Tracearr users by username, with a **mapping screen** for the ones that
+  don't match or are ambiguous. Anything unmatched stays in an explicit **unattributed** bucket rather
+  than being silently dropped, so the totals stay honest about media that never came through Ombi.
+- Settings panel with test-connection, manual sync and live progress; a **purge** control appears once
+  you disconnect, so mirrored data can be removed deliberately rather than by surprise.
+- Syncs every 6 hours, and once immediately when you first configure it.
+
 ## v1.7.0 — Never Watched dashboard page
 
 - New **Library → Never Watched** page: every movie and series that has never been played, with the

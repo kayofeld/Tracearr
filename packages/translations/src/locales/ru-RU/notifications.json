@@ -67,6 +67,11 @@
       "jobStartFailed": "Не удалось запустить задание",
       "mobileAccessDisableFailed": "Не удалось отключить мобильный доступ",
       "mobileAccessEnableFailed": "Не удалось включить мобильный доступ",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Не удалось сгенерировать токен пары",
       "plexDirectUrl": "URL-адреса plex.direct это адреса ретрансляции, которые не могут быть использованы здесь. Пожалуйста, используйте прямой IP адрес или имя хоста.",
       "plexUnlinkFailed": "Не удалось отвязать аккаунт Plex",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Сканируйте QR-код с помощью мобильного приложения Tracearr для подключения",
         "title": "Мобильный доступ включен"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Сканируйте QR-код вашим мобильным устройством для сопряжения",

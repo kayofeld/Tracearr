@@ -1125,3 +1125,161 @@ export const libraryItemsRelations = relations(libraryItems, ({ one }) => ({
     references: [servers.id],
   }),
 }));
+
+// ============================================================================
+// Ombi Connector Tables
+// ============================================================================
+// Design: docs/architecture/ombi-connector.md §4. ADRs: 0002 (username matching),
+// 0003 (query-time external-id join to library_items - no FK), 0004 (full-mirror
+// resync). Strictly optional: both tables stay empty until the owner configures
+// an Ombi URL + API key; no other table is touched by this feature.
+
+// Ombi request status enum (derived at sync time from Ombi's booleans; see design §4.1)
+export const ombiRequestStatusEnum = ['pending', 'approved', 'denied', 'available'] as const;
+
+// Ombi request media type enum (movie, or a TV *child* / per-user season-batch request)
+export const ombiRequestMediaTypeEnum = ['movie', 'tv'] as const;
+
+// Requester -> Tracearr user resolution method (ADR 0002); null on the row means unattributed
+export const ombiMatchMethodEnum = ['manual', 'provider', 'username'] as const;
+
+/**
+ * Ombi Requests - full mirror of Ombi's movie + TV-child requests (ADR 0004)
+ *
+ * One row per attributable request unit: a movie request, or one TV child
+ * (per-user, per-season-batch) request under a parent series. This is a mirror,
+ * not an event log - every sync run upserts on (media_type, ombi_request_id) and
+ * prunes rows whose synced_at predates that run's phase (ADR 0004 §5).
+ *
+ * No FK to library_items.id (ADR 0003): library_items churns on every library
+ * sync, so attribution joins to it at QUERY TIME on imdb_id/tmdb_id/tvdb_id
+ * (precedence imdb -> tmdb -> tvdb, matching buildExternalIdMatchKey.ts).
+ *
+ * Deliberately no email column - PII minimization, design §7: usernames/aliases
+ * are already surfaced elsewhere in Tracearr and carry all the matching value
+ * measured on the live data; email would be a higher-sensitivity duplicate of
+ * data Ombi remains the source of truth for.
+ */
+export const ombiRequests = pgTable(
+  'ombi_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    // Ombi identity - movie request id or TV *child* id. Independent id sequences
+    // per media type, hence the composite (media_type, ombi_request_id) upsert key.
+    ombiRequestId: integer('ombi_request_id').notNull(),
+    ombiParentRequestId: integer('ombi_parent_request_id'), // TV parent id; null for movies
+    mediaType: varchar('media_type', { length: 10 })
+      .notNull()
+      .$type<(typeof ombiRequestMediaTypeEnum)[number]>(),
+
+    // Denormalized media fields - so a request still renders even when the media
+    // was never in the library, or the library item was later removed/re-synced.
+    title: varchar('title', { length: 500 }).notNull(),
+    releaseYear: integer('release_year'),
+
+    // External ids for the query-time join to library_items (ADR 0003). Same
+    // formats as library_items.{imdb_id,tmdb_id,tvdb_id} (schema.ts:990-992).
+    imdbId: varchar('imdb_id', { length: 20 }),
+    tmdbId: integer('tmdb_id'), // movies: theMovieDbId
+    tvdbId: integer('tvdb_id'), // TV: parent tvDbId, copied onto each child row
+
+    // TV: requested season numbers (number[]); null for movies. Display only,
+    // never queried relationally - jsonb is proportionate at this volume.
+    seasons: jsonb('seasons').$type<number[]>(),
+    is4k: boolean('is_4k').notNull().default(false), // movies: is4kRequest; false for TV
+
+    // Derived status - single enum beats mirroring Ombi's four booleans
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .$type<(typeof ombiRequestStatusEnum)[number]>(),
+
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(), // Ombi requestedDate
+    availableAt: timestamp('available_at', { withTimezone: true }), // Ombi markedAsAvailable
+
+    // Raw Ombi requester identity - always retained, even when unattributed, so a
+    // future re-resolution (mapping change, new Tracearr user) can recover the match.
+    ombiUserId: varchar('ombi_user_id', { length: 64 }).notNull(), // Ombi account GUID
+    ombiUsername: varchar('ombi_username', { length: 255 }).notNull(),
+    ombiAlias: varchar('ombi_alias', { length: 255 }), // preferred fallback display name
+
+    // Resolved Tracearr identity (ADR 0002). Null = unattributed; history survives
+    // deletion of the Tracearr user (SET NULL, not CASCADE - design §7/§9).
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    matchMethod: varchar('match_method', { length: 20 }).$type<
+      (typeof ombiMatchMethodEnum)[number] | null
+    >(),
+
+    // Stamped with the sync run's start time on every upsert; drives the
+    // full-mirror prune (ADR 0004) - rows with a stale synced_at are deleted.
+    syncedAt: timestamp('synced_at', { withTimezone: true }).notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Idempotent upsert key (ADR 0004) - movie and TV-child id sequences are independent
+    uniqueIndex('ombi_requests_media_type_request_id_unique').on(
+      table.mediaType,
+      table.ombiRequestId
+    ),
+
+    // Requester-stats grouping (GET /stats/requesters)
+    index('ombi_requests_user_id_idx').on(table.userId),
+
+    // Re-resolution when a mapping changes; mapping UI per-requester counts
+    index('ombi_requests_ombi_user_id_idx').on(table.ombiUserId),
+
+    // Stats date ranges / earliest-requester pick
+    index('ombi_requests_requested_at_idx').on(table.requestedAt),
+
+    // Partial indexes for the query-time external-id join to library_items
+    // (mirrors library_items' own partial-index pattern, schema.ts:1025-1033)
+    index('ombi_requests_imdb_partial')
+      .on(table.imdbId)
+      .where(sql`${table.imdbId} IS NOT NULL`),
+    index('ombi_requests_tmdb_partial')
+      .on(table.tmdbId)
+      .where(sql`${table.tmdbId} IS NOT NULL`),
+    index('ombi_requests_tvdb_partial')
+      .on(table.tvdbId)
+      .where(sql`${table.tvdbId} IS NOT NULL`),
+  ]
+);
+
+export const ombiRequestsRelations = relations(ombiRequests, ({ one }) => ({
+  user: one(users, {
+    fields: [ombiRequests.userId],
+    references: [users.id],
+  }),
+}));
+
+/**
+ * Ombi User Mappings - manual owner overrides only (ADR 0002 §6.2 step 1)
+ *
+ * Automatic matches are computed at sync time and stored directly on
+ * ombi_requests rows; they need no mapping row here. This table exists only
+ * for the ~3 stragglers (and future drift) the auto-matcher can't resolve, or
+ * for the owner to explicitly force an account to stay unattributed
+ * (user_id = null).
+ */
+export const ombiUserMappings = pgTable('ombi_user_mappings', {
+  ombiUserId: varchar('ombi_user_id', { length: 64 }).primaryKey(), // one override per Ombi account
+  ombiUsername: varchar('ombi_username', { length: 255 }).notNull(), // snapshot for the mapping UI
+
+  // Target identity. null = "force unattributed" (owner explicitly says: never
+  // attribute this Ombi account to anyone). Cascade: deleting the target user
+  // deletes the override too, so the next sync falls back to auto-resolution
+  // rather than silently keeping a stale mapping to a gone user.
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const ombiUserMappingsRelations = relations(ombiUserMappings, ({ one }) => ({
+  user: one(users, {
+    fields: [ombiUserMappings.userId],
+    references: [users.id],
+  }),
+}));

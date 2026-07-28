@@ -67,6 +67,11 @@
       "jobStartFailed": "Error al iniciar el trabajo",
       "mobileAccessDisableFailed": "Error al deshabilitar el acceso móvil",
       "mobileAccessEnableFailed": "No se pudo habilitar el acceso móvil",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Error al generar el token de emparejado",
       "plexDirectUrl": "Las URLs plex.direct son direcciones repetidas que no se pueden utilizar aquí. Por favor, utilice una dirección IP directa o nombre de host en su lugar.",
       "plexUnlinkFailed": "Error al desvincular la cuenta de Plex",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Escanea el código QR con la aplicación móvil Tracearr para conectar",
         "title": "Acceso móvil habilitado"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Escanea el código QR con tu dispositivo móvil para emparejar",

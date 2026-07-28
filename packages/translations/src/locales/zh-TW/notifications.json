@@ -67,6 +67,11 @@
       "jobStartFailed": "启动任务失败",
       "mobileAccessDisableFailed": "禁用移动访问失败",
       "mobileAccessEnableFailed": "启用移动访问失败",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "生成配对令牌失败",
       "plexDirectUrl": "plex.direct URL是此处不能使用的中继地址。请使用直接IP地址或主机名。",
       "plexUnlinkFailed": "取消链接Plex帐户失败",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "使用 Tracearr 移动应用程序扫描二维码以连接",
         "title": "移动访问已启用"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "用您的移动设备扫描二维码进行配对",

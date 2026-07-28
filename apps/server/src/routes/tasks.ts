@@ -9,6 +9,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { RunningTask } from '@tracearr/shared';
 import { getAllActiveImports, getActiveImportProgress } from '../jobs/importQueue.js';
 import { getAllActiveLibrarySyncs } from '../jobs/librarySyncQueue.js';
+import { getAllActiveOmbiSyncs } from '../jobs/ombiSyncQueue.js';
 import { getMaintenanceProgress, getAllActiveMaintenanceJobs } from '../jobs/maintenanceQueue.js';
 import { db } from '../db/client.js';
 import { servers } from '../db/schema.js';
@@ -60,6 +61,28 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
         message: isRunning ? `Syncing ${serverName}...` : 'Waiting to start',
         startedAt: new Date(sync.createdAt).toISOString(),
         context: serverName,
+      });
+    }
+
+    // Get Ombi sync tasks (no per-server context - the connector is global)
+    const ombiSyncs = await getAllActiveOmbiSyncs();
+    for (const sync of ombiSyncs) {
+      const isRunning = sync.state === 'active';
+      const isScheduled = sync.triggeredBy === 'scheduled';
+
+      // Skip scheduled jobs that are just queued - only show when running
+      if (isScheduled && !isRunning) {
+        continue;
+      }
+
+      tasks.push({
+        id: sync.jobId,
+        type: 'ombi_sync',
+        name: 'Ombi Sync',
+        status: isRunning ? 'running' : 'pending',
+        progress: sync.progress,
+        message: isRunning ? 'Syncing Ombi requests...' : 'Waiting to start',
+        startedAt: new Date(sync.createdAt).toISOString(),
       });
     }
 

@@ -67,6 +67,11 @@
       "jobStartFailed": "Kan ikke starte jobb",
       "mobileAccessDisableFailed": "Kunne ikke deaktivere mobiltilgang",
       "mobileAccessEnableFailed": "Kunne ikke aktivere mobiltilgang",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "Kunne ikke generere par token",
       "plexDirectUrl": "plex.direkte URL-er er relay adresser som ikke kan brukes her. Vennligst bruk en direkte IP-adresse eller vertsnavn i stedet.",
       "plexUnlinkFailed": "Klarte ikke koble fra Plex konto",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "Skann QR-koden med Tracearr mobile app for å koble til",
         "title": "Mobile tilgang aktivert"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "Skann QR-koden med din mobile enhet for å pare",

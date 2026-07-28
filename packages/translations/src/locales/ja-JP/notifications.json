@@ -67,6 +67,11 @@
       "jobStartFailed": "ジョブの開始に失敗しました",
       "mobileAccessDisableFailed": "モバイルアクセスを無効にできませんでした",
       "mobileAccessEnableFailed": "モバイルアクセスを有効にできませんでした",
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "pairTokenGenerateFailed": "ペアトークンの生成に失敗しました",
       "plexDirectUrl": "plex.directのURLはここでは使用できないリレーアドレスです。代わりにIPアドレスまたはホスト名を使用してください。",
       "plexUnlinkFailed": "プレックスアカウントのリンクを解除できませんでした",
@@ -166,6 +171,15 @@
       "mobileAccessEnabled": {
         "message": "TracearrモバイルアプリでQRコードをスキャンして接続します",
         "title": "モバイルアクセスが有効です"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
         "message": "モバイル端末でQRコードをスキャンしてペアリングします",

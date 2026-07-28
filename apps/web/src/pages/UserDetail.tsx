@@ -13,6 +13,7 @@ import {
 import { TrustScoreBadge } from '@/components/users/TrustScoreBadge';
 import { UserLocationsCard } from '@/components/users/UserLocationsCard';
 import { UserDevicesCard } from '@/components/users/UserDevicesCard';
+import { UserRequestsCard } from '@/components/users/UserRequestsCard';
 import { EditUserNameDialog } from '@/components/users/EditUserNameDialog';
 import { EditTrustScoreDialog } from '@/components/users/EditTrustScoreDialog';
 import { SessionDetailSheet } from '@/components/history/SessionDetailSheet';
@@ -739,6 +740,10 @@ export function UserDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Ombi requests - "wasted usage" (requested but never watched by anyone).
+          Renders nothing at all when the Ombi connector isn't configured. */}
+      <UserRequestsCard userId={identityUserId} />
 
       {/* Locations and Devices */}
       <div className="grid gap-6 lg:grid-cols-2">

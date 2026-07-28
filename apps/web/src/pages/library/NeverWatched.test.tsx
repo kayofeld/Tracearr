@@ -128,6 +128,7 @@ function staleItemsReturn(overrides: Partial<ReturnType<typeof useLibraryStale>>
           watchCount: 0,
           category: 'never_watched',
           daysStale: 900,
+          requestedBy: null,
         },
       ],
       summary: {
@@ -296,5 +297,111 @@ describe('LibraryNeverWatched', () => {
     const lastItemsCall = itemsCalls[itemsCalls.length - 1];
     // useLibraryStale(serverIds, libraryId, staleDays, category, page, pageSize, mediaType, sortBy, sortOrder)
     expect(lastItemsCall?.[6]).toBe('movie');
+  });
+
+  describe('requestedBy attribution column', () => {
+    it('renders a muted dash when requestedBy is null (connector off or unmatched)', () => {
+      renderPage();
+
+      expect(screen.getByText('library.neverWatched.requestedByNone')).toBeInTheDocument();
+    });
+
+    it('renders the resolved Tracearr username and the other-requester badge when present', () => {
+      mockUseLibraryStale.mockReturnValue(
+        staleItemsReturn({
+          data: {
+            items: [
+              {
+                id: 'item-1',
+                serverId: 'srv-1',
+                serverName: 'Server A',
+                libraryId: 'lib-1',
+                libraryName: 'Movies',
+                title: 'Old Forgotten Movie',
+                mediaType: 'movie',
+                year: 2010,
+                fileSize: 12_000_000_000,
+                resolution: '1080p',
+                addedAt: '2023-01-01T00:00:00Z',
+                lastWatched: null,
+                watchCount: 0,
+                category: 'never_watched',
+                daysStale: 900,
+                requestedBy: {
+                  userId: 'user-1',
+                  username: 'alice',
+                  ombiUsername: 'alice.ombi',
+                  ombiAlias: null,
+                  requestedAt: '2023-01-01T00:00:00Z',
+                  otherRequesterCount: 2,
+                  source: 'ombi',
+                },
+              },
+            ],
+            summary: {
+              neverWatched: { count: 1, sizeBytes: 12_000_000_000 },
+              stale: { count: 0, sizeBytes: 0 },
+              total: { count: 1, sizeBytes: 12_000_000_000 },
+              threshold: { days: 90 },
+            },
+            pagination: { page: 1, pageSize: 20, total: 1 },
+          },
+        })
+      );
+
+      renderPage();
+
+      expect(screen.getByText('alice')).toBeInTheDocument();
+      expect(screen.getByText('library.neverWatched.requestedByOthers')).toBeInTheDocument();
+    });
+
+    it('falls back to the raw Ombi identity when unattributed to a Tracearr user', () => {
+      mockUseLibraryStale.mockReturnValue(
+        staleItemsReturn({
+          data: {
+            items: [
+              {
+                id: 'item-1',
+                serverId: 'srv-1',
+                serverName: 'Server A',
+                libraryId: 'lib-1',
+                libraryName: 'Movies',
+                title: 'Old Forgotten Movie',
+                mediaType: 'movie',
+                year: 2010,
+                fileSize: 12_000_000_000,
+                resolution: '1080p',
+                addedAt: '2023-01-01T00:00:00Z',
+                lastWatched: null,
+                watchCount: 0,
+                category: 'never_watched',
+                daysStale: 900,
+                requestedBy: {
+                  userId: null,
+                  username: null,
+                  ombiUsername: 'raw-requester',
+                  ombiAlias: 'Friendly Name',
+                  requestedAt: '2023-01-01T00:00:00Z',
+                  otherRequesterCount: 0,
+                  source: 'ombi',
+                },
+              },
+            ],
+            summary: {
+              neverWatched: { count: 1, sizeBytes: 12_000_000_000 },
+              stale: { count: 0, sizeBytes: 0 },
+              total: { count: 1, sizeBytes: 12_000_000_000 },
+              threshold: { days: 90 },
+            },
+            pagination: { page: 1, pageSize: 20, total: 1 },
+          },
+        })
+      );
+
+      renderPage();
+
+      expect(screen.getByText('Friendly Name')).toBeInTheDocument();
+      expect(screen.queryByText('library.neverWatched.requestedByOthers')).not.toBeInTheDocument();
+    });
   });
 });

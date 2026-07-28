@@ -23,11 +23,23 @@ export {
   useBandwidthDaily,
   useBandwidthTopUsers,
   useBandwidthSummary,
+  // Ombi requester stats
+  useRequesterStats,
   type LocationStatsFilters,
   type StatsTimeRange,
   type EngagementStatsOptions,
   type ShowStatsOptions,
 } from './useStats';
+
+// Ombi connector hooks (settings, sync, requester mappings)
+export {
+  useOmbiStatus,
+  useOmbiMappings,
+  useOmbiSync,
+  useOmbiPurge,
+  useUpsertOmbiMapping,
+  useRevertOmbiMapping,
+} from './useOmbi';
 
 // Session hooks
 export { useSessions, useActiveSessions, useSession, useBulkDeleteSessions } from './useSessions';

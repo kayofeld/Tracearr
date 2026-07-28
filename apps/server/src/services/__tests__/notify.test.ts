@@ -53,6 +53,8 @@ describe('NotificationManager', () => {
     pollerIntervalMs: 15000,
     tautulliUrl: null,
     tautulliApiKey: null,
+    ombiUrl: null,
+    ombiApiKey: null,
     externalUrl: null,
     trustProxy: false,
     mobileEnabled: false,

@@ -48,7 +48,13 @@ vi.mock('../../services/geoip.js', () => ({
   },
 }));
 
+// Mock the Ombi sync queue's cache-invalidation helper (OMB-4)
+vi.mock('../../jobs/ombiSyncQueue.js', () => ({
+  invalidateOmbiCaches: vi.fn(),
+}));
+
 import { getAllSettings, setSettings } from '../../services/settings.js';
+import { invalidateOmbiCaches } from '../../jobs/ombiSyncQueue.js';
 import { settingsRoutes } from '../settings.js';
 
 const mockAllSettings: Settings = {
@@ -68,6 +74,8 @@ const mockAllSettings: Settings = {
   usePlexGeoip: false,
   tautulliUrl: 'http://localhost:8181',
   tautulliApiKey: 'secret-api-key',
+  ombiUrl: null,
+  ombiApiKey: null,
   externalUrl: 'https://tracearr.example.com',
   trustProxy: true,
   mobileEnabled: false,
@@ -89,6 +97,7 @@ async function buildTestApp(authUser: AuthUser): Promise<FastifyInstance> {
   app.decorate('authenticate', async (request: unknown) => {
     (request as { user: AuthUser }).user = authUser;
   });
+  app.decorate('redis', {} as never);
 
   await app.register(settingsRoutes, { prefix: '/settings' });
   return app;
@@ -432,6 +441,59 @@ describe('Settings Routes', () => {
       });
 
       expect(response.statusCode).toBe(200);
+    });
+
+    // ==========================================================================
+    // Ombi cache invalidation on connect/disconnect (OMB-4)
+    // ==========================================================================
+
+    it('invalidates Ombi caches when ombiUrl/ombiApiKey are cleared (disconnect)', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getAllSettings).mockResolvedValue({
+        ...mockAllSettings,
+        ombiUrl: null,
+        ombiApiKey: null,
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { ombiUrl: null, ombiApiKey: null },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(invalidateOmbiCaches).toHaveBeenCalledTimes(1);
+    });
+
+    it('invalidates Ombi caches when ombiUrl/ombiApiKey are set (connect)', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getAllSettings).mockResolvedValue({
+        ...mockAllSettings,
+        ombiUrl: 'http://ombi.local',
+        ombiApiKey: 'key',
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { ombiUrl: 'http://ombi.local', ombiApiKey: 'key' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(invalidateOmbiCaches).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not invalidate Ombi caches for unrelated setting updates', async () => {
+      app = await buildTestApp(ownerUser);
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { allowGuestAccess: true },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(invalidateOmbiCaches).not.toHaveBeenCalled();
     });
   });
 });
