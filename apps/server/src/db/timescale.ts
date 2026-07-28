@@ -807,8 +807,27 @@ async function createLibraryAggregates(): Promise<void> {
   }
 }
 
-/** Create continuous aggregates for dashboard performance */
-async function createContinuousAggregates(): Promise<void> {
+/** Result of attempting to create a single continuous aggregate */
+interface AggregateCreationResult {
+  name: string;
+  created: boolean;
+  error?: string;
+}
+
+/**
+ * Create continuous aggregates for dashboard performance.
+ *
+ * Each aggregate is created independently: a failure creating one (a
+ * transient lock, a permissions issue, etc.) must not prevent the others
+ * from being created, and must not propagate out and abort the rest of
+ * initTimescaleDB() - the caller catches and continues, so an unguarded
+ * throw here would silently skip compression, the partial/content indexes,
+ * and the engagement views too (the same silent-abort class the toolkit
+ * guard fixes). daily_content_engagement is created first; the existing
+ * exists-check before ensureEngagementViews() decides whether the views can
+ * be built, independent of whether every other aggregate succeeded.
+ */
+async function createContinuousAggregates(): Promise<AggregateCreationResult[]> {
   const definitions = getAggregateDefinitions();
 
   // Drop old unused aggregates
@@ -816,16 +835,41 @@ async function createContinuousAggregates(): Promise<void> {
   await db.execute(sql`DROP MATERIALIZED VIEW IF EXISTS daily_play_patterns CASCADE`);
   await db.execute(sql`DROP MATERIALIZED VIEW IF EXISTS hourly_play_patterns CASCADE`);
 
+  const results: AggregateCreationResult[] = [];
   for (const def of definitions) {
-    await createAggregate(def);
+    try {
+      await createAggregate(def);
+      results.push({ name: def.name, created: true });
+    } catch (err) {
+      console.error(
+        `[TimescaleDB] Failed to create aggregate ${def.name}, continuing with remaining aggregates:`,
+        err
+      );
+      results.push({
+        name: def.name,
+        created: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
+  return results;
 }
 
-/** Set up refresh policies for continuous aggregates */
-async function setupRefreshPolicies(): Promise<void> {
+/**
+ * Set up refresh policies for continuous aggregates.
+ * Pass `aggregateNames` to restrict to a subset (e.g. only the aggregates
+ * that were just successfully created). Each policy is added independently -
+ * a failure on one must not prevent the others or abort the caller.
+ */
+async function setupRefreshPolicies(aggregateNames?: Set<string>): Promise<void> {
   const definitions = getAggregateDefinitions();
   for (const def of definitions) {
-    await addRefreshPolicy(def);
+    if (aggregateNames && !aggregateNames.has(def.name)) continue;
+    try {
+      await addRefreshPolicy(def);
+    } catch (err) {
+      console.warn(`[TimescaleDB] Failed to add refresh policy for ${def.name}:`, err);
+    }
   }
 }
 
@@ -1708,10 +1752,23 @@ export async function initTimescaleDB(): Promise<{
       );
     }
   } else if (missingAggregates.length > 0) {
-    await createContinuousAggregates();
-    await setupRefreshPolicies();
+    // Per-aggregate isolation (see createContinuousAggregates): one aggregate
+    // failing to create must not abort init before the compression/index/
+    // engagement-view steps below run.
+    const results = await createContinuousAggregates();
+    const createdNames = new Set(results.filter((r) => r.created).map((r) => r.name));
+    await setupRefreshPolicies(createdNames);
     await setStoredSchemaVersion(AGGREGATE_SCHEMA_VERSION);
-    actions.push(`Created continuous aggregates: ${missingAggregates.join(', ')}`);
+
+    const succeeded = results.filter((r) => r.created).map((r) => r.name);
+    if (succeeded.length > 0) {
+      actions.push(`Created continuous aggregates: ${succeeded.join(', ')}`);
+    }
+    for (const failure of results.filter((r) => !r.created)) {
+      actions.push(
+        `Warning: Failed to create aggregate ${failure.name}: ${failure.error} - continuing with remaining setup`
+      );
+    }
   } else {
     // Ensure version is stored even if aggregates already exist
     if (storedVersion === 0) {
@@ -1731,20 +1788,37 @@ export async function initTimescaleDB(): Promise<{
     }
   }
 
-  // Check and enable compression
-  const hasCompression = await isCompressionEnabled();
-  if (!hasCompression) {
-    await enableCompression();
-    actions.push('Enabled compression on sessions');
-  } else {
-    // Check if compression settings need to be fixed (orderby column limit issue)
-    const orderbyCorrect = await isCompressionOrderbyCorrect();
-    if (!orderbyCorrect) {
-      await fixCompressionSettings();
-      actions.push('Fixed compression settings (orderby column limit)');
+  // Check and enable compression.
+  // Compression is an optimization, not a prerequisite for the partial/content
+  // indexes or the engagement views below - so, like the toolkit block above,
+  // a failure here (e.g. ALTER TABLE ... SET (timescaledb.compress ...)
+  // throwing "functionality not supported under the current license" when the
+  // Apache-license switch above itself failed under a least-privilege role)
+  // must not abort the rest of init.
+  try {
+    const hasCompression = await isCompressionEnabled();
+    if (!hasCompression) {
+      await enableCompression();
+      actions.push('Enabled compression on sessions');
     } else {
-      actions.push('Compression already enabled with correct settings');
+      // Check if compression settings need to be fixed (orderby column limit issue)
+      const orderbyCorrect = await isCompressionOrderbyCorrect();
+      if (!orderbyCorrect) {
+        await fixCompressionSettings();
+        actions.push('Fixed compression settings (orderby column limit)');
+      } else {
+        actions.push('Compression already enabled with correct settings');
+      }
     }
+  } catch (err) {
+    console.warn(
+      '[TimescaleDB] Could not enable/fix compression (optional - continuing without it). ' +
+        'If you see "functionality not supported under the current license", set ' +
+        "timescaledb.license = 'timescale' in your PostgreSQL configuration. " +
+        'See: https://docs.timescale.com/about/latest/timescaledb-editions/',
+      err
+    );
+    actions.push(`Compression: skipped (${err instanceof Error ? err.message : String(err)})`);
   }
 
   // Create partial indexes for optimized filtered queries
