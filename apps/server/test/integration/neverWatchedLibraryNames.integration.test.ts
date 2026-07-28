@@ -106,9 +106,12 @@ describe('never-watched by-library display names', () => {
     await insertMovie(serverB.id, sharedLibraryId, 'rk-b1', 'Never Watched B1');
 
     const app = await buildApp();
+    // serverIds is a single UUID or REPEATED params (serverIdsQuerySchema is a
+    // union of uuid and uuid[]) - never a comma-separated list, which fails
+    // uuid validation and 400s before any SQL runs.
     const response = await app.inject({
       method: 'GET',
-      url: `/never-watched?serverIds=${serverA.id},${serverB.id}`,
+      url: `/never-watched?serverIds=${serverA.id}&serverIds=${serverB.id}`,
     });
     await app.close();
 
