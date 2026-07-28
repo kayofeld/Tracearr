@@ -1546,13 +1546,30 @@ export async function initTimescaleDB(): Promise<{
     );
   }
 
-  // Enable Toolkit if available - not using any hyperfunctions yet but might later
+  // Enable Toolkit if available - not using any hyperfunctions yet but might later.
+  // Toolkit is strictly optional, so a failure here must never abort init: everything
+  // below (hypertable conversion, continuous aggregates, engagement views) is mandatory.
+  // "Available on the system" only means the extension files are installed - creating it
+  // still needs superuser ("must be superuser to create a base type"), which a
+  // least-privilege application role does not have. Without this guard that error
+  // propagated out of initTimescaleDB() and silently cost the install its engagement
+  // views, surfacing much later as a failed query on /library/watch.
   const toolkitAvailable = await isToolkitAvailableOnSystem();
   if (toolkitAvailable) {
     const toolkitInstalled = await isToolkitInstalled();
     if (!toolkitInstalled) {
-      await db.execute(sql`CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit`);
-      actions.push('TimescaleDB Toolkit extension enabled');
+      try {
+        await db.execute(sql`CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit`);
+        actions.push('TimescaleDB Toolkit extension enabled');
+      } catch (err) {
+        console.warn(
+          '[TimescaleDB] Toolkit is available but could not be enabled (creating it ' +
+            'requires superuser). This is optional and nothing currently depends on it - ' +
+            'continuing with standard aggregates.',
+          err
+        );
+        actions.push('TimescaleDB Toolkit: skipped (requires superuser - optional)');
+      }
     } else {
       actions.push('TimescaleDB Toolkit extension already enabled');
     }
@@ -1761,6 +1778,16 @@ export async function initTimescaleDB(): Promise<{
       } else {
         actions.push('Engagement views already exist');
       }
+    } else {
+      // Don't skip silently: the engagement views back /library/watch and
+      // /library/patterns, so without them those endpoints fail on a missing
+      // relation with no earlier hint of why.
+      console.warn(
+        '[TimescaleDB] Continuous aggregate "daily_content_engagement" is missing, so the ' +
+          'engagement views were not created. Watch/patterns analytics will be unavailable ' +
+          'until TimescaleDB initializes successfully.'
+      );
+      actions.push('Engagement views: skipped (daily_content_engagement aggregate missing)');
     }
   } catch (err) {
     console.warn('Failed to create engagement views:', err);
