@@ -4,6 +4,24 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v1.9.0 — Seerr connector, and email-free sign-up
+
+- **Seerr connector** (seerr-team/seerr), a sibling to Ombi: point it at your instance and request
+  history is mirrored so library items can be attributed to whoever asked for them. Seerr sends a
+  media-server user id with every request, so requesters resolve automatically - on the reference
+  instance all 108 requests attributed with no manual mapping needed.
+- Both connectors now share one table with a `source` column, so the statistics, the "Requested By"
+  column and the requester page span them: one person requesting from both is one row, an item
+  requested in both counts once, and anything unmatched stays in an explicit unattributed bucket.
+  Existing Ombi data migrates in place.
+- **Sign-up no longer requires an email address.** Better Auth's own sign-up endpoint mandates one,
+  so this adds a username sign-up path built on its internals - no placeholder addresses are stored,
+  and supplying an email is still supported.
+- Hardening from review: sign-up is now atomic, so a database blip mid-registration can no longer
+  leave an account with no password and lock you out; rate limiting can no longer be disabled by an
+  environment variable; a compromised request server can no longer drive the sync out of memory; and
+  Seerr status 4 now correctly reads as failed rather than approved.
+
 ## v1.8.1 — Docker images for the fork
 
 - The fork now **publishes its own container images** to `ghcr.io/kayofeld/tracearr` (linux/amd64 +
