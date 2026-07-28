@@ -32,7 +32,9 @@
 >
 > The fork tracks upstream via the `upstream` remote but ships independently: releases, the in-app update
 > checker, and the self-update button all follow **kayofeld/Tracearr** (configurable via
-> `TRACEARR_UPDATE_REPO`). The fork does **not** publish its own Docker images — run it from source.
+> `TRACEARR_UPDATE_REPO`). It publishes its own Docker images at `ghcr.io/kayofeld/tracearr`, so both
+> source and container deployments get the fork's features. See
+> [Docker / Portainer](#docker--portainer-fork-images).
 
 ---
 
