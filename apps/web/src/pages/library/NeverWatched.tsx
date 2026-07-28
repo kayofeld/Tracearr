@@ -448,15 +448,14 @@ export function LibraryNeverWatched() {
             <div className="divide-border divide-y rounded-md border">
               {stats.data.byLibrary.map((row) => {
                 const widthPct = Math.max((row.count / maxLibraryCount) * 100, 4);
-                // `libraryName` is actually the raw library key (a Plex library
-                // id, or a Jellyfin/Emby GUID) - there's no human-readable
-                // library display name in the DB. Prefix with the server name
-                // when multiple servers are in play so two libraries never
-                // render an identical label; label it explicitly as a library
-                // key otherwise so we don't pass off a raw id as a real name.
+                // `libraryName` is now a real display name (falling back to the
+                // raw server-side library key server-side only when a library
+                // hasn't been re-synced yet). Guard against an empty/missing
+                // value so we never render a blank label.
+                const libraryName = row.libraryName || t('common:labels.unknown');
                 const libraryLabel = isMultiServer
-                  ? `${row.serverName} · ${row.libraryName}`
-                  : t('library.neverWatched.libraryKeyLabel', { id: row.libraryName });
+                  ? `${row.serverName} · ${libraryName}`
+                  : libraryName;
                 return (
                   <div
                     key={`${row.serverId}-${row.libraryId}`}

@@ -484,6 +484,13 @@
       "when": 1785265909003,
       "tag": "0068_generalize_media_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1785276421708,
+      "tag": "0069_add_libraries_table",
+      "breakpoints": true
     }
   ]
 }

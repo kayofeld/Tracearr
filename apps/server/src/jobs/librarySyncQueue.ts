@@ -57,6 +57,7 @@ async function invalidateLibraryCaches(serverId: string): Promise<void> {
     `${REDIS_KEYS.LIBRARY_STORAGE}*`,
     `${REDIS_KEYS.LIBRARY_DUPLICATES}*`,
     `${REDIS_KEYS.LIBRARY_STALE}*`,
+    `${REDIS_KEYS.LIBRARY_NEVER_WATCHED}*`,
     `${REDIS_KEYS.LIBRARY_WATCH}*`,
     `${REDIS_KEYS.LIBRARY_COMPLETION}*`,
     `${REDIS_KEYS.LIBRARY_PATTERNS}*`,

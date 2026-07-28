@@ -11,7 +11,12 @@
 
 import { eq, and, inArray, sql, gte, lt, desc } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { servers, libraryItems, librarySnapshots } from '../db/schema.js';
+import {
+  servers,
+  libraryItems,
+  librarySnapshots,
+  libraries as librariesTable,
+} from '../db/schema.js';
 import { createMediaServerClient, type MediaLibraryItem } from './mediaServer/index.js';
 import type { LibrarySyncProgress } from '@tracearr/shared';
 import { REDIS_KEYS, RESOLUTION_TIERS, resolutionTierRank } from '@tracearr/shared';
@@ -128,6 +133,21 @@ export class LibrarySyncService {
       return true;
     });
     const totalLibraries = libraries.length;
+
+    // Persist display names/types for the libraries we're about to sync, so a
+    // rename on the media server propagates and the Never Watched "by library"
+    // breakdown can show a real name instead of the raw library_id. Filtered-out
+    // types (photo/boxsets/playlists, above) are intentionally NOT persisted here:
+    // they never get item rows in library_items, so nothing ever joins against
+    // their name and a stray row would just be dead data to clean up later.
+    try {
+      await this.upsertLibraries(serverId, libraries);
+    } catch (err) {
+      console.warn(
+        `[LibrarySync] Failed to persist library display names for ${server.name}:`,
+        err
+      );
+    }
 
     // Report initial progress
     if (onProgress) {
@@ -748,6 +768,39 @@ export class LibrarySyncService {
   }
 
   /**
+   * Upsert display name + type for the libraries about to be synced.
+   *
+   * Conflict target: (server_id, library_id) — matches libraries_server_library_unique.
+   * A rename on the media server updates the row in place; the library_id
+   * (server-side section key) never changes for the lifetime of a library.
+   */
+  async upsertLibraries(
+    serverId: string,
+    libs: Array<{ id: string; name: string; type: string }>
+  ): Promise<void> {
+    if (libs.length === 0) return;
+
+    await db
+      .insert(librariesTable)
+      .values(
+        libs.map((lib) => ({
+          serverId,
+          libraryId: lib.id,
+          name: lib.name,
+          type: lib.type,
+        }))
+      )
+      .onConflictDoUpdate({
+        target: [librariesTable.serverId, librariesTable.libraryId],
+        set: {
+          name: sql`excluded.name`,
+          type: sql`excluded.type`,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  /**
    * Upsert items to libraryItems table
    *
    * Uses Drizzle's onConflictDoUpdate for atomic bulk upserts.
@@ -1207,17 +1260,27 @@ export class LibrarySyncService {
       .from(librarySnapshots)
       .where(eq(librarySnapshots.serverId, serverId));
 
+    // Also check the libraries display-name table as a source of orphans: an
+    // empty library that only ever got a name persisted (no items, no
+    // snapshot) would otherwise never be detected as orphaned and its stale
+    // name would linger forever.
+    const nameLibraryRows = await db
+      .selectDistinct({ libraryId: librariesTable.libraryId })
+      .from(librariesTable)
+      .where(eq(librariesTable.serverId, serverId));
+
     // Combine and subtract current library IDs to find orphans
     const allDbLibraryIds = new Set<string>();
     for (const row of itemLibraryRows) allDbLibraryIds.add(row.libraryId);
     for (const row of snapshotLibraryRows) allDbLibraryIds.add(row.libraryId);
+    for (const row of nameLibraryRows) allDbLibraryIds.add(row.libraryId);
 
     const orphanedIds = [...allDbLibraryIds].filter((id) => !currentLibraryIds.has(id));
     if (orphanedIds.length === 0) {
       return { removedLibraryIds: [] };
     }
 
-    // Delete orphaned items and snapshots per library.
+    // Delete orphaned items, snapshots, and the persisted display name per library.
     const cleanedIds: string[] = [];
     let deletedSnapshots = false;
 
@@ -1231,6 +1294,12 @@ export class LibrarySyncService {
           .delete(librarySnapshots)
           .where(
             and(eq(librarySnapshots.serverId, serverId), eq(librarySnapshots.libraryId, libraryId))
+          );
+
+        await db
+          .delete(librariesTable)
+          .where(
+            and(eq(librariesTable.serverId, serverId), eq(librariesTable.libraryId, libraryId))
           );
 
         cleanedIds.push(libraryId);

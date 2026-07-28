@@ -152,7 +152,6 @@
       "filterSeries": "Series",
       "itemsDesc": "Sorted with the oldest additions first",
       "itemsTitle": "Never-Watched Items",
-      "libraryKeyLabel": "Library {{id}}",
       "noOldestData": "No data yet",
       "onServerFor": "on server for {{duration}}",
       "requestedByNone": "—",
