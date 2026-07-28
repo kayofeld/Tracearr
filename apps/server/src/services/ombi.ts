@@ -311,8 +311,12 @@ export class OmbiService {
   }
 
   /** Strips the API key from any string before it can reach a log line or an
-   * error surfaced to the client (ADR 0005 - the key must never leak). */
-  private redact(message: string): string {
+   * error surfaced to the client (ADR 0005 - the key must never leak).
+   * Public (SEERR-04 sibling fix) so jobs/ombiSyncQueue.ts can redact the
+   * sync path's error messages too - classifyError() below is only used by
+   * testConnection(), so redaction was previously not literally guaranteed
+   * on every failure path. */
+  redact(message: string): string {
     return this.apiKey ? message.split(this.apiKey).join('<redacted>') : message;
   }
 

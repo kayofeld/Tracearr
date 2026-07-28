@@ -29,7 +29,7 @@ import { getRedisPrefix, REDIS_KEYS, WS_EVENTS } from '@tracearr/shared';
 import type { OmbiSyncProgressEvent } from '@tracearr/shared';
 import { isMaintenance } from '../serverState.js';
 import { db } from '../db/client.js';
-import { ombiRequests, ombiUserMappings, serverUsers, users } from '../db/schema.js';
+import { mediaRequests, mediaRequestUserMappings, serverUsers, users } from '../db/schema.js';
 import { getPubSubService } from '../services/cache.js';
 import { getOmbiSettings, getSetting, setSetting } from '../services/settings.js';
 import type { OmbiSyncStatusInternal } from '../services/settings.js';
@@ -95,8 +95,12 @@ export interface RequesterResolver {
 export async function buildRequesterResolver(): Promise<RequesterResolver> {
   const [mappingRows, serverUserRows, userRows] = await Promise.all([
     db
-      .select({ ombiUserId: ombiUserMappings.ombiUserId, userId: ombiUserMappings.userId })
-      .from(ombiUserMappings),
+      .select({
+        ombiUserId: mediaRequestUserMappings.sourceUserId,
+        userId: mediaRequestUserMappings.userId,
+      })
+      .from(mediaRequestUserMappings)
+      .where(eq(mediaRequestUserMappings.source, 'ombi')),
     db
       .select({ plexAccountId: serverUsers.plexAccountId, userId: serverUsers.userId })
       .from(serverUsers)
@@ -161,6 +165,22 @@ interface PhaseResult {
   error: string | null;
 }
 
+// CR-3 sibling fix (jobs/seerrSyncQueue.ts): node-postgres caps a single bind
+// message at 65,535 parameters; each row here binds ~20 values, so one
+// unchunked multi-row INSERT hard-fails around ~3,200 requests per phase.
+// Less urgent here (movies/tv are independent phases, so the practical
+// per-phase row count is roughly half Seerr's single-phase count), but the
+// same exposure exists, so fixed the same way.
+const INSERT_CHUNK_SIZE = 1000;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 function emptyPhase(error: string | null = null): PhaseResult {
   return { ok: error === null, processed: 0, skipped: 0, pruned: 0, error };
 }
@@ -178,8 +198,9 @@ async function upsertPhase(
     const rows = records.map((r) => {
       const resolution = resolver.resolve(r.requester);
       return {
-        ombiRequestId: r.ombiRequestId,
-        ombiParentRequestId: r.ombiParentRequestId,
+        source: 'ombi' as const,
+        sourceRequestId: r.ombiRequestId,
+        sourceParentRequestId: r.ombiParentRequestId,
         mediaType: r.mediaType,
         title: r.title,
         releaseYear: r.releaseYear,
@@ -191,9 +212,9 @@ async function upsertPhase(
         status: r.status,
         requestedAt: r.requestedAt,
         availableAt: r.availableAt,
-        ombiUserId: r.requester.ombiUserId,
-        ombiUsername: r.requester.ombiUsername,
-        ombiAlias: r.requester.ombiAlias,
+        sourceUserId: r.requester.ombiUserId,
+        sourceUsername: r.requester.ombiUsername,
+        sourceAlias: r.requester.ombiAlias,
         userId: resolution.userId,
         matchMethod: resolution.matchMethod,
         syncedAt: runStartedAt,
@@ -201,50 +222,66 @@ async function upsertPhase(
     });
 
     await db.transaction(async (tx) => {
-      await tx
-        .insert(ombiRequests)
-        .values(rows)
-        .onConflictDoUpdate({
-          target: [ombiRequests.mediaType, ombiRequests.ombiRequestId],
-          set: {
-            ombiParentRequestId: sqlExcluded('ombi_parent_request_id'),
-            title: sqlExcluded('title'),
-            releaseYear: sqlExcluded('release_year'),
-            imdbId: sqlExcluded('imdb_id'),
-            tmdbId: sqlExcluded('tmdb_id'),
-            tvdbId: sqlExcluded('tvdb_id'),
-            seasons: sqlExcluded('seasons'),
-            is4k: sqlExcluded('is_4k'),
-            status: sqlExcluded('status'),
-            requestedAt: sqlExcluded('requested_at'),
-            availableAt: sqlExcluded('available_at'),
-            ombiUserId: sqlExcluded('ombi_user_id'),
-            ombiUsername: sqlExcluded('ombi_username'),
-            ombiAlias: sqlExcluded('ombi_alias'),
-            userId: sqlExcluded('user_id'),
-            matchMethod: sqlExcluded('match_method'),
-            syncedAt: sqlExcluded('synced_at'),
-            updatedAt: new Date(),
-          },
-        });
+      // Chunked (CR-3 sibling fix) - all chunks run inside this one
+      // transaction, same as the prune below: still all-or-nothing per phase.
+      for (const rowChunk of chunk(rows, INSERT_CHUNK_SIZE)) {
+        await tx
+          .insert(mediaRequests)
+          .values(rowChunk)
+          .onConflictDoUpdate({
+            target: [mediaRequests.source, mediaRequests.mediaType, mediaRequests.sourceRequestId],
+            set: {
+              sourceParentRequestId: sqlExcluded('source_parent_request_id'),
+              title: sqlExcluded('title'),
+              releaseYear: sqlExcluded('release_year'),
+              imdbId: sqlExcluded('imdb_id'),
+              tmdbId: sqlExcluded('tmdb_id'),
+              tvdbId: sqlExcluded('tvdb_id'),
+              seasons: sqlExcluded('seasons'),
+              is4k: sqlExcluded('is_4k'),
+              status: sqlExcluded('status'),
+              requestedAt: sqlExcluded('requested_at'),
+              availableAt: sqlExcluded('available_at'),
+              sourceUserId: sqlExcluded('source_user_id'),
+              sourceUsername: sqlExcluded('source_username'),
+              sourceAlias: sqlExcluded('source_alias'),
+              userId: sqlExcluded('user_id'),
+              matchMethod: sqlExcluded('match_method'),
+              syncedAt: sqlExcluded('synced_at'),
+              updatedAt: new Date(),
+            },
+          });
+      }
 
       if (allowPrune) {
         const deleted = await tx
-          .delete(ombiRequests)
+          .delete(mediaRequests)
           .where(
-            and(eq(ombiRequests.mediaType, mediaType), lt(ombiRequests.syncedAt, runStartedAt))
+            and(
+              eq(mediaRequests.source, 'ombi'),
+              eq(mediaRequests.mediaType, mediaType),
+              lt(mediaRequests.syncedAt, runStartedAt)
+            )
           )
-          .returning({ id: ombiRequests.id });
+          .returning({ id: mediaRequests.id });
         pruned = deleted.length;
       }
     });
   } else if (allowPrune) {
     // Zero live records this run (e.g. the owner deleted everything in Ombi) -
-    // every existing row of this type is now stale and should be pruned too.
+    // every existing row of this type, FOR THIS SOURCE, is now stale and should
+    // be pruned too. Scoped to source='ombi' so a Seerr-only run never touches
+    // Ombi rows and vice versa.
     const deleted = await db
-      .delete(ombiRequests)
-      .where(and(eq(ombiRequests.mediaType, mediaType), lt(ombiRequests.syncedAt, runStartedAt)))
-      .returning({ id: ombiRequests.id });
+      .delete(mediaRequests)
+      .where(
+        and(
+          eq(mediaRequests.source, 'ombi'),
+          eq(mediaRequests.mediaType, mediaType),
+          lt(mediaRequests.syncedAt, runStartedAt)
+        )
+      )
+      .returning({ id: mediaRequests.id });
     pruned = deleted.length;
   }
 
@@ -261,7 +298,8 @@ async function runPhase(
   fetcher: () => Promise<{ records: OmbiSyncRecord[]; skipped: number }>,
   mediaType: 'movie' | 'tv',
   resolver: RequesterResolver,
-  runStartedAt: Date
+  runStartedAt: Date,
+  ombi: OmbiService
 ): Promise<PhaseResult> {
   try {
     const { records, skipped } = await fetcher();
@@ -277,7 +315,10 @@ async function runPhase(
     );
     return { ok: true, processed, skipped, pruned, error: null };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
+    // Redacted (SEERR-04 sibling fix) - same reasoning as jobs/seerrSyncQueue.ts:
+    // this message is persisted to ombiSyncStatus.lastError and surfaced by
+    // GET /ombi/status, so the redaction invariant must hold here too.
+    const message = ombi.redact(error instanceof Error ? error.message : 'Unknown error');
     console.warn(`[OmbiSync] ${mediaType} phase failed: ${message}`);
     return { ok: false, processed: 0, skipped: 0, pruned: 0, error: message };
   }
@@ -322,10 +363,16 @@ export async function runOmbiSync(
   const resolver = await buildRequesterResolver();
 
   onProgress?.({ jobId, phase: 'movies', progress: null });
-  const moviePhase = await runPhase(() => ombi.getMovieRequests(), 'movie', resolver, runStartedAt);
+  const moviePhase = await runPhase(
+    () => ombi.getMovieRequests(),
+    'movie',
+    resolver,
+    runStartedAt,
+    ombi
+  );
 
   onProgress?.({ jobId, phase: 'tv', progress: null });
-  const tvPhase = await runPhase(() => ombi.getTvRequests(), 'tv', resolver, runStartedAt);
+  const tvPhase = await runPhase(() => ombi.getTvRequests(), 'tv', resolver, runStartedAt, ombi);
 
   onProgress?.({ jobId, phase: 'resolve', progress: null });
 

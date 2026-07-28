@@ -41,6 +41,16 @@ export {
   useRevertOmbiMapping,
 } from './useOmbi';
 
+// Seerr connector hooks (settings, sync, requester mappings) - sibling to Ombi
+export {
+  useSeerrStatus,
+  useSeerrMappings,
+  useSeerrSync,
+  useSeerrPurge,
+  useUpsertSeerrMapping,
+  useRevertSeerrMapping,
+} from './useSeerr';
+
 // Session hooks
 export { useSessions, useActiveSessions, useSession, useBulkDeleteSessions } from './useSessions';
 export { useTerminateSession } from './useTerminateSession';

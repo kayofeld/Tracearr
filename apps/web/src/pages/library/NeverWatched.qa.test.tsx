@@ -30,6 +30,7 @@ vi.mock('@/hooks/queries', () => ({
   useLibraryNeverWatched: vi.fn(),
   useLibraryStale: vi.fn(),
   useLibraryStatus: vi.fn(),
+  useRequesterStats: vi.fn(),
 }));
 
 vi.mock('@/hooks/useServer', () => ({
@@ -47,12 +48,18 @@ vi.mock('@/components/charts', () => ({
 vi.mock('highcharts', () => ({ default: {} }));
 vi.mock('highcharts-react-official', () => ({ HighchartsReact: () => null }));
 
-import { useLibraryNeverWatched, useLibraryStale, useLibraryStatus } from '@/hooks/queries';
+import {
+  useLibraryNeverWatched,
+  useLibraryStale,
+  useLibraryStatus,
+  useRequesterStats,
+} from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 
 const mockUseLibraryNeverWatched = vi.mocked(useLibraryNeverWatched);
 const mockUseLibraryStale = vi.mocked(useLibraryStale);
 const mockUseLibraryStatus = vi.mocked(useLibraryStatus);
+const mockUseRequesterStats = vi.mocked(useRequesterStats);
 const mockUseServer = vi.mocked(useServer);
 
 function serverReturn() {
@@ -151,6 +158,13 @@ describe('LibraryNeverWatched (QA supplemental)', () => {
     mockUseLibraryStatus.mockReturnValue(statusReturn());
     mockUseLibraryNeverWatched.mockReturnValue(statsReturn());
     mockUseLibraryStale.mockReturnValue(itemsReturn());
+    mockUseRequesterStats.mockReturnValue({
+      data: { configuredSources: { ombi: true, seerr: false } },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useRequesterStats>);
   });
 
   it('queries the never_watched category with default sort added_at asc, page 1, pageSize 20', () => {

@@ -800,6 +800,8 @@ export const updateSettingsSchema = z.object({
   tautulliApiKey: nullableStringSchema().optional(),
   ombiUrl: nullableUrlSchema.optional(),
   ombiApiKey: nullableStringSchema().optional(),
+  seerrUrl: nullableUrlSchema.optional(),
+  seerrApiKey: nullableStringSchema().optional(),
   // Network/access settings
   externalUrl: nullableUrlSchema.optional(),
   trustProxy: z.boolean().optional(),
@@ -1121,6 +1123,17 @@ export const requesterStatsQuerySchema = z.object({
   mediaType: z.enum(['all', 'movie', 'tv']).default('all'),
 });
 
+// Seerr connector schemas (contract: docs/architecture/seerr-api-contract.md)
+export const seerrTestConnectionSchema = z.object({
+  url: permissiveUrlSchema,
+  apiKey: z.string().min(1).max(255),
+});
+
+export const seerrMappingUpsertSchema = z.object({
+  // null forces "unattributed" - the owner deliberately ignoring this requester.
+  userId: z.uuid().nullable(),
+});
+
 // Library watch statistics query schema
 export const libraryWatchQuerySchema = z.object({
   serverId: uuidSchema.optional(),
@@ -1223,6 +1236,8 @@ export type LibraryStaleQueryInput = z.infer<typeof libraryStaleQuerySchema>;
 export type LibraryNeverWatchedQueryInput = z.infer<typeof libraryNeverWatchedQuerySchema>;
 export type OmbiTestConnectionInput = z.infer<typeof ombiTestConnectionSchema>;
 export type OmbiMappingUpsertInput = z.infer<typeof ombiMappingUpsertSchema>;
+export type SeerrTestConnectionInput = z.infer<typeof seerrTestConnectionSchema>;
+export type SeerrMappingUpsertInput = z.infer<typeof seerrMappingUpsertSchema>;
 export type RequesterStatsQueryInput = z.infer<typeof requesterStatsQuerySchema>;
 export type LibraryWatchQueryInput = z.infer<typeof libraryWatchQuerySchema>;
 export type LibraryRoiQueryInput = z.infer<typeof libraryRoiQuerySchema>;

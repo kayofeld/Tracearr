@@ -53,8 +53,15 @@ vi.mock('../../jobs/ombiSyncQueue.js', () => ({
   invalidateOmbiCaches: vi.fn(),
 }));
 
+// Mock the Seerr sync queue's cache-invalidation helper (SEERR-03 - the OMB-4
+// finding, repeated for the Seerr connector)
+vi.mock('../../jobs/seerrSyncQueue.js', () => ({
+  invalidateSeerrCaches: vi.fn(),
+}));
+
 import { getAllSettings, setSettings } from '../../services/settings.js';
 import { invalidateOmbiCaches } from '../../jobs/ombiSyncQueue.js';
+import { invalidateSeerrCaches } from '../../jobs/seerrSyncQueue.js';
 import { settingsRoutes } from '../settings.js';
 
 const mockAllSettings: Settings = {
@@ -76,6 +83,8 @@ const mockAllSettings: Settings = {
   tautulliApiKey: 'secret-api-key',
   ombiUrl: null,
   ombiApiKey: null,
+  seerrUrl: null,
+  seerrApiKey: null,
   externalUrl: 'https://tracearr.example.com',
   trustProxy: true,
   mobileEnabled: false,
@@ -494,6 +503,64 @@ describe('Settings Routes', () => {
 
       expect(response.statusCode).toBe(200);
       expect(invalidateOmbiCaches).not.toHaveBeenCalled();
+    });
+
+    // ==========================================================================
+    // Seerr cache invalidation on connect/disconnect (SEERR-03 - same OMB-4
+    // finding, repeated for the Seerr connector: previously only
+    // ombiUrl/ombiApiKey were covered, so /stats/requesters and
+    // /library/stale kept serving stale Seerr attribution for up to 1h after
+    // the owner disconnected Seerr)
+    // ==========================================================================
+
+    it('invalidates Seerr caches when seerrUrl/seerrApiKey are cleared (disconnect)', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getAllSettings).mockResolvedValue({
+        ...mockAllSettings,
+        seerrUrl: null,
+        seerrApiKey: null,
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { seerrUrl: null, seerrApiKey: null },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(invalidateSeerrCaches).toHaveBeenCalledTimes(1);
+      expect(invalidateOmbiCaches).not.toHaveBeenCalled();
+    });
+
+    it('invalidates Seerr caches when seerrUrl/seerrApiKey are set (connect)', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getAllSettings).mockResolvedValue({
+        ...mockAllSettings,
+        seerrUrl: 'http://seerr.local',
+        seerrApiKey: 'key',
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { seerrUrl: 'http://seerr.local', seerrApiKey: 'key' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(invalidateSeerrCaches).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not invalidate Seerr caches for unrelated setting updates', async () => {
+      app = await buildTestApp(ownerUser);
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { allowGuestAccess: true },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(invalidateSeerrCaches).not.toHaveBeenCalled();
     });
   });
 });

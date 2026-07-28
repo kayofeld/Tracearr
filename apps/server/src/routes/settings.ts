@@ -12,6 +12,7 @@ import { geoipService } from '../services/geoip.js';
 import { notificationManager } from '../services/notifications/index.js';
 import { getAllSettings, getSettings, setSettings } from '../services/settings.js';
 import { invalidateOmbiCaches } from '../jobs/ombiSyncQueue.js';
+import { invalidateSeerrCaches } from '../jobs/seerrSyncQueue.js';
 
 // Re-export service getters so existing import paths still work
 export {
@@ -78,14 +79,20 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
     await setSettings(updates);
 
-    // Ombi connect/disconnect (OMB-4): /library/stale and /stats/requesters
-    // cache their Ombi requester attribution for up to 1h (CACHE_TTL.
-    // LIBRARY_STALE / OMBI_REQUESTER_STATS). Clearing ombiUrl/ombiApiKey
-    // (disconnect) must invalidate those caches immediately - the contract
-    // requires requestedBy to be null once unconfigured, not stale for up to
-    // an hour. Invalidate on any change to either setting (covers connect too).
+    // Ombi/Seerr connect/disconnect (OMB-4, and the identical SEERR-03 for
+    // the Seerr connector): /library/stale and /stats/requesters cache their
+    // requester attribution for up to 1h (CACHE_TTL.LIBRARY_STALE /
+    // OMBI_REQUESTER_STATS - the latter is the shared cross-source cache,
+    // legacy name kept deliberately, contract §8). Clearing either
+    // connector's url/apiKey (disconnect) must invalidate those caches
+    // immediately - the contract requires requestedBy to be null once
+    // unconfigured, not stale for up to an hour. Invalidate on any change to
+    // either setting (covers connect too).
     if ('ombiUrl' in updates || 'ombiApiKey' in updates) {
       await invalidateOmbiCaches(app.redis);
+    }
+    if ('seerrUrl' in updates || 'seerrApiKey' in updates) {
+      await invalidateSeerrCaches(app.redis);
     }
 
     // Return updated settings with masks

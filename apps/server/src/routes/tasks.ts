@@ -10,6 +10,7 @@ import type { RunningTask } from '@tracearr/shared';
 import { getAllActiveImports, getActiveImportProgress } from '../jobs/importQueue.js';
 import { getAllActiveLibrarySyncs } from '../jobs/librarySyncQueue.js';
 import { getAllActiveOmbiSyncs } from '../jobs/ombiSyncQueue.js';
+import { getAllActiveSeerrSyncs } from '../jobs/seerrSyncQueue.js';
 import { getMaintenanceProgress, getAllActiveMaintenanceJobs } from '../jobs/maintenanceQueue.js';
 import { db } from '../db/client.js';
 import { servers } from '../db/schema.js';
@@ -82,6 +83,28 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
         status: isRunning ? 'running' : 'pending',
         progress: sync.progress,
         message: isRunning ? 'Syncing Ombi requests...' : 'Waiting to start',
+        startedAt: new Date(sync.createdAt).toISOString(),
+      });
+    }
+
+    // Get Seerr sync tasks (no per-server context - the connector is global)
+    const seerrSyncs = await getAllActiveSeerrSyncs();
+    for (const sync of seerrSyncs) {
+      const isRunning = sync.state === 'active';
+      const isScheduled = sync.triggeredBy === 'scheduled';
+
+      // Skip scheduled jobs that are just queued - only show when running
+      if (isScheduled && !isRunning) {
+        continue;
+      }
+
+      tasks.push({
+        id: sync.jobId,
+        type: 'seerr_sync',
+        name: 'Seerr Sync',
+        status: isRunning ? 'running' : 'pending',
+        progress: sync.progress,
+        message: isRunning ? 'Syncing Seerr requests...' : 'Waiting to start',
         startedAt: new Date(sync.createdAt).toISOString(),
       });
     }

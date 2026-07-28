@@ -14,6 +14,7 @@ import { MobileSettings } from '@/components/settings/MobileSettings';
 import { TailscaleSettings } from '@/components/settings/TailscaleSettings';
 import { ImportSettings } from '@/components/settings/ImportSettings';
 import { OmbiSettings } from '@/components/settings/OmbiSettings';
+import { SeerrSettings } from '@/components/settings/SeerrSettings';
 import { JobsSettings } from '@/components/settings/JobsSettings';
 import { BackupSettings } from '@/components/settings/BackupSettings';
 import { NotificationAgentsManager } from '@/components/settings/notification-agents';
@@ -32,6 +33,7 @@ function SettingsNav() {
     { href: '/settings/tailscale', label: t('tabs.tailscale') },
     { href: '/settings/import', label: t('tabs.import') },
     { href: '/settings/ombi', label: t('tabs.ombi') },
+    { href: '/settings/seerr', label: t('tabs.seerr') },
     { href: '/settings/jobs', label: t('tabs.jobs') },
     { href: '/settings/backup', label: t('tabs.backup') },
   ];
@@ -92,6 +94,7 @@ export function Settings() {
         <Route path="tailscale" element={<TailscaleSettings />} />
         <Route path="import" element={<ImportSettings />} />
         <Route path="ombi" element={<OmbiSettings />} />
+        <Route path="seerr" element={<SeerrSettings />} />
         <Route path="jobs" element={<JobsSettings />} />
         <Route path="backup" element={<BackupSettings />} />
       </Routes>

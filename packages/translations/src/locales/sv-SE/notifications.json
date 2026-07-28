@@ -79,6 +79,11 @@
       "ruleCreateFailed": "Kunde inte skapa regel",
       "ruleDeleteFailed": "Det gick inte att ta bort regel",
       "ruleUpdateFailed": "Det gick inte att uppdatera regel",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "Det gick inte att lägga till server",
       "serverRemoveFailed": "Det gick inte att ta bort servern",
       "serverReorderFailed": "Det gick inte att ordna om servrar",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "Regeln har uppdaterats",
         "title": "Regel uppdaterad"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "{{name}} har anslutits",

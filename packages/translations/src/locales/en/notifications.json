@@ -166,6 +166,15 @@
       },
       "ombiMappingReverted": {
         "title": "Requester mapping reverted to automatic"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
       }
     },
     "error": {
@@ -218,7 +227,12 @@
       "ombiSyncAlreadyRunning": "An Ombi sync is already running",
       "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
       "ombiPurgeFailed": "Failed to purge Ombi data",
-      "ombiMappingUpdateFailed": "Failed to update requester mapping"
+      "ombiMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping"
     },
     "warning": {
       "jobFailed": {

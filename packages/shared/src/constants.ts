@@ -90,6 +90,8 @@ export const WS_EVENTS = {
   LIBRARY_SYNC_PROGRESS: 'library:sync:progress',
   /** Ombi request-mirror sync progress updates */
   OMBI_SYNC_PROGRESS: 'ombi:sync:progress',
+  /** Seerr request-mirror sync progress updates */
+  SEERR_SYNC_PROGRESS: 'seerr:sync:progress',
   /** Unified running tasks updates */
   TASKS_UPDATED: 'tasks:updated',
   SUBSCRIBE_SESSIONS: 'subscribe:sessions',

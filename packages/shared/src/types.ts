@@ -1047,6 +1047,10 @@ export interface Settings {
   ombiUrl: string | null;
   /** Ombi API key. Plaintext per repo convention (ADR 0005); MUST be redacted in logs. */
   ombiApiKey: string | null;
+  /** Seerr connector base URL, e.g. "https://seerr.example.com". Null when unconfigured. */
+  seerrUrl: string | null;
+  /** Seerr API key, sent as X-Api-Key. Plaintext per ADR 0005; MUST be redacted in logs. */
+  seerrApiKey: string | null;
   // Network/access settings
   externalUrl: string | null;
   trustProxy: boolean;
@@ -1211,6 +1215,7 @@ export interface ServerToClientEvents {
   'maintenance:progress': (progress: MaintenanceJobProgress) => void;
   'library:sync:progress': (progress: LibrarySyncProgress) => void;
   'ombi:sync:progress': (event: OmbiSyncProgressEvent) => void;
+  'seerr:sync:progress': (event: SeerrSyncProgressEvent) => void;
   'tasks:updated': (tasks: RunningTask[]) => void;
   'version:update': (data: { current: string; latest: string; releaseUrl: string }) => void;
   'server:down': (data: { serverId: string; serverName: string }) => void;
@@ -1824,7 +1829,12 @@ export interface MaintenanceJobResult {
 // =============================================================================
 
 export type RunningTaskType =
-  'library_sync' | 'tautulli_import' | 'jellystat_import' | 'maintenance' | 'ombi_sync';
+  | 'library_sync'
+  | 'tautulli_import'
+  | 'jellystat_import'
+  | 'maintenance'
+  | 'ombi_sync'
+  | 'seerr_sync';
 
 export interface RunningTask {
   /** Unique task identifier */
@@ -2366,8 +2376,14 @@ export interface StaleItemRequestedBy {
   requestedAt: string;
   /** Additional distinct requesters of the same media; 0 in the common case. */
   otherRequesterCount: number;
-  /** Future-proofs sibling request connectors. */
-  source: 'ombi';
+  /**
+   * Which connector attributed this row. Widened from `'ombi'` in v1.9.0 - this
+   * discriminator shipped in v1.8.0 precisely so a sibling connector could slot in.
+   * Note `ombiUsername`/`ombiAlias` above keep their legacy names but carry the
+   * source-side identity of WHICHEVER connector matched (Seerr sends
+   * jellyfinUsername/displayName); renaming would break the frozen wire shape.
+   */
+  source: 'ombi' | 'seerr';
 }
 
 export interface StaleSummary {
@@ -2486,6 +2502,95 @@ export interface OmbiPurgeResponse {
   deletedMappings: number;
 }
 
+// =============================================================================
+// Seerr connector (optional, sibling to Ombi - seerr-team/seerr)
+// Contract: docs/architecture/seerr-api-contract.md, ADRs 0006-0008.
+// Unlike Ombi, every Seerr request carries a media-server user id, so requesters
+// resolve on a stable external id rather than a username.
+// =============================================================================
+
+export interface SeerrTestConnectionRequest {
+  url: string;
+  apiKey: string;
+}
+
+export interface SeerrTestConnectionResponse {
+  success: boolean;
+  /** Seerr version, e.g. "3.4.0"; present on success. */
+  version?: string;
+  userCount?: number;
+  error?: string;
+}
+
+export interface SeerrStatusResponse {
+  configured: boolean;
+  running: boolean;
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  counts: {
+    movieRequests: number;
+    tvRequests: number;
+    total: number;
+    skippedValidation: number;
+  };
+  attribution: {
+    /** match_method 'provider' (external id) or 'username'. */
+    matched: number;
+    manual: number;
+    unattributed: number;
+  };
+  mediaMatch: {
+    matched: number;
+    unmatched: number;
+  };
+  /** True iff disconnected AND source='seerr' rows remain - drives the purge control. */
+  purgeAvailable: boolean;
+}
+
+/** 'provider' = matched via jellyfinUserId/plexId against server_users (ADR 0008). */
+export type SeerrRequesterResolutionType = 'manual' | 'provider' | 'username' | 'unattributed';
+
+export interface SeerrRequesterMapping {
+  /** Seerr's numeric user id, carried as a string. */
+  seerrUserId: string;
+  seerrUsername: string;
+  seerrDisplayName: string | null;
+  requestCount: number;
+  resolution: {
+    type: SeerrRequesterResolutionType;
+    userId: string | null;
+    username: string | null;
+  };
+  /** Auto-match refused: multiple candidate external ids or usernames. */
+  ambiguous: boolean;
+  suggestions: Array<{ userId: string; username: string }>;
+  /** Override exists but the requester is absent from Seerr. */
+  stale: boolean;
+}
+
+export interface SeerrMappingsResponse {
+  requesters: SeerrRequesterMapping[];
+}
+
+export interface SeerrMappingUpsertRequest {
+  /** users.id to attribute to; null forces "unattributed". */
+  userId: string | null;
+}
+
+export interface SeerrPurgeResponse {
+  deletedRequests: number;
+  deletedMappings: number;
+}
+
+export interface SeerrSyncProgressEvent {
+  jobId: string;
+  phase: 'count' | 'fetch' | 'resolve' | 'done' | 'error';
+  /** 0-100; null when indeterminate. */
+  progress: number | null;
+  error?: string;
+}
+
 export type OmbiRequesterResolutionType = 'manual' | 'provider' | 'username' | 'unattributed';
 
 export interface OmbiRequesterMapping {
@@ -2560,8 +2665,14 @@ export interface RequesterStatsResponse {
     unattributedCount: number;
     neverWatchedSizeBytes: number;
   };
-  /** False => feature off; payload is empty/zeroed and the UI hides the page. */
+  /**
+   * False => no request connector is configured; payload is empty/zeroed and the UI
+   * hides the page. Generalized in v1.9.0: true iff AT LEAST ONE of Ombi/Seerr is
+   * configured. v1.8.x clients used it only to hide the page, so they stay correct.
+   */
   configured: boolean;
+  /** Per-source breakdown for newer UIs. Absent on older servers. */
+  configuredSources?: { ombi: boolean; seerr: boolean };
   generatedAt: string;
 }
 

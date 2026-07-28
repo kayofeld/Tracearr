@@ -1,21 +1,27 @@
 /**
- * Ombi Requester Statistics Route
+ * Media Request Requester Statistics Route (Ombi + Seerr, source-generalized)
  *
- * GET /requesters (mounted under /stats) - per-Tracearr-identity Ombi request
- * statistics, with a mandatory "unattributed" bucket for requests that could
+ * GET /requesters (mounted under /stats) - per-Tracearr-identity media
+ * request statistics across every currently-configured source (Ombi and/or
+ * Seerr), with a mandatory "unattributed" bucket for requests that could
  * not be resolved to a Tracearr user.
  *
- * Contract: docs/architecture/ombi-api-contract.md §6. ADR 0003 (query-time
+ * Contract: docs/architecture/ombi-api-contract.md §6 (generalized by
+ * docs/architecture/seerr-connector.md §4.4/§9). ADR 0003 (query-time
  * external-id join to library_items, no FK, imdb -> tmdb -> tvdb precedence,
- * no title fallback for attribution).
+ * no title fallback for attribution). ADR 0006 (source-discriminated
+ * media_requests table; scoped here to the configured-source set so a
+ * disconnected connector's rows stay retained but invisible, per source).
  *
  * Request counts (requestCount/movieCount/tvCount/statusCounts) are
- * server-agnostic (Ombi is a single global instance). Fields derived from the
- * library-items/sessions join (matchedToLibraryCount, totalSizeBytes,
- * neverWatched*, watchedByRequesterCount) ARE scoped to the resolved servers.
+ * server-agnostic. Fields derived from the library-items/sessions join
+ * (matchedToLibraryCount, totalSizeBytes, neverWatched*,
+ * watchedByRequesterCount) ARE scoped to the resolved servers.
  *
  * Aggregation is per Tracearr `users.id` identity (not per server_user),
- * consistent with user merges - see routes/stats/users.ts.
+ * consistent with user merges - see routes/stats/users.ts. A user resolved
+ * from both sources merges into one row (grouping is by user_id); the
+ * unattributed bucket spans sources by design.
  */
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -108,20 +114,25 @@ function zeroRow(): RequesterStatsRow {
   };
 }
 
-/** Empty/zeroed payload - unconfigured connector or no accessible servers. */
-function emptyResponse(configured: boolean): RequesterStatsResponse {
+/** Empty/zeroed payload - no connector configured, or no accessible servers. */
+function emptyResponse(
+  configured: boolean,
+  configuredSources?: { ombi: boolean; seerr: boolean }
+): RequesterStatsResponse {
   return {
     requesters: [],
     unattributed: zeroRow(),
     totals: { requestCount: 0, requesterCount: 0, unattributedCount: 0, neverWatchedSizeBytes: 0 },
     configured,
+    ...(configuredSources && { configuredSources }),
     generatedAt: new Date().toISOString(),
   };
 }
 
 export const requesterStatsRoute: FastifyPluginAsync = async (app) => {
   /**
-   * GET /requesters - per-requester Ombi statistics + unattributed bucket
+   * GET /requesters - per-requester media request statistics (Ombi + Seerr) +
+   * unattributed bucket
    */
   app.get<{ Querystring: RequesterStatsQueryInput }>(
     '/requesters',
@@ -136,10 +147,24 @@ export const requesterStatsRoute: FastifyPluginAsync = async (app) => {
       const authUser = request.user;
 
       // Cheap settings check first - unconfigured is a true no-op (no DB work).
-      const settingsConfig = await getSettings(['ombiUrl', 'ombiApiKey']);
-      const configured = Boolean(settingsConfig.ombiUrl && settingsConfig.ombiApiKey);
+      const settingsConfig = await getSettings([
+        'ombiUrl',
+        'ombiApiKey',
+        'seerrUrl',
+        'seerrApiKey',
+      ]);
+      const ombiConfigured = Boolean(settingsConfig.ombiUrl && settingsConfig.ombiApiKey);
+      const seerrConfigured = Boolean(settingsConfig.seerrUrl && settingsConfig.seerrApiKey);
+      const configuredSources = { ombi: ombiConfigured, seerr: seerrConfigured };
+      // Currently-configured source set - a disconnected source's rows stay in
+      // the table (ADR 0004 retention) but must vanish from stats (design §4.4).
+      const sources: Array<'ombi' | 'seerr'> = [
+        ...(ombiConfigured ? (['ombi'] as const) : []),
+        ...(seerrConfigured ? (['seerr'] as const) : []),
+      ];
+      const configured = sources.length > 0;
       if (!configured) {
-        return emptyResponse(false);
+        return emptyResponse(false, configuredSources);
       }
 
       // resolveServerIds throws ForbiddenError (-> 403) for an unauthorized
@@ -151,7 +176,7 @@ export const requesterStatsRoute: FastifyPluginAsync = async (app) => {
       // access there is nothing this caller may see; keep it simple and
       // return the zeroed shape without touching cache or the database.
       if (resolvedIds?.length === 0) {
-        return emptyResponse(true);
+        return emptyResponse(true, configuredSources);
       }
 
       const serverCacheSegment = resolvedIds ? resolvedIds.slice().sort().join(',') : 'all';
@@ -172,6 +197,12 @@ export const requesterStatsRoute: FastifyPluginAsync = async (app) => {
 
       const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
       const mediaTypeFilter = mediaType === 'all' ? sql`` : sql`AND r.media_type = ${mediaType}`;
+      // Scope to the configured-source set (design §4.4) - a disconnected
+      // source's rows stay retained but invisible here.
+      const sourceFilter = sql`AND r.source IN (${sql.join(
+        sources.map((s) => sql`${s}`),
+        sql`, `
+      )})`;
 
       const result = await db.execute(sql`
         WITH filtered_requests AS (
@@ -184,8 +215,8 @@ export const requesterStatsRoute: FastifyPluginAsync = async (app) => {
             r.imdb_id,
             r.tmdb_id,
             r.tvdb_id
-          FROM ombi_requests r
-          WHERE true ${mediaTypeFilter}
+          FROM media_requests r
+          WHERE true ${mediaTypeFilter} ${sourceFilter}
         ),
         -- Query-time external-id join to library_items (ADR 0003): imdb -> tmdb ->
         -- tvdb precedence, LATERAL pick-first for determinism, NO title fallback
@@ -466,7 +497,8 @@ export const requesterStatsRoute: FastifyPluginAsync = async (app) => {
           unattributedCount: unattributed.requestCount,
           neverWatchedSizeBytes: parseInt(row?.total_never_watched_size_bytes ?? '0', 10) || 0,
         },
-        configured: true,
+        configured,
+        configuredSources,
         generatedAt: new Date().toISOString(),
       };
 

@@ -12,7 +12,12 @@ import { DataTable, type SortingState } from '@/components/ui/data-table';
 import { ErrorState, LibraryEmptyState, EmptyState } from '@/components/library';
 import { NeverWatchedAgeChart } from '@/components/charts';
 import { ServerColumnCell } from '@/components/server';
-import { useLibraryNeverWatched, useLibraryStale, useLibraryStatus } from '@/hooks/queries';
+import {
+  useLibraryNeverWatched,
+  useLibraryStale,
+  useLibraryStatus,
+  useRequesterStats,
+} from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 import { formatBytes } from '@/lib/formatters';
 
@@ -48,17 +53,23 @@ function formatDuration(days: number, t: Translate): string {
 }
 
 /**
- * "Requested by" cell - sourced from the Ombi connector's attribution
- * (StaleItem.requestedBy). Degrades to a muted dash whenever the connector
- * is off, the item matched no request, or requestedBy is otherwise null -
- * never hides the column or errors.
+ * "Requested by" cell - sourced from either request connector's attribution
+ * (StaleItem.requestedBy). Degrades to a muted dash whenever no connector is
+ * on, the item matched no request, or requestedBy is otherwise null - never
+ * hides the column or errors.
+ *
+ * `showSource` gates a small connector badge (Ombi/Seerr) - only worth
+ * showing once BOTH connectors are configured (a single-connector install
+ * never needs to be told which one attributed a row).
  */
 function RequestedByCell({
   requestedBy,
   t,
+  showSource,
 }: {
   requestedBy: StaleItem['requestedBy'];
   t: Translate;
+  showSource: boolean;
 }) {
   if (!requestedBy) {
     return (
@@ -67,6 +78,10 @@ function RequestedByCell({
   }
 
   const label = requestedBy.ombiAlias ?? requestedBy.ombiUsername;
+  const sourceLabel =
+    requestedBy.source === 'seerr'
+      ? t('library.neverWatched.sourceSeerr')
+      : t('library.neverWatched.sourceOmbi');
 
   return (
     <span className="inline-flex items-center gap-1">
@@ -76,6 +91,15 @@ function RequestedByCell({
         </Link>
       ) : (
         <span>{label}</span>
+      )}
+      {showSource && (
+        <Badge
+          variant="outline"
+          className="px-1.5 py-0 text-[10px]"
+          title={t('library.neverWatched.sourceTooltip', { source: sourceLabel })}
+        >
+          {sourceLabel}
+        </Badge>
       )}
       {requestedBy.otherRequesterCount > 0 && (
         <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
@@ -148,6 +172,15 @@ export function LibraryNeverWatched() {
 
   // Aggregate stats (totals, breakdowns, age distribution) for the current filter
   const stats = useLibraryNeverWatched(selectedServerIds, null, mediaTypeFilter);
+
+  // Sourced only to read `configuredSources` - determines whether the
+  // "Requested By" column needs a connector badge (both configured) or can
+  // stay unlabeled (zero or one connector - the common case). Authenticated,
+  // not owner-gated, so this is safe to call for every viewer of this page.
+  const requesterStats = useRequesterStats(selectedServerIds);
+  const showRequesterSource = Boolean(
+    requesterStats.data?.configuredSources?.ombi && requesterStats.data?.configuredSources?.seerr
+  );
 
   // Paginated, sortable item list
   const items = useLibraryStale(
@@ -227,10 +260,16 @@ export function LibraryNeverWatched() {
         id: 'requestedBy',
         header: t('library.neverWatched.colRequestedBy'),
         enableSorting: false,
-        cell: ({ row }) => <RequestedByCell requestedBy={row.original.requestedBy} t={translate} />,
+        cell: ({ row }) => (
+          <RequestedByCell
+            requestedBy={row.original.requestedBy}
+            t={translate}
+            showSource={showRequesterSource}
+          />
+        ),
       },
     ],
-    [t, translate, isMultiServer]
+    [t, translate, isMultiServer, showRequesterSource]
   );
 
   // Show empty state only if ALL selected servers need setup

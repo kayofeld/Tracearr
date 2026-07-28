@@ -23,6 +23,7 @@ import {
   uniqueIndex,
   unique,
   check,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { MEDIA_TYPES } from '@tracearr/shared';
@@ -1128,159 +1129,208 @@ export const libraryItemsRelations = relations(libraryItems, ({ one }) => ({
 }));
 
 // ============================================================================
-// Ombi Connector Tables
+// Media Request Connector Tables (Ombi + Seerr, source-discriminated)
 // ============================================================================
-// Design: docs/architecture/ombi-connector.md §4. ADRs: 0002 (username matching),
-// 0003 (query-time external-id join to library_items - no FK), 0004 (full-mirror
-// resync). Strictly optional: both tables stay empty until the owner configures
-// an Ombi URL + API key; no other table is touched by this feature.
+// Design: docs/architecture/seerr-connector.md §4 (generalization) + the
+// inherited docs/architecture/ombi-connector.md §4 (original per-source
+// semantics). ADRs: 0002 (username matching pipeline shape), 0003 (query-time
+// external-id join to library_items - no FK), 0004 (full-mirror resync), 0006
+// (generalize ombi_requests -> media_requests, source-discriminated - the
+// decision behind this table pair), 0007 (seerr title query-time derivation),
+// 0008 (seerr external-id-first requester matching, persisted). Migrated in
+// place from the shipped ombi_requests / ombi_user_mappings tables by
+// migration 0068 (hand-written, preserves the 938 live Ombi rows - see that
+// file's header for why). Strictly optional per source: a source's rows only
+// ever appear once its connector is configured.
 
-// Ombi request status enum (derived at sync time from Ombi's booleans; see design §4.1)
-export const ombiRequestStatusEnum = ['pending', 'approved', 'denied', 'available'] as const;
+// Media request status enum (derived at sync time from each source's native status)
+export const mediaRequestStatusEnum = ['pending', 'approved', 'denied', 'available'] as const;
 
-// Ombi request media type enum (movie, or a TV *child* / per-user season-batch request)
-export const ombiRequestMediaTypeEnum = ['movie', 'tv'] as const;
+// Media request media type enum (movie, or a TV *child* / per-user season-batch request)
+export const mediaRequestMediaTypeEnum = ['movie', 'tv'] as const;
 
-// Requester -> Tracearr user resolution method (ADR 0002); null on the row means unattributed
-export const ombiMatchMethodEnum = ['manual', 'provider', 'username'] as const;
+// Request source discriminator (ADR 0006)
+export const mediaRequestSourceEnum = ['ombi', 'seerr'] as const;
+
+// Requester -> Tracearr user resolution method (ADR 0002/0008); null on the row means unattributed
+export const mediaRequestMatchMethodEnum = ['manual', 'provider', 'username'] as const;
 
 /**
- * Ombi Requests - full mirror of Ombi's movie + TV-child requests (ADR 0004)
+ * Media Requests - full mirror of each configured source's requests (ADR 0004,
+ * generalized across sources by ADR 0006)
  *
- * One row per attributable request unit: a movie request, or one TV child
- * (per-user, per-season-batch) request under a parent series. This is a mirror,
- * not an event log - every sync run upserts on (media_type, ombi_request_id) and
- * prunes rows whose synced_at predates that run's phase (ADR 0004 §5).
+ * One row per attributable request unit: an Ombi movie request, an Ombi TV
+ * child (per-user, per-season-batch) request under a parent series, or a
+ * Seerr request (movie or tv - Seerr has no parent/child split). This is a
+ * mirror, not an event log - every sync run upserts on
+ * (source, media_type, source_request_id) and prunes rows whose synced_at
+ * predates that run's phase, scoped to its own source (ADR 0004 §5).
  *
  * No FK to library_items.id (ADR 0003): library_items churns on every library
  * sync, so attribution joins to it at QUERY TIME on imdb_id/tmdb_id/tvdb_id
  * (precedence imdb -> tmdb -> tvdb, matching buildExternalIdMatchKey.ts).
  *
- * Deliberately no email column - PII minimization, design §7: usernames/aliases
- * are already surfaced elsewhere in Tracearr and carry all the matching value
- * measured on the live data; email would be a higher-sensitivity duplicate of
- * data Ombi remains the source of truth for.
+ * Deliberately no email column - PII minimization, design §7/§8.3: usernames/
+ * aliases are already surfaced elsewhere in Tracearr and carry all the
+ * matching value measured on the live data for both sources; email would be a
+ * higher-sensitivity duplicate of data each source remains the source of
+ * truth for.
  */
-export const ombiRequests = pgTable(
-  'ombi_requests',
+export const mediaRequests = pgTable(
+  'media_requests',
   {
     id: uuid('id').primaryKey().defaultRandom(),
 
-    // Ombi identity - movie request id or TV *child* id. Independent id sequences
-    // per media type, hence the composite (media_type, ombi_request_id) upsert key.
-    ombiRequestId: integer('ombi_request_id').notNull(),
-    ombiParentRequestId: integer('ombi_parent_request_id'), // TV parent id; null for movies
+    // Discriminator (ADR 0006). No column default - writers must be explicit;
+    // only migration 0068's backfill of the shipped Ombi rows used a default.
+    source: varchar('source', { length: 10 })
+      .notNull()
+      .$type<(typeof mediaRequestSourceEnum)[number]>(),
+
+    // Source identity - Ombi movie/child request id, or Seerr's single request
+    // id sequence. Independent id sequences per (source, media_type), hence the
+    // composite (source, media_type, source_request_id) upsert key.
+    sourceRequestId: integer('source_request_id').notNull(),
+    sourceParentRequestId: integer('source_parent_request_id'), // Ombi TV parent id; always null for seerr
     mediaType: varchar('media_type', { length: 10 })
       .notNull()
-      .$type<(typeof ombiRequestMediaTypeEnum)[number]>(),
+      .$type<(typeof mediaRequestMediaTypeEnum)[number]>(),
 
     // Denormalized media fields - so a request still renders even when the media
     // was never in the library, or the library item was later removed/re-synced.
-    title: varchar('title', { length: 500 }).notNull(),
-    releaseYear: integer('release_year'),
+    // title is nullable: Seerr's request payload carries no title (ADR 0007) -
+    // null for seerr rows in v1, display falls back to the matched library item
+    // or a TMDB-id placeholder at query time. Ombi rows keep their non-null titles.
+    title: varchar('title', { length: 500 }),
+    releaseYear: integer('release_year'), // null for seerr rows in v1 (no source field)
 
     // External ids for the query-time join to library_items (ADR 0003). Same
     // formats as library_items.{imdb_id,tmdb_id,tvdb_id} (schema.ts:990-992).
     imdbId: varchar('imdb_id', { length: 20 }),
-    tmdbId: integer('tmdb_id'), // movies: theMovieDbId
-    tvdbId: integer('tvdb_id'), // TV: parent tvDbId, copied onto each child row
+    tmdbId: integer('tmdb_id'), // Ombi movies: theMovieDbId; Seerr: media.tmdbId (100% coverage measured)
+    tvdbId: integer('tvdb_id'), // Ombi TV: parent tvDbId copied onto each child row; Seerr: media.tvdbId (tv only)
 
     // TV: requested season numbers (number[]); null for movies. Display only,
     // never queried relationally - jsonb is proportionate at this volume.
     seasons: jsonb('seasons').$type<number[]>(),
-    is4k: boolean('is_4k').notNull().default(false), // movies: is4kRequest; false for TV
+    is4k: boolean('is_4k').notNull().default(false), // Ombi movies: is4kRequest; Seerr: is4k; false for Ombi TV
 
-    // Derived status - single enum beats mirroring Ombi's four booleans
+    // Derived status - single enum beats mirroring each source's native status
+    // representation (Ombi's four booleans, Seerr's status integer)
     status: varchar('status', { length: 20 })
       .notNull()
-      .$type<(typeof ombiRequestStatusEnum)[number]>(),
+      .$type<(typeof mediaRequestStatusEnum)[number]>(),
 
-    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(), // Ombi requestedDate
-    availableAt: timestamp('available_at', { withTimezone: true }), // Ombi markedAsAvailable
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(), // Ombi requestedDate; Seerr createdAt
+    availableAt: timestamp('available_at', { withTimezone: true }), // Ombi markedAsAvailable; Seerr media.mediaAddedAt
 
-    // Raw Ombi requester identity - always retained, even when unattributed, so a
+    // Raw source requester identity - always retained, even when unattributed, so a
     // future re-resolution (mapping change, new Tracearr user) can recover the match.
-    ombiUserId: varchar('ombi_user_id', { length: 64 }).notNull(), // Ombi account GUID
-    ombiUsername: varchar('ombi_username', { length: 255 }).notNull(),
-    ombiAlias: varchar('ombi_alias', { length: 255 }), // preferred fallback display name
+    sourceUserId: varchar('source_user_id', { length: 64 }).notNull(), // Ombi account GUID, or Seerr requestedBy.id (int, stored as text)
+    sourceUsername: varchar('source_username', { length: 255 }).notNull(), // Ombi userName, or Seerr jellyfinUsername ?? plexUsername ?? username
+    sourceAlias: varchar('source_alias', { length: 255 }), // Ombi alias, or Seerr displayName; preferred fallback display name
 
-    // Resolved Tracearr identity (ADR 0002). Null = unattributed; history survives
-    // deletion of the Tracearr user (SET NULL, not CASCADE - design §7/§9).
+    // Strong media-server user id, persisted (ADR 0008). Null for ombi rows -
+    // Ombi's providerUserId deliberately stays transient (ADR 0002); populated
+    // for seerr because it is the PRIMARY match tier and must survive for
+    // offline re-resolution (mapping change without a live Seerr payload).
+    sourceExternalUserId: varchar('source_external_user_id', { length: 64 }),
+
+    // Resolved Tracearr identity (ADR 0002/0008). Null = unattributed; history
+    // survives deletion of the Tracearr user (SET NULL, not CASCADE - design §7/§9).
     userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
     matchMethod: varchar('match_method', { length: 20 }).$type<
-      (typeof ombiMatchMethodEnum)[number] | null
+      (typeof mediaRequestMatchMethodEnum)[number] | null
     >(),
 
     // Stamped with the sync run's start time on every upsert; drives the
-    // full-mirror prune (ADR 0004) - rows with a stale synced_at are deleted.
+    // full-mirror prune (ADR 0004), scoped per source - rows with a stale
+    // synced_at for that row's own source are deleted.
     syncedAt: timestamp('synced_at', { withTimezone: true }).notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Idempotent upsert key (ADR 0004) - movie and TV-child id sequences are independent
-    uniqueIndex('ombi_requests_media_type_request_id_unique').on(
+    // Idempotent upsert key (ADR 0004/0006) - source prepended: Ombi's per-type
+    // id sequences and Seerr's global sequence are both collision-free under it
+    uniqueIndex('media_requests_source_media_type_request_id_unique').on(
+      table.source,
       table.mediaType,
-      table.ombiRequestId
+      table.sourceRequestId
     ),
 
     // Requester-stats grouping (GET /stats/requesters)
-    index('ombi_requests_user_id_idx').on(table.userId),
+    index('media_requests_user_id_idx').on(table.userId),
 
-    // Re-resolution when a mapping changes; mapping UI per-requester counts
-    index('ombi_requests_ombi_user_id_idx').on(table.ombiUserId),
+    // Re-resolution when a mapping changes; mapping UI per-requester counts - always per-source
+    index('media_requests_source_user_id_idx').on(table.source, table.sourceUserId),
 
     // Stats date ranges / earliest-requester pick
-    index('ombi_requests_requested_at_idx').on(table.requestedAt),
+    index('media_requests_requested_at_idx').on(table.requestedAt),
 
     // Partial indexes for the query-time external-id join to library_items
     // (mirrors library_items' own partial-index pattern, schema.ts:1025-1033)
-    index('ombi_requests_imdb_partial')
+    index('media_requests_imdb_partial')
       .on(table.imdbId)
       .where(sql`${table.imdbId} IS NOT NULL`),
-    index('ombi_requests_tmdb_partial')
+    index('media_requests_tmdb_partial')
       .on(table.tmdbId)
       .where(sql`${table.tmdbId} IS NOT NULL`),
-    index('ombi_requests_tvdb_partial')
+    index('media_requests_tvdb_partial')
       .on(table.tvdbId)
       .where(sql`${table.tvdbId} IS NOT NULL`),
   ]
 );
 
-export const ombiRequestsRelations = relations(ombiRequests, ({ one }) => ({
+export const mediaRequestsRelations = relations(mediaRequests, ({ one }) => ({
   user: one(users, {
-    fields: [ombiRequests.userId],
+    fields: [mediaRequests.userId],
     references: [users.id],
   }),
 }));
 
 /**
- * Ombi User Mappings - manual owner overrides only (ADR 0002 §6.2 step 1)
+ * Media Request User Mappings - manual owner overrides only (ADR 0002 §6.2
+ * step 1, generalized across sources by ADR 0006)
  *
  * Automatic matches are computed at sync time and stored directly on
- * ombi_requests rows; they need no mapping row here. This table exists only
- * for the ~3 stragglers (and future drift) the auto-matcher can't resolve, or
- * for the owner to explicitly force an account to stay unattributed
- * (user_id = null).
+ * media_requests rows; they need no mapping row here. This table exists only
+ * for the stragglers (and future drift) the auto-matcher can't resolve per
+ * source, or for the owner to explicitly force an account to stay unattributed
+ * (user_id = null). Expected Seerr rows: ~0 (ADR 0008's external-id tier
+ * auto-matches 16/16 measured); this table exists for future drift.
  */
-export const ombiUserMappings = pgTable('ombi_user_mappings', {
-  ombiUserId: varchar('ombi_user_id', { length: 64 }).primaryKey(), // one override per Ombi account
-  ombiUsername: varchar('ombi_username', { length: 255 }).notNull(), // snapshot for the mapping UI
+export const mediaRequestUserMappings = pgTable(
+  'media_request_user_mappings',
+  {
+    source: varchar('source', { length: 10 })
+      .notNull()
+      .$type<(typeof mediaRequestSourceEnum)[number]>(),
+    sourceUserId: varchar('source_user_id', { length: 64 }).notNull(), // one override per (source, source account)
+    sourceUsername: varchar('source_username', { length: 255 }).notNull(), // snapshot for the mapping UI
 
-  // Target identity. null = "force unattributed" (owner explicitly says: never
-  // attribute this Ombi account to anyone). Cascade: deleting the target user
-  // deletes the override too, so the next sync falls back to auto-resolution
-  // rather than silently keeping a stale mapping to a gone user.
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    // Target identity. null = "force unattributed" (owner explicitly says: never
+    // attribute this account to anyone). Cascade: deleting the target user
+    // deletes the override too, so the next sync falls back to auto-resolution
+    // rather than silently keeping a stale mapping to a gone user.
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
 
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Composite PK (source, source_user_id) - one override per source account (ADR 0006 §4.2)
+    primaryKey({
+      name: 'media_request_user_mappings_pk',
+      columns: [table.source, table.sourceUserId],
+    }),
+  ]
+);
 
-export const ombiUserMappingsRelations = relations(ombiUserMappings, ({ one }) => ({
+export const mediaRequestUserMappingsRelations = relations(mediaRequestUserMappings, ({ one }) => ({
   user: one(users, {
-    fields: [ombiUserMappings.userId],
+    fields: [mediaRequestUserMappings.userId],
     references: [users.id],
   }),
 }));

@@ -79,6 +79,11 @@
       "ruleCreateFailed": "ルールの作成に失敗しました",
       "ruleDeleteFailed": "ルールの削除に失敗しました",
       "ruleUpdateFailed": "ルールの更新に失敗しました",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "サーバーの追加に失敗しました",
       "serverRemoveFailed": "サーバーの削除に失敗しました",
       "serverReorderFailed": "サーバーの順序を変更できませんでした",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "ルールが正常に更新されました",
         "title": "ルールが更新されました"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "{{name}} は正常に接続されました",

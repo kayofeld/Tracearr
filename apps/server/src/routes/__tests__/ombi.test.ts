@@ -13,6 +13,25 @@ import sensible from '@fastify/sensible';
 import { randomUUID } from 'node:crypto';
 import type { AuthUser } from '@tracearr/shared';
 
+/**
+ * Renders a drizzle `sql` template's literal chunks back to a string, so raw
+ * SQL text sent to `db.execute` can be pinned without a live Postgres
+ * (mirrors routes/library/__tests__/stale.test.ts's renderSqlLiteral). Used
+ * below to guard against the media_requests generalization's blind spot
+ * (ADR 0006 §4.4): a stale `ombi_requests`/`ombi_user_id` identifier, or a
+ * missing `source = 'ombi'` scope, typechecks fine but is wrong at runtime.
+ */
+function renderSqlLiteral(fragment: unknown): string {
+  return (fragment as { queryChunks: unknown[] }).queryChunks
+    .map((chunk) => {
+      if (chunk && typeof chunk === 'object' && 'value' in chunk) {
+        return (chunk as { value: string[] }).value.join('');
+      }
+      return '';
+    })
+    .join('');
+}
+
 vi.mock('../../db/client.js', () => ({
   db: {
     select: vi.fn(),
@@ -86,6 +105,11 @@ function selectWhereLimit(result: unknown[]) {
 }
 function selectFromOnly(result: unknown[]) {
   return { from: vi.fn().mockResolvedValue(result) };
+}
+/** Chainable .from().where() - used for the mediaRequestUserMappings query,
+ * which is now scoped by source='ombi' (media_requests generalization). */
+function selectFromWhere(result: unknown[]) {
+  return { from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(result) }) };
 }
 function mockInsertChain() {
   const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
@@ -292,6 +316,45 @@ describe('Ombi connector routes', () => {
       expect(body.mediaMatch).toEqual({ matched: 3, unmatched: 2 });
     });
 
+    it("scopes every raw-SQL query to the generalized media_requests tables and source='ombi' (ADR 0006 §4.4 regression guard)", async () => {
+      app = await buildTestApp(createOwnerUser());
+      vi.mocked(getOmbiSettings).mockResolvedValue({ ombiUrl: null, ombiApiKey: null });
+      vi.mocked(getSetting).mockResolvedValue(null);
+      vi.mocked(isOmbiSyncRunning).mockResolvedValue(false);
+      vi.mocked(db.execute)
+        .mockResolvedValueOnce({ rows: [] } as never) // counts
+        .mockResolvedValueOnce({ rows: [{ matched: 0, manual: 0, unattributed: 0 }] } as never) // attribution
+        .mockResolvedValueOnce({ rows: [{ matched: 0, unmatched: 0 }] } as never) // mediaMatch
+        .mockResolvedValueOnce({ rows: [{ count: 0 }] } as never); // mappingCount
+
+      await app.inject({ method: 'GET', url: '/ombi/status' });
+
+      const calls = vi.mocked(db.execute).mock.calls;
+      expect(calls).toHaveLength(4);
+      const renderedQueries = calls.map((call) => renderSqlLiteral(call[0]));
+
+      for (const text of renderedQueries) {
+        // A stale `ombi_requests`/`ombi_user_mappings` identifier no longer
+        // exists in the DB post-migration-0068 - would 500 at runtime despite
+        // typechecking fine (the exact blind spot this guard closes).
+        expect(text).not.toContain('ombi_requests');
+        expect(text).not.toContain('ombi_user_mappings');
+      }
+
+      // counts + attribution + mediaMatch all read media_requests scoped to
+      // source='ombi' - never an unscoped table read that would also surface
+      // Seerr rows.
+      expect(renderedQueries[0]).toContain('media_requests');
+      expect(renderedQueries[0]).toContain("source = 'ombi'");
+      expect(renderedQueries[1]).toContain('media_requests');
+      expect(renderedQueries[1]).toContain("source = 'ombi'");
+      expect(renderedQueries[2]).toContain('media_requests');
+      expect(renderedQueries[2]).toContain("r.source = 'ombi'");
+      // mappingCount reads media_request_user_mappings scoped to source='ombi'.
+      expect(renderedQueries[3]).toContain('media_request_user_mappings');
+      expect(renderedQueries[3]).toContain("source = 'ombi'");
+    });
+
     it('reports purgeAvailable=false when configured, even with rows present', async () => {
       app = await buildTestApp(createOwnerUser());
       vi.mocked(getOmbiSettings).mockResolvedValue({
@@ -374,7 +437,7 @@ describe('Ombi connector routes', () => {
           ],
         } as never);
       vi.mocked(db.select)
-        .mockReturnValueOnce(selectFromOnly([]) as never) // ombiUserMappings (no stale entries)
+        .mockReturnValueOnce(selectFromWhere([]) as never) // mediaRequestUserMappings (no stale entries)
         .mockReturnValueOnce(
           selectFromOnly([
             { id: 'user-1', username: 'alice' },
@@ -422,7 +485,7 @@ describe('Ombi connector routes', () => {
         } as never)
         .mockResolvedValueOnce({ rows: [{ ombiUserId: 'ombi-3', requestCount: 2 }] } as never);
       vi.mocked(db.select)
-        .mockReturnValueOnce(selectFromOnly([]) as never)
+        .mockReturnValueOnce(selectFromWhere([]) as never)
         .mockReturnValueOnce(selectFromOnly([{ id: 'user-new', username: 'alice' }]) as never);
 
       const response = await app.inject({ method: 'GET', url: '/ombi/mappings' });
@@ -436,6 +499,44 @@ describe('Ombi connector routes', () => {
       expect(row.suggestions).toEqual([{ userId: 'user-new', username: 'alice' }]);
     });
 
+    it('does not flag a resolved requester as ambiguous just because its username separately collides (CR-4)', async () => {
+      // Resolved (matchMethod='provider', userId set) - the auto-match
+      // already succeeded, so contract §5.1's "auto-match refused" must be
+      // false even though another Tracearr user happens to share the
+      // requester's username (pre-fix: ambiguous was true purely from the
+      // username collision, regardless of the already-successful resolution).
+      app = await buildTestApp(createOwnerUser());
+      vi.mocked(db.execute)
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              ombiUserId: 'ombi-5',
+              ombiUsername: 'bob',
+              ombiAlias: null,
+              userId: 'user-5',
+              matchMethod: 'provider',
+            },
+          ],
+        } as never)
+        .mockResolvedValueOnce({ rows: [{ ombiUserId: 'ombi-5', requestCount: 2 }] } as never);
+      vi.mocked(db.select)
+        .mockReturnValueOnce(selectFromWhere([]) as never)
+        .mockReturnValueOnce(
+          selectFromOnly([
+            { id: 'user-5', username: 'bob' },
+            { id: 'user-6', username: 'BOB' },
+          ]) as never
+        );
+
+      const response = await app.inject({ method: 'GET', url: '/ombi/mappings' });
+
+      const body = response.json();
+      const row = body.requesters.find((r: { ombiUserId: string }) => r.ombiUserId === 'ombi-5');
+      expect(row.resolution).toEqual({ type: 'provider', userId: 'user-5', username: 'bob' });
+      expect(row.ambiguous).toBe(false);
+      expect(row.suggestions).toEqual([]);
+    });
+
     it('flags a mapping row with no current requests as stale', async () => {
       app = await buildTestApp(createOwnerUser());
       vi.mocked(db.execute)
@@ -443,8 +544,8 @@ describe('Ombi connector routes', () => {
         .mockResolvedValueOnce({ rows: [] } as never);
       vi.mocked(db.select)
         .mockReturnValueOnce(
-          selectFromOnly([
-            { ombiUserId: 'ombi-gone', ombiUsername: 'ghost', userId: null },
+          selectFromWhere([
+            { sourceUserId: 'ombi-gone', sourceUsername: 'ghost', userId: null },
           ]) as never
         )
         .mockReturnValueOnce(selectFromOnly([]) as never);
@@ -623,12 +724,20 @@ describe('Ombi connector routes', () => {
     it('purges both tables and invalidates caches once disconnected', async () => {
       app = await buildTestApp(createOwnerUser());
       vi.mocked(getOmbiSettings).mockResolvedValue({ ombiUrl: null, ombiApiKey: null });
+      // Both deletes are now scoped with .where(eq(source, 'ombi')) (media_requests
+      // generalization) - chainable so the real .delete().where().returning() call resolves.
       const tx = {
         delete: vi
           .fn()
-          .mockReturnValueOnce({ returning: vi.fn().mockResolvedValue([{ id: '1' }, { id: '2' }]) })
           .mockReturnValueOnce({
-            returning: vi.fn().mockResolvedValue([{ ombiUserId: 'ombi-1' }]),
+            where: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([{ id: '1' }, { id: '2' }]),
+            }),
+          })
+          .mockReturnValueOnce({
+            where: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([{ ombiUserId: 'ombi-1' }]),
+            }),
           }),
       };
       vi.mocked(db.transaction).mockImplementation(
