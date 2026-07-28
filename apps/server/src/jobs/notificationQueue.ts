@@ -31,6 +31,7 @@ const JOB_TYPE_TO_EVENT_TYPE: Record<NotificationJobData['type'], NotificationEv
   server_down: 'server_down',
   server_up: 'server_up',
   plugin_update_available: 'plugin_update_available',
+  app_update_available: 'app_update_available',
 };
 
 // Job type discriminated union for type-safe job handling
@@ -49,6 +50,14 @@ export type NotificationJobData =
         installedVersion: string | null;
         latestVersion: string;
         downloadUrl: string;
+      };
+    }
+  | {
+      type: 'app_update_available';
+      payload: {
+        currentVersion: string;
+        latestVersion: string;
+        releaseUrl: string;
       };
     };
 
@@ -410,6 +419,12 @@ export async function processNotificationJob(job: Job<NotificationJobData>): Pro
       }
       break;
 
+    case 'app_update_available':
+      if (routing.discordEnabled || routing.webhookEnabled) {
+        await notificationManager.notifyAppUpdateAvailable(payload, notificationSettings);
+      }
+      break;
+
     default: {
       // TypeScript exhaustiveness check
       const _exhaustive: never = type;
@@ -447,6 +462,12 @@ function getDedupeKey(data: NotificationJobData): string | undefined {
     case 'server_up':
     case 'plugin_update_available': {
       return `${data.type}-${data.payload.serverId}-${timeBucket}`;
+    }
+    case 'app_update_available': {
+      // versionCheckQueue's persisted lastNotifiedAppUpdateVersion is the real
+      // dedup mechanism (survives restarts); this is just the usual BullMQ
+      // same-window guard, keyed by version rather than a serverId.
+      return `${data.type}-${data.payload.latestVersion}-${timeBucket}`;
     }
     default: {
       const _exhaustive: never = data;

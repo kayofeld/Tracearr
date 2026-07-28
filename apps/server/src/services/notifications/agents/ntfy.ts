@@ -15,11 +15,13 @@ import type {
   SessionContext,
   ServerContext,
   PluginUpdateContext,
+  AppUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
 import { formatViolationMessage } from '../formatters/violation.js';
 import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
+import { formatAppUpdateMessage } from '../formatters/appUpdate.js';
 
 interface NtfyPayload {
   topic: string;
@@ -88,6 +90,8 @@ export class NtfyAgent extends BaseAgent {
         return this.buildServerUpPayload(ntfyTopic, payload.context);
       case 'plugin_update_available':
         return this.buildPluginUpdatePayload(ntfyTopic, payload.context);
+      case 'app_update_available':
+        return this.buildAppUpdatePayload(ntfyTopic, payload.context);
       case 'new_device':
         return this.buildNewDevicePayload(ntfyTopic, payload.context);
       case 'trust_score_changed':
@@ -161,6 +165,16 @@ export class NtfyAgent extends BaseAgent {
       topic,
       title: 'Plugin Update Available',
       message: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
+      priority: 3,
+      tags: ['tracearr'],
+    };
+  }
+
+  private buildAppUpdatePayload(topic: string, ctx: AppUpdateContext): NtfyPayload {
+    return {
+      topic,
+      title: 'Tracearr Update Available',
+      message: formatAppUpdateMessage(ctx),
       priority: 3,
       tags: ['tracearr'],
     };

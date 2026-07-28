@@ -30,6 +30,7 @@ export type {
   SessionContext,
   ServerContext,
   PluginUpdateContext,
+  AppUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
   NotificationContext,
@@ -193,6 +194,21 @@ export class NotificationManager {
       payload.installedVersion,
       payload.latestVersion,
       payload.downloadUrl
+    );
+    return this.sendAll(notificationPayload, settings);
+  }
+
+  /**
+   * Send a Tracearr app-update-available notification to all enabled agents
+   */
+  async notifyAppUpdateAvailable(
+    payload: { currentVersion: string; latestVersion: string; releaseUrl: string },
+    settings: NotificationSettings
+  ): Promise<SendResult[]> {
+    const notificationPayload = PayloadBuilders.fromAppUpdate(
+      payload.currentVersion,
+      payload.latestVersion,
+      payload.releaseUrl
     );
     return this.sendAll(notificationPayload, settings);
   }

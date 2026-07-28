@@ -11,6 +11,8 @@ import type { Redis } from 'ioredis';
 import { isMaintenance } from '../serverState.js';
 import { REDIS_KEYS, CACHE_TTL, WS_EVENTS } from '@tracearr/shared';
 import { getCurrentVersion } from '../utils/buildInfo.js';
+import { enqueueNotification } from './notificationQueue.js';
+import { getSetting, setSetting } from '../services/settings.js';
 
 // Queue name
 const QUEUE_NAME = 'version-check';
@@ -322,6 +324,34 @@ export function findBestUpdateForPrerelease(
 }
 
 /**
+ * Notify every configured channel (Telegram, Discord, webhooks, ...) about a new
+ * Tracearr release, once per version. Mirrors pluginUpdateChecker's "nudge once,
+ * re-arm when latest changes" approach, but persists the last-notified version via
+ * services/settings.ts (an internal setting) instead of an in-memory map, since this
+ * check must survive a server restart without re-announcing an already-notified version.
+ * Never fires on downgrade/equal-version/fetch-error — those are excluded upstream by
+ * only calling this when `updateAvailable` (isNewerVersion) is already true.
+ */
+async function notifyAppUpdateIfNew(
+  currentVersion: string,
+  latestVersion: string,
+  releaseUrl: string
+): Promise<void> {
+  const lastNotified = await getSetting('lastNotifiedAppUpdateVersion');
+  if (lastNotified === latestVersion) {
+    // Already notified for this version (including across a restart) - skip.
+    return;
+  }
+
+  await enqueueNotification({
+    type: 'app_update_available',
+    payload: { currentVersion, latestVersion, releaseUrl },
+  });
+
+  await setSetting('lastNotifiedAppUpdateVersion', latestVersion);
+}
+
+/**
  * Process a version check job.
  * Best-effort/informational; on rate limit it sets a cooldown and returns
  * gracefully (no retry storm). On other errors it rethrows for BullMQ retry.
@@ -420,6 +450,11 @@ export async function processVersionCheck(job: Job<VersionCheckJobData>): Promis
         releaseUrl: latestData.releaseUrl,
       });
       console.log(`Update available: ${currentVersion} -> ${version}`);
+    }
+
+    if (updateAvailable) {
+      // Notify Telegram/Discord/webhooks - once per version, persisted across restarts.
+      await notifyAppUpdateIfNew(currentVersion, version, latestData.releaseUrl);
     }
   } catch (error) {
     if (error instanceof GitHubRateLimitError) {

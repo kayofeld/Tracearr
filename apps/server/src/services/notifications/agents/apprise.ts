@@ -15,11 +15,13 @@ import type {
   SessionContext,
   ServerContext,
   PluginUpdateContext,
+  AppUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
 import { formatViolationMessage } from '../formatters/violation.js';
 import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
+import { formatAppUpdateMessage } from '../formatters/appUpdate.js';
 
 interface ApprisePayload {
   title: string;
@@ -82,6 +84,8 @@ export class AppriseAgent extends BaseAgent {
         return this.buildServerUpPayload(payload.context);
       case 'plugin_update_available':
         return this.buildPluginUpdatePayload(payload.context);
+      case 'app_update_available':
+        return this.buildAppUpdatePayload(payload.context);
       case 'new_device':
         return this.buildNewDevicePayload(payload.context);
       case 'trust_score_changed':
@@ -145,6 +149,14 @@ export class AppriseAgent extends BaseAgent {
       title: 'Plugin Update Available',
       body: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
       type: 'warning',
+    };
+  }
+
+  private buildAppUpdatePayload(ctx: AppUpdateContext): ApprisePayload {
+    return {
+      title: 'Tracearr Update Available',
+      body: formatAppUpdateMessage(ctx),
+      type: 'info',
     };
   }
 

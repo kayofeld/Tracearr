@@ -15,6 +15,7 @@ import type {
   SessionContext,
   ServerContext,
   PluginUpdateContext,
+  AppUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
@@ -24,6 +25,7 @@ import {
   type DiscordField,
 } from '../formatters/violation.js';
 import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
+import { formatAppUpdateMessage } from '../formatters/appUpdate.js';
 
 interface DiscordEmbed {
   title: string;
@@ -87,6 +89,8 @@ export class DiscordAgent extends BaseAgent {
         return this.buildServerUpEmbed(payload, payload.context);
       case 'plugin_update_available':
         return this.buildPluginUpdateEmbed(payload, payload.context);
+      case 'app_update_available':
+        return this.buildAppUpdateEmbed(payload, payload.context);
       case 'new_device':
         return this.buildNewDeviceEmbed(payload, payload.context);
       case 'trust_score_changed':
@@ -232,6 +236,14 @@ export class DiscordAgent extends BaseAgent {
     return {
       title: 'Plugin Update Available',
       description: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
+      color: 0xf39c12, // Orange/Warning
+    };
+  }
+
+  private buildAppUpdateEmbed(_payload: NotificationPayload, ctx: AppUpdateContext): DiscordEmbed {
+    return {
+      title: 'Tracearr Update Available',
+      description: formatAppUpdateMessage(ctx),
       color: 0xf39c12, // Orange/Warning
     };
   }

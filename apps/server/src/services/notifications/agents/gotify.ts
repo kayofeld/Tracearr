@@ -15,11 +15,13 @@ import type {
   SessionContext,
   ServerContext,
   PluginUpdateContext,
+  AppUpdateContext,
   NewDeviceContext,
   TrustScoreChangedContext,
 } from '../types.js';
 import { formatViolationMessage } from '../formatters/violation.js';
 import { formatPluginUpdateMessage } from '../formatters/pluginUpdate.js';
+import { formatAppUpdateMessage } from '../formatters/appUpdate.js';
 
 interface GotifyPayload {
   title: string;
@@ -82,6 +84,8 @@ export class GotifyAgent extends BaseAgent {
         return this.buildServerUpPayload(payload.context);
       case 'plugin_update_available':
         return this.buildPluginUpdatePayload(payload.context);
+      case 'app_update_available':
+        return this.buildAppUpdatePayload(payload.context);
       case 'new_device':
         return this.buildNewDevicePayload(payload.context);
       case 'trust_score_changed':
@@ -144,6 +148,14 @@ export class GotifyAgent extends BaseAgent {
     return {
       title: 'Plugin Update Available',
       message: `${ctx.serverName}: ${formatPluginUpdateMessage(ctx)}`,
+      priority: 3,
+    };
+  }
+
+  private buildAppUpdatePayload(ctx: AppUpdateContext): GotifyPayload {
+    return {
+      title: 'Tracearr Update Available',
+      message: formatAppUpdateMessage(ctx),
       priority: 3,
     };
   }

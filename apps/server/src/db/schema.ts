@@ -603,6 +603,7 @@ export const notificationEventTypeEnum = [
   'server_down',
   'server_up',
   'plugin_update_available',
+  'app_update_available',
 ] as const;
 
 // Notification channel routing configuration
