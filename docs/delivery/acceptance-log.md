@@ -34,3 +34,34 @@ reviewing agents, open items, and the sign-off. Append one entry per gate using
 - **Accepted risks (owner-decided):** SEC-01 Ombi API key stored plaintext per repo convention (ADR 0005) — compensations: treat DB dumps/backups as secret material, rotate the key on backup leak; repo-wide secrets-at-rest encryption backlogged. PRIV-01 requester identity and wasted-storage visible to any authenticated user — accepted as all accounts are admin; revisit if `allowGuestAccess` is ever enabled.
 - **Open items (non-blocking):** owner must map the ambiguous `draner` requester (two identities share the username; 142 requests currently unattributed) plus Azel/Neopier/Tiwoof. OMB-7 (a mapping edit during an in-flight sync is overwritten until the next run) accepted and documented.
 - **Sign-off:** Coordinator (Claude, Fable 5), on live evidence above.
+
+---
+
+## 2026-07-29 — Watch-analytics init fix (`fix/timescale-toolkit-optional` @ 2dbf3394)
+
+- **Verdict:** GO. Not merged — branch pushed, PR is the owner's to open.
+- **Scope:** `/library/watch` and `/library/patterns` returned a failed query on a missing relation. Root cause was three steps upstream: `initTimescaleDB()` ran `CREATE EXTENSION timescaledb_toolkit` outside any try/catch; that statement needs superuser, so a least-privilege role made it throw and abort the rest of init — skipping the hypertable conversion, the continuous aggregates, and all seven engagement views. Toolkit is optional and nothing consumes it. Review then found the same silent-abort mode twice more in the same function (compression, aggregate creation), because the caller catches and continues.
+- **Evidence:** on the dev instance, with the Toolkit extension still NOT installed, a restart created all 7 engagement views, 4 continuous aggregates and 2 hypertables; `/library/watch` and `/library/patterns` returned 200 with real data. Unit suite 49 files / 1441 tests. Each new guard test was proven non-vacuous by stripping its guard, observing the failure, and restoring it.
+- **Reviewers:** `code-reviewer` (GO; found B1/B2, which are fixed here), `qa-engineer` (GO; flagged the fix shipped with zero coverage, which is now closed).
+- **Deliberately unchanged:** `convertToHypertable()` stays unguarded — it is a genuine prerequisite, not an optional step.
+- **Open item:** the caller at `index.ts:649` swallowing init errors means any FUTURE unguarded statement inherits the same silent-symptom class. Worth a lint or a structural change rather than repeated case-by-case guards.
+- **Sign-off:** Coordinator, on the live evidence above.
+
+## 2026-07-29 — Library display names + requester profile links (`feat/library-display-names` @ 9bf4f656)
+
+- **Verdict:** GO. Not merged — branch pushed, PR is the owner's to open.
+- **Scope:** Never Watched's "By library" breakdown showed raw server-side library keys. Adds a `libraries` dimension table (migration 0069), populated on sync, left-joined with a fallback to the raw key. Requester usernames now link to their profile. No contract change — `libraryName` and `userId` were already frozen.
+- **Evidence:** server suite 3673 tests; web suite 208; integration suite against a real TimescaleDB **36 files / 264 tests**, which also rehearsed migration 0069 (table and unique index verified by inspection afterward). Live on dev: 6 libraries persisted with real names including the accented "Clips Vidéos"; the breakdown renders "Films"/"TV" in place of "3"/"5054"; requesters 16/16 carry a userId and the unattributed bucket is null, so no dead links.
+- **Reviewers:** `code-reviewer` GO (1 Low), `qa-engineer` GO (3 Low). Both independently found the same top defect — `upsertLibraries` skipped the file's own `scrubStringFields` convention, so one null byte or one overlength name aborted the single multi-row INSERT and silently cost that server every display name on every sync. Fixed, with regression tests.
+- **Tests added from QA's gap list:** two servers sharing a `library_id` (the JOIN fan-out case, previously unexercised anywhere) and the cache-invalidation pattern list, which no test covered at all — QA confirmed that dropping the never-watched key survived the entire suite.
+- **Corrected during verification:** the rename integration test initially passed a comma-separated `serverIds`, which fails UUID validation and 400s before any SQL runs; and it had simulated a sync by writing only the database row, omitting the cache invalidation a real sync performs, so it read a stale name. Both fixed — the test now exercises the real invalidation path.
+- **Known, not defects of this increment:** the ~91 s cold `/library/never-watched` query (pre-existing, still open); a stale-name window if a cold compute finishes after an invalidation (self-healing, pattern predates this change).
+- **Sign-off:** Coordinator, on the live evidence above.
+
+## 2026-07-29 — Emby-native first-run setup — DESIGN GATE FAILED (`feat/emby-native-setup`)
+
+- **Verdict:** NO-GO to build as designed. No implementation written. Design revision in progress.
+- **Why it matters:** the design's first-run gate asked whether an owner row exists. That is not the same as a fresh instance. An instance can be ownerless yet fully populated (support incident, partial restore, a deleted owner account), and in that state an attacker could supply their own Emby URL, be trivially admin on their own server, claim the instance, and use the existing owner-only `pg_dump` backup export to pull the database — including the real operator's plaintext Emby and Plex tokens. Three further High findings: a second `emby` server row makes `/emby/login`'s authority nondeterministic (`limit(1)` with no ORDER BY); the SSRF guard follows redirects and never resolves hostnames, and the error path echoes upstream status, making it an internal port scanner; and the index meant to fix the concurrent-owner race sat in a warn-and-continue path where its failure would be invisible.
+- **Reviewer:** `security-reviewer` — 4 High, 4 Medium, 3 Low. It endorsed the architecture's shape and corrected the design in tracearr's favour on one point: pre-auth outbound probing is not new, since `/plex/connect` already does it with no SSRF check at all.
+- **Owner decisions required before build:** claim code default-on plus persistence across restarts; in-app set-password surface versus CLI-only recovery (the design's stated mitigation does not exist — there is no HTTP surface, only `pnpm reset-password`); whether multiple Emby servers are supported; acceptance of the residual internal-probe exposure; and whether to fix `/plex/connect` in the same increment.
+- **Sign-off:** gate not cleared; recorded as a blocked increment awaiting owner input.
