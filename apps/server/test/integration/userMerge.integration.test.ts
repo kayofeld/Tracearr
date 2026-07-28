@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import {
   createTestUser,
@@ -46,6 +46,34 @@ import {
   MergeValidationError,
   SameServerCombineNotConfirmedError,
 } from '../../src/services/mergeService.js';
+
+interface TestAuthUser {
+  userId: string;
+  username: string;
+  role: string;
+  serverIds: string[];
+}
+
+/**
+ * Stubs the auth decorators referenced by the registered routers.
+ * `authenticate` attaches the given user; `requireOwner` mirrors the real
+ * decorator in src/plugins/auth.ts (resolve the user, then reject non-owners
+ * with 403) so owner-gated routes (e.g. POST /users/bulk/remove in
+ * listRoutes) stay honestly guarded instead of being no-op'd in these tests.
+ * Without `requireOwner`, registering listRoutes throws
+ * "preHandler hook should be a function" at route registration.
+ */
+function decorateTestAuth(app: FastifyInstance, user: TestAuthUser): void {
+  app.decorate('authenticate', async (request: any) => {
+    request.user = user;
+  });
+  app.decorate('requireOwner', async (request: any, reply: any) => {
+    request.user = user;
+    if (user.role !== 'owner') {
+      return reply.forbidden('Owner access required');
+    }
+  });
+}
 
 describe('mergeUsers', () => {
   it('merges a cross-server duplicate: repoints server users, carries history, recomputes aggregates, deletes source, writes audit', async () => {
@@ -465,9 +493,7 @@ describe('GET /users/:id/full identity aggregation', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(fullRoutes, { prefix: '/users' });
 
     const response = await app.inject({ method: 'GET', url: `/users/${targetSu.id}/full` });
@@ -532,13 +558,11 @@ describe('GET /users/:id/full identity aggregation', () => {
     await app.register(sensible);
     // Viewer scoped only to serverA (where targetSu lives), not serverB
     // (where the merged-in sourceSu lives).
-    app.decorate('authenticate', async (request: any) => {
-      request.user = {
-        userId: randomUUID(),
-        username: 'viewer',
-        role: 'viewer',
-        serverIds: [serverA.id],
-      };
+    decorateTestAuth(app, {
+      userId: randomUUID(),
+      username: 'viewer',
+      role: 'viewer',
+      serverIds: [serverA.id],
     });
     await app.register(fullRoutes, { prefix: '/users' });
 
@@ -620,8 +644,11 @@ describe('GET /users/:id/full?scope=identity panels', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: randomUUID(), username: 'owner', role: 'owner', serverIds: [] };
+    decorateTestAuth(app, {
+      userId: randomUUID(),
+      username: 'owner',
+      role: 'owner',
+      serverIds: [],
     });
     await app.register(fullRoutes, { prefix: '/users' });
 
@@ -659,13 +686,11 @@ describe('GET /users/:id/full?scope=identity panels', () => {
     const app = Fastify({ logger: false });
     await app.register(sensible);
     // Viewer scoped only to serverA (where targetSu lives), not serverB.
-    app.decorate('authenticate', async (request: any) => {
-      request.user = {
-        userId: randomUUID(),
-        username: 'viewer',
-        role: 'viewer',
-        serverIds: [serverA.id],
-      };
+    decorateTestAuth(app, {
+      userId: randomUUID(),
+      username: 'viewer',
+      role: 'viewer',
+      serverIds: [serverA.id],
     });
     await app.register(fullRoutes, { prefix: '/users' });
 
@@ -697,9 +722,7 @@ describe('GET /users/:id/full?scope=identity panels', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(fullRoutes, { prefix: '/users' });
 
     const defaultResponse = await app.inject({ method: 'GET', url: `/users/${soloSu.id}/full` });
@@ -725,8 +748,11 @@ describe('GET /users/:id/full?scope=identity panels', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: randomUUID(), username: 'owner', role: 'owner', serverIds: [] };
+    decorateTestAuth(app, {
+      userId: randomUUID(),
+      username: 'owner',
+      role: 'owner',
+      serverIds: [],
     });
     await app.register(sessionsRoutes, { prefix: '/users' });
     await app.register(terminationsRoutes, { prefix: '/users' });
@@ -784,9 +810,7 @@ describe('GET /violations userId identity filter', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(violationRoutes, { prefix: '/violations' });
 
     const response = await app.inject({
@@ -832,13 +856,11 @@ describe('GET /violations userId identity filter', () => {
     const app = Fastify({ logger: false });
     await app.register(sensible);
     // Viewer scoped only to serverA - can't see the merged-in sourceSu's server.
-    app.decorate('authenticate', async (request: any) => {
-      request.user = {
-        userId: randomUUID(),
-        username: 'viewer',
-        role: 'viewer',
-        serverIds: [serverA.id],
-      };
+    decorateTestAuth(app, {
+      userId: randomUUID(),
+      username: 'viewer',
+      role: 'viewer',
+      serverIds: [serverA.id],
     });
     await app.register(violationRoutes, { prefix: '/violations' });
 
@@ -885,9 +907,7 @@ describe('GET /users identityServers', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({ method: 'GET', url: '/users?pageSize=100' });
@@ -927,13 +947,11 @@ describe('GET /users identityServers', () => {
     await app.register(sensible);
     // Viewer scoped only to serverA - serverB (the merged-in sibling) is
     // outside their access, so it must not leak into identityServers.
-    app.decorate('authenticate', async (request: any) => {
-      request.user = {
-        userId: randomUUID(),
-        username: 'viewer',
-        role: 'viewer',
-        serverIds: [serverA.id],
-      };
+    decorateTestAuth(app, {
+      userId: randomUUID(),
+      username: 'viewer',
+      role: 'viewer',
+      serverIds: [serverA.id],
     });
     await app.register(listRoutes, { prefix: '/users' });
 
@@ -970,9 +988,7 @@ describe('GET /users dedup + includeRemoved + access scoping', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({ method: 'GET', url: '/users?pageSize=100' });
@@ -1011,9 +1027,7 @@ describe('GET /users dedup + includeRemoved + access scoping', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const defaultResponse = await app.inject({ method: 'GET', url: '/users?pageSize=100' });
@@ -1060,13 +1074,11 @@ describe('GET /users dedup + includeRemoved + access scoping', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = {
-        userId: randomUUID(),
-        username: 'viewer',
-        role: 'viewer',
-        serverIds: [serverA.id],
-      };
+    decorateTestAuth(app, {
+      userId: randomUUID(),
+      username: 'viewer',
+      role: 'viewer',
+      serverIds: [serverA.id],
     });
     await app.register(listRoutes, { prefix: '/users' });
 
@@ -1104,9 +1116,7 @@ describe('GET /users serverIds (multi-select)', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({
@@ -1147,9 +1157,7 @@ describe('GET /users serverIds (multi-select)', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({
@@ -1180,13 +1188,11 @@ describe('GET /users serverIds (multi-select)', () => {
     const app = Fastify({ logger: false });
     await app.register(sensible);
     // Viewer only has access to serverA, but requests both servers.
-    app.decorate('authenticate', async (request: any) => {
-      request.user = {
-        userId: randomUUID(),
-        username: 'viewer',
-        role: 'viewer',
-        serverIds: [serverA.id],
-      };
+    decorateTestAuth(app, {
+      userId: randomUUID(),
+      username: 'viewer',
+      role: 'viewer',
+      serverIds: [serverA.id],
     });
     await app.register(listRoutes, { prefix: '/users' });
 
@@ -1224,9 +1230,7 @@ describe('GET /users search', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({ method: 'GET', url: '/users?search=zebra' });
@@ -1258,9 +1262,7 @@ describe('GET /users search', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({ method: 'GET', url: '/users?search=featherweight' });
@@ -1294,9 +1296,7 @@ describe('GET /users search', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({
@@ -1342,9 +1342,7 @@ describe('GET /users search', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({
@@ -1410,9 +1408,7 @@ describe('identity trust rollup stays current outside merge/split', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     // Lower trust on the heavier-weighted account (sessionCount 30)
@@ -1489,9 +1485,7 @@ describe('identity trust rollup stays current outside merge/split', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(violationRoutes, { prefix: '/violations' });
 
     const response = await app.inject({ method: 'DELETE', url: `/violations/${violation.id}` });
@@ -1541,9 +1535,7 @@ describe('POST /users/bulk/reset-trust', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     // Only the representative row's id is sent, the same way the roster sends it
@@ -1597,13 +1589,11 @@ describe('POST /users/bulk/reset-trust', () => {
     await app.register(sensible);
     // Admin scoped only to serverA - the only account this caller can see or
     // select on the roster is targetSu, so that's the only id sent.
-    app.decorate('authenticate', async (request: any) => {
-      request.user = {
-        userId: randomUUID(),
-        username: 'scoped-admin',
-        role: 'admin',
-        serverIds: [serverA.id],
-      };
+    decorateTestAuth(app, {
+      userId: randomUUID(),
+      username: 'scoped-admin',
+      role: 'admin',
+      serverIds: [serverA.id],
     });
     await app.register(listRoutes, { prefix: '/users' });
 
@@ -1673,9 +1663,7 @@ describe('POST /users/bulk/reset-trust', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({
@@ -1725,9 +1713,7 @@ describe('GET /users orderBy', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const page1 = await app.inject({
@@ -1753,9 +1739,7 @@ describe('GET /users orderBy', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({ method: 'GET', url: '/users?orderBy=notAField' });
@@ -1782,9 +1766,7 @@ describe('GET /users orderBy', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const response = await app.inject({ method: 'GET', url: '/users?pageSize=100' });
@@ -1816,9 +1798,7 @@ describe('GET /users orderBy', () => {
 
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    decorateTestAuth(app, { userId: admin.id, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
 
     const descResponse = await app.inject({
