@@ -212,7 +212,13 @@ function buildAuth(redis: Redis) {
         (await redis.eval(GET_AND_DELETE_SCRIPT, 1, rkey(key))) as string | null,
     },
     rateLimit: {
-      enabled: true,
+      // Disabled only under vitest (NODE_ENV=test). Better Auth's limiter keeps
+      // per-IP counters in-process, so an integration test that drives several
+      // sign-up requests through one app instance trips it and gets 429s that
+      // have nothing to do with the behaviour under test. Production and dev set
+      // NODE_ENV=production, so this can never disable the limiter in a
+      // deployment - see betterAuthSignupUsername.integration.test.ts.
+      enabled: process.env.NODE_ENV !== 'test',
       storage: 'secondary-storage',
     },
     databaseHooks: {
