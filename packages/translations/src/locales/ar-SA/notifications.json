@@ -79,6 +79,11 @@
       "ruleCreateFailed": "فشل في إنشاء قاعدة",
       "ruleDeleteFailed": "فشل في حذف القاعدة",
       "ruleUpdateFailed": "فشل تحديث القاعدة",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "فشل في إضافة الخادم",
       "serverRemoveFailed": "فشل في إزالة الخادم",
       "serverReorderFailed": "فشل في إعادة ترتيب الخوادم",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "تم تحديث القاعدة بنجاح",
         "title": "تم تحديث القاعدة"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "تم توصيل {{name}} بنجاح",

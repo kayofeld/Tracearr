@@ -79,6 +79,11 @@
       "ruleCreateFailed": "Failed to create rule",
       "ruleDeleteFailed": "Failed to delete rule",
       "ruleUpdateFailed": "Failed to update rule",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "Failed to add server",
       "serverRemoveFailed": "Failed to remove server",
       "serverReorderFailed": "Failed to reorder servers",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "The rule has been updated successfully",
         "title": "Rule Updated"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "{{name}} has been connected successfully",

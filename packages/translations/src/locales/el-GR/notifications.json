@@ -79,6 +79,11 @@
       "ruleCreateFailed": "Αποτυχία δημιουργίας κανόνα",
       "ruleDeleteFailed": "Αποτυχία διαγραφής κανόνα",
       "ruleUpdateFailed": "Αποτυχία ενημέρωσης κανόνα",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "Αποτυχία προσθήκης διακομιστή",
       "serverRemoveFailed": "Αποτυχία κατάργησης διακομιστή",
       "serverReorderFailed": "Απέτυχε η αναδιάταξη διακομιστών",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "Ο κανόνας έχει ενημερωθεί με επιτυχία",
         "title": "Κανόνας Ενημερώθηκε"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "Το {{name}} συνδέθηκε με επιτυχία",

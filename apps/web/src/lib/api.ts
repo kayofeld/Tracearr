@@ -90,6 +90,13 @@ import type {
   OmbiMappingsResponse,
   OmbiMappingUpsertRequest,
   RequesterStatsResponse,
+  // Seerr connector types
+  SeerrTestConnectionRequest,
+  SeerrTestConnectionResponse,
+  SeerrStatusResponse,
+  SeerrPurgeResponse,
+  SeerrMappingsResponse,
+  SeerrMappingUpsertRequest,
 } from '@tracearr/shared';
 
 // Re-export shared types needed by frontend components
@@ -1471,6 +1478,33 @@ class ApiClient {
         }),
       revert: (ombiUserId: string) =>
         this.request<{ updated: number }>(`/ombi/mappings/${encodeURIComponent(ombiUserId)}`, {
+          method: 'DELETE',
+        }),
+    },
+  };
+
+  // Seerr connector - owner-gated connection/sync/mapping management.
+  // Contract: docs/architecture/seerr-api-contract.md
+  seerr = {
+    testConnection: (data: SeerrTestConnectionRequest) =>
+      this.request<SeerrTestConnectionResponse>('/seerr/test-connection', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    // 202 -> { jobId }; the request() helper throws ApiError(409|400) for the
+    // "already running" / "not configured" cases per the contract.
+    sync: () => this.request<{ jobId: string }>('/seerr/sync', { method: 'POST' }),
+    status: () => this.request<SeerrStatusResponse>('/seerr/status'),
+    purge: () => this.request<SeerrPurgeResponse>('/seerr/data', { method: 'DELETE' }),
+    mappings: {
+      list: () => this.request<SeerrMappingsResponse>('/seerr/mappings'),
+      upsert: (seerrUserId: string, data: SeerrMappingUpsertRequest) =>
+        this.request<{ updated: number }>(`/seerr/mappings/${encodeURIComponent(seerrUserId)}`, {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+      revert: (seerrUserId: string) =>
+        this.request<{ updated: number }>(`/seerr/mappings/${encodeURIComponent(seerrUserId)}`, {
           method: 'DELETE',
         }),
     },

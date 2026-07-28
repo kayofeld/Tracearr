@@ -79,6 +79,11 @@
       "ruleCreateFailed": "Regel aanmaken mislukt",
       "ruleDeleteFailed": "Regel verwijderen mislukt",
       "ruleUpdateFailed": "Regel bijwerken mislukt",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "Server toevoegen mislukt",
       "serverRemoveFailed": "Server verwijderen mislukt",
       "serverReorderFailed": "Servers herschikken mislukt",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "De regel is succesvol bijgewerkt",
         "title": "Regel bijgewerkt"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "{{name}} is succesvol verbonden",

@@ -20,6 +20,7 @@ vi.mock('@/hooks/queries', () => ({
   useLibraryNeverWatched: vi.fn(),
   useLibraryStale: vi.fn(),
   useLibraryStatus: vi.fn(),
+  useRequesterStats: vi.fn(),
 }));
 
 vi.mock('@/hooks/useServer', () => ({
@@ -42,13 +43,60 @@ vi.mock('@/components/charts', () => ({
 vi.mock('highcharts', () => ({ default: {} }));
 vi.mock('highcharts-react-official', () => ({ HighchartsReact: () => null }));
 
-import { useLibraryNeverWatched, useLibraryStale, useLibraryStatus } from '@/hooks/queries';
+import {
+  useLibraryNeverWatched,
+  useLibraryStale,
+  useLibraryStatus,
+  useRequesterStats,
+} from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
 
 const mockUseLibraryNeverWatched = vi.mocked(useLibraryNeverWatched);
 const mockUseLibraryStale = vi.mocked(useLibraryStale);
 const mockUseLibraryStatus = vi.mocked(useLibraryStatus);
+const mockUseRequesterStats = vi.mocked(useRequesterStats);
 const mockUseServer = vi.mocked(useServer);
+
+function requesterStatsReturn(
+  configuredSources: { ombi: boolean; seerr: boolean } | undefined = {
+    ombi: true,
+    seerr: false,
+  }
+) {
+  return {
+    data: {
+      requesters: [],
+      unattributed: {
+        userId: null,
+        username: null,
+        requestCount: 0,
+        movieCount: 0,
+        tvCount: 0,
+        statusCounts: { pending: 0, approved: 0, denied: 0, available: 0 },
+        matchedToLibraryCount: 0,
+        totalSizeBytes: 0,
+        neverWatchedCount: 0,
+        neverWatchedSizeBytes: 0,
+        watchedByRequesterCount: 0,
+        firstRequestAt: null,
+        lastRequestAt: null,
+      },
+      totals: {
+        requestCount: 0,
+        requesterCount: 0,
+        unattributedCount: 0,
+        neverWatchedSizeBytes: 0,
+      },
+      configured: true,
+      configuredSources,
+      generatedAt: '2023-06-01T00:00:00Z',
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useRequesterStats>;
+}
 
 function serverReturn(overrides: Partial<ReturnType<typeof useServer>> = {}) {
   return {
@@ -154,6 +202,7 @@ describe('LibraryNeverWatched', () => {
     mockUseLibraryStatus.mockReturnValue(statusReturn());
     mockUseLibraryNeverWatched.mockReturnValue(neverWatchedStatsReturn());
     mockUseLibraryStale.mockReturnValue(staleItemsReturn());
+    mockUseRequesterStats.mockReturnValue(requesterStatsReturn());
   });
 
   it('renders stats and table rows from the mocked hooks', () => {
@@ -402,6 +451,88 @@ describe('LibraryNeverWatched', () => {
 
       expect(screen.getByText('Friendly Name')).toBeInTheDocument();
       expect(screen.queryByText('library.neverWatched.requestedByOthers')).not.toBeInTheDocument();
+    });
+
+    function itemWithRequestedBy(source: 'ombi' | 'seerr') {
+      return staleItemsReturn({
+        data: {
+          items: [
+            {
+              id: 'item-1',
+              serverId: 'srv-1',
+              serverName: 'Server A',
+              libraryId: 'lib-1',
+              libraryName: 'Movies',
+              title: 'Old Forgotten Movie',
+              mediaType: 'movie',
+              year: 2010,
+              fileSize: 12_000_000_000,
+              resolution: '1080p',
+              addedAt: '2023-01-01T00:00:00Z',
+              lastWatched: null,
+              watchCount: 0,
+              category: 'never_watched',
+              daysStale: 900,
+              requestedBy: {
+                userId: 'user-1',
+                username: 'alice',
+                ombiUsername: 'alice.source',
+                ombiAlias: null,
+                requestedAt: '2023-01-01T00:00:00Z',
+                otherRequesterCount: 0,
+                source,
+              },
+            },
+          ],
+          summary: {
+            neverWatched: { count: 1, sizeBytes: 12_000_000_000 },
+            stale: { count: 0, sizeBytes: 0 },
+            total: { count: 1, sizeBytes: 12_000_000_000 },
+            threshold: { days: 90 },
+          },
+          pagination: { page: 1, pageSize: 20, total: 1 },
+        },
+      });
+    }
+
+    it('does not show a connector source badge when only one connector is configured', () => {
+      mockUseRequesterStats.mockReturnValue(requesterStatsReturn({ ombi: true, seerr: false }));
+      mockUseLibraryStale.mockReturnValue(itemWithRequestedBy('ombi'));
+
+      renderPage();
+
+      expect(screen.getByText('alice')).toBeInTheDocument();
+      expect(screen.queryByText('library.neverWatched.sourceOmbi')).not.toBeInTheDocument();
+      expect(screen.queryByText('library.neverWatched.sourceSeerr')).not.toBeInTheDocument();
+    });
+
+    it('shows the Seerr connector source badge once both connectors are configured', () => {
+      mockUseRequesterStats.mockReturnValue(requesterStatsReturn({ ombi: true, seerr: true }));
+      mockUseLibraryStale.mockReturnValue(itemWithRequestedBy('seerr'));
+
+      renderPage();
+
+      expect(screen.getByText('alice')).toBeInTheDocument();
+      expect(screen.getByText('library.neverWatched.sourceSeerr')).toBeInTheDocument();
+    });
+
+    it('shows the Ombi connector source badge once both connectors are configured', () => {
+      mockUseRequesterStats.mockReturnValue(requesterStatsReturn({ ombi: true, seerr: true }));
+      mockUseLibraryStale.mockReturnValue(itemWithRequestedBy('ombi'));
+
+      renderPage();
+
+      expect(screen.getByText('alice')).toBeInTheDocument();
+      expect(screen.getByText('library.neverWatched.sourceOmbi')).toBeInTheDocument();
+    });
+
+    it('does not show a source badge when configuredSources is absent (older server)', () => {
+      mockUseRequesterStats.mockReturnValue(requesterStatsReturn(undefined));
+      mockUseLibraryStale.mockReturnValue(itemWithRequestedBy('seerr'));
+
+      renderPage();
+
+      expect(screen.queryByText('library.neverWatched.sourceSeerr')).not.toBeInTheDocument();
     });
   });
 });

@@ -79,6 +79,11 @@
       "ruleCreateFailed": "Kunne ikke oprette regel",
       "ruleDeleteFailed": "Kunne ikke slette reglen",
       "ruleUpdateFailed": "Kunne ikke opdatere reglen",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "Mislykkedes at tilføje server",
       "serverRemoveFailed": "Mislykkedes at fjerne server",
       "serverReorderFailed": "Kunne ikke omarrangere servere",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "Reglen er blevet opdateret",
         "title": "Regel Opdateret"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "{{name}} er blevet forbundet",

@@ -79,6 +79,11 @@
       "ruleCreateFailed": "创建规则失败",
       "ruleDeleteFailed": "删除规则失败",
       "ruleUpdateFailed": "更新规则失败",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "添加服务器失败",
       "serverRemoveFailed": "删除服务器失败",
       "serverReorderFailed": "服务器重新排序失败",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "规则已成功更新",
         "title": "规则已更新"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "{{name}}已成功连接",

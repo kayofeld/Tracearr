@@ -79,6 +79,11 @@
       "ruleCreateFailed": "Vytvoření pravidla se nezdařilo",
       "ruleDeleteFailed": "Nepodařilo se odstranit pravidlo",
       "ruleUpdateFailed": "Aktualizace pravidla se nezdařila",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "Nepodařilo se přidat server",
       "serverRemoveFailed": "Nepodařilo se odstranit server",
       "serverReorderFailed": "Změna pořadí serverů se nezdařila",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "Pravidlo bylo úspěšně aktualizováno",
         "title": "Pravidlo aktualizováno"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "{{name}} byl úspěšně připojen",

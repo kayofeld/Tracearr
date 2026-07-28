@@ -21,12 +21,42 @@ function formatDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString() : '-';
 }
 
+/**
+ * Which request connector(s) are configured, driving the copy on this page.
+ * `RequesterStatsResponse.configuredSources` is optional (absent on an older
+ * server that predates the Seerr connector) - treat that as 'unknown' and
+ * fall back to source-neutral copy rather than guessing which one it is.
+ */
+type SourceKind = 'ombi' | 'seerr' | 'both' | 'unknown';
+
+function sourceKind(configuredSources: { ombi: boolean; seerr: boolean } | undefined): SourceKind {
+  if (!configuredSources) return 'unknown';
+  const { ombi, seerr } = configuredSources;
+  if (ombi && seerr) return 'both';
+  if (ombi) return 'ombi';
+  if (seerr) return 'seerr';
+  return 'unknown';
+}
+
 export function StatsRequesters() {
   const { t } = useTranslation(['pages', 'common']);
   const { selectedServerIds } = useServer();
   const [mediaTypeFilter, setMediaTypeFilter] = useState<MediaTypeFilter>('all');
 
   const stats = useRequesterStats(selectedServerIds, mediaTypeFilter);
+  const kind = sourceKind(stats.data?.configuredSources);
+  const descriptionKey =
+    kind === 'ombi'
+      ? 'statsRequesters.descriptionOmbi'
+      : kind === 'seerr'
+        ? 'statsRequesters.descriptionSeerr'
+        : 'statsRequesters.descriptionBoth';
+  const unattributedRowDescKey =
+    kind === 'ombi'
+      ? 'statsRequesters.unattributedRowDescOmbi'
+      : kind === 'seerr'
+        ? 'statsRequesters.unattributedRowDescSeerr'
+        : 'statsRequesters.unattributedRowDescBoth';
 
   const columns = useMemo<ColumnDef<RequesterStatsRow>[]>(
     () => [
@@ -92,7 +122,7 @@ export function StatsRequesters() {
   const header = (
     <div>
       <h1 className="text-2xl font-bold">{t('statsRequesters.title')}</h1>
-      <p className="text-muted-foreground text-sm">{t('statsRequesters.description')}</p>
+      <p className="text-muted-foreground text-sm">{t(descriptionKey)}</p>
     </div>
   );
 
@@ -120,12 +150,22 @@ export function StatsRequesters() {
             <h3 className="text-lg font-semibold">{t('statsRequesters.notConfiguredTitle')}</h3>
             <p className="text-muted-foreground mt-1">{t('statsRequesters.notConfiguredDesc')}</p>
           </div>
-          <Button asChild>
-            <Link to="/settings/ombi">
-              <SettingsIcon className="mr-2 h-4 w-4" />
-              {t('statsRequesters.goToSettings')}
-            </Link>
-          </Button>
+          {/* Neither connector is configured - offer both, never assume which one
+              the owner will pick (this page has no way to know). */}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button asChild>
+              <Link to="/settings/ombi">
+                <SettingsIcon className="mr-2 h-4 w-4" />
+                {t('statsRequesters.goToOmbiSettings')}
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/settings/seerr">
+                <SettingsIcon className="mr-2 h-4 w-4" />
+                {t('statsRequesters.goToSeerrSettings')}
+              </Link>
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -187,9 +227,7 @@ export function StatsRequesters() {
             <UserX className="text-muted-foreground h-4 w-4" />
             {t('statsRequesters.unattributedRow')}
           </CardTitle>
-          <p className="text-muted-foreground text-sm">
-            {t('statsRequesters.unattributedRowDesc')}
-          </p>
+          <p className="text-muted-foreground text-sm">{t(unattributedRowDescKey)}</p>
         </CardHeader>
         <CardContent>
           {stats.isLoading ? (

@@ -79,6 +79,11 @@
       "ruleCreateFailed": "Crearea regulii a eșuat",
       "ruleDeleteFailed": "Ștergerea regulii a eșuat",
       "ruleUpdateFailed": "Actualizarea regulii a eșuat",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "Adăugarea serverului a eșuat",
       "serverRemoveFailed": "Ștergerea serverului a eșuat",
       "serverReorderFailed": "Reordonarea serverelor a eșuat",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "Regula a fost actualizată cu succes",
         "title": "Regulă actualizată"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "{{name}} a fost conectat cu succes",

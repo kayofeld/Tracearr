@@ -79,6 +79,11 @@
       "ruleCreateFailed": "Не вдалося створити правило",
       "ruleDeleteFailed": "Не вдалося видалити правило",
       "ruleUpdateFailed": "Не вдалося оновити правило",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "serverAddFailed": "Не вдалося додати сервер",
       "serverRemoveFailed": "Не вдалося видалити сервер",
       "serverReorderFailed": "Не вдалося змінити порядок серверів",
@@ -204,6 +209,15 @@
       "ruleUpdated": {
         "message": "Правило успішно оновлено",
         "title": "Правило оновлено"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
       },
       "serverAdded": {
         "message": "{{name}} успішно підключено",
