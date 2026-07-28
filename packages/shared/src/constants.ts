@@ -88,6 +88,8 @@ export const WS_EVENTS = {
   MAINTENANCE_PROGRESS: 'maintenance:progress',
   /** Library sync progress updates */
   LIBRARY_SYNC_PROGRESS: 'library:sync:progress',
+  /** Ombi request-mirror sync progress updates */
+  OMBI_SYNC_PROGRESS: 'ombi:sync:progress',
   /** Unified running tasks updates */
   TASKS_UPDATED: 'tasks:updated',
   SUBSCRIBE_SESSIONS: 'subscribe:sessions',
@@ -185,6 +187,9 @@ export const REDIS_KEYS = {
   get LIBRARY_NEVER_WATCHED() {
     return `${_redisPrefix}tracearr:library:never-watched`;
   },
+  get OMBI_REQUESTER_STATS() {
+    return `${_redisPrefix}tracearr:ombi:requester-stats`;
+  },
   get LIBRARY_DUPLICATES() {
     return `${_redisPrefix}tracearr:library:duplicates`;
   },
@@ -280,6 +285,7 @@ export const CACHE_TTL = {
   LIBRARY_QUALITY: 300, // 5 minutes
   LIBRARY_STALE: 3600, // 1 hour (changes slowly)
   LIBRARY_NEVER_WATCHED: 3600, // 1 hour (changes slowly)
+  OMBI_REQUESTER_STATS: 3600, // 1 hour - matches LIBRARY_STALE cadence
   LIBRARY_DUPLICATES: 3600, // 1 hour (changes slowly)
   LIBRARY_STORAGE: 300, // 5 minutes
   LIBRARY_WATCH: 300, // 5 minutes

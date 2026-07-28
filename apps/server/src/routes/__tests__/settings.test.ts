@@ -68,6 +68,8 @@ const mockAllSettings: Settings = {
   usePlexGeoip: false,
   tautulliUrl: 'http://localhost:8181',
   tautulliApiKey: 'secret-api-key',
+  ombiUrl: null,
+  ombiApiKey: null,
   externalUrl: 'https://tracearr.example.com',
   trustProxy: true,
   mobileEnabled: false,

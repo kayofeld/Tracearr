@@ -798,6 +798,8 @@ export const updateSettingsSchema = z.object({
   // Tautulli integration
   tautulliUrl: nullableUrlSchema.optional(),
   tautulliApiKey: nullableStringSchema().optional(),
+  ombiUrl: nullableUrlSchema.optional(),
+  ombiApiKey: nullableStringSchema().optional(),
   // Network/access settings
   externalUrl: nullableUrlSchema.optional(),
   trustProxy: z.boolean().optional(),
@@ -1102,6 +1104,23 @@ export const libraryNeverWatchedQuerySchema = z.object({
   mediaType: z.enum(['movie', 'show', 'all']).default('all'),
 });
 
+// Ombi connector schemas (contract: docs/architecture/ombi-api-contract.md)
+export const ombiTestConnectionSchema = z.object({
+  url: permissiveUrlSchema,
+  apiKey: z.string().min(1).max(255),
+});
+
+export const ombiMappingUpsertSchema = z.object({
+  // null forces "unattributed" - the owner deliberately ignoring this requester.
+  userId: z.uuid().nullable(),
+});
+
+export const requesterStatsQuerySchema = z.object({
+  serverId: uuidSchema.optional(),
+  serverIds: serverIdsQuerySchema,
+  mediaType: z.enum(['all', 'movie', 'tv']).default('all'),
+});
+
 // Library watch statistics query schema
 export const libraryWatchQuerySchema = z.object({
   serverId: uuidSchema.optional(),
@@ -1202,6 +1221,9 @@ export type LibraryStorageQueryInput = z.infer<typeof libraryStorageQuerySchema>
 export type LibraryDuplicatesQueryInput = z.infer<typeof libraryDuplicatesQuerySchema>;
 export type LibraryStaleQueryInput = z.infer<typeof libraryStaleQuerySchema>;
 export type LibraryNeverWatchedQueryInput = z.infer<typeof libraryNeverWatchedQuerySchema>;
+export type OmbiTestConnectionInput = z.infer<typeof ombiTestConnectionSchema>;
+export type OmbiMappingUpsertInput = z.infer<typeof ombiMappingUpsertSchema>;
+export type RequesterStatsQueryInput = z.infer<typeof requesterStatsQuerySchema>;
 export type LibraryWatchQueryInput = z.infer<typeof libraryWatchQuerySchema>;
 export type LibraryRoiQueryInput = z.infer<typeof libraryRoiQuerySchema>;
 export type LibraryPatternsQueryInput = z.infer<typeof libraryPatternsQuerySchema>;

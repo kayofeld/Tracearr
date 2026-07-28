@@ -29,6 +29,9 @@ const PUBLIC_DEFAULTS: Settings = {
   usePlexGeoip: false,
   tautulliUrl: null,
   tautulliApiKey: null,
+  // Ombi connector: "configured" iff both are set (same gate as Tautulli above).
+  ombiUrl: null,
+  ombiApiKey: null,
   externalUrl: null,
   trustProxy: false,
   mobileEnabled: false,
