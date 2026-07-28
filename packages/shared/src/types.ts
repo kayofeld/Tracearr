@@ -1215,6 +1215,7 @@ export interface ServerToClientEvents {
   'maintenance:progress': (progress: MaintenanceJobProgress) => void;
   'library:sync:progress': (progress: LibrarySyncProgress) => void;
   'ombi:sync:progress': (event: OmbiSyncProgressEvent) => void;
+  'seerr:sync:progress': (event: SeerrSyncProgressEvent) => void;
   'tasks:updated': (tasks: RunningTask[]) => void;
   'version:update': (data: { current: string; latest: string; releaseUrl: string }) => void;
   'server:down': (data: { serverId: string; serverName: string }) => void;
