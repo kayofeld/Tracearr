@@ -868,6 +868,56 @@ describe('LibrarySyncService', () => {
 
       expect(db.insert).not.toHaveBeenCalled();
     });
+
+    it('should strip null bytes from name/type instead of inserting raw', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const insertChain = mockInsertChain();
+
+      await service.upsertLibraries(serverId, [{ id: 'lib-1', name: 'Movi es', type: 'mo vie' }]);
+
+      expect(insertChain.values).toHaveBeenCalledWith([
+        { serverId, libraryId: 'lib-1', name: 'Movies', type: 'movie' },
+      ]);
+    });
+
+    it('should truncate an overlength name to 255 chars and type to 20 chars', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const insertChain = mockInsertChain();
+      const longName = 'A'.repeat(300);
+      const longType = 'B'.repeat(30);
+
+      await service.upsertLibraries(serverId, [{ id: 'lib-1', name: longName, type: longType }]);
+
+      expect(insertChain.values).toHaveBeenCalledWith([
+        { serverId, libraryId: 'lib-1', name: 'A'.repeat(255), type: 'B'.repeat(20) },
+      ]);
+    });
+
+    it('should skip a library whose name is whitespace-only after trim, without inserting a blank', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+
+      await service.upsertLibraries(serverId, [{ id: 'lib-1', name: '   ', type: 'movie' }]);
+
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('should insert the remaining valid libraries when one has a blank name', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const insertChain = mockInsertChain();
+
+      await service.upsertLibraries(serverId, [
+        { id: 'lib-1', name: '   ', type: 'movie' },
+        { id: 'lib-2', name: 'TV Shows', type: 'show' },
+      ]);
+
+      expect(insertChain.values).toHaveBeenCalledWith([
+        { serverId, libraryId: 'lib-2', name: 'TV Shows', type: 'show' },
+      ]);
+    });
   });
 
   describe('delta detection', () => {

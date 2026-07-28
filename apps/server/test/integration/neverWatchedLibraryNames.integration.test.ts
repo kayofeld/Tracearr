@@ -88,6 +88,43 @@ describe('never-watched by-library display names', () => {
     expect(entry?.libraryName).toBe('lib-unsynced');
   });
 
+  it('keeps distinct names/counts when two servers share the same library_id', async () => {
+    // library_id is the media server's raw section key (e.g. Plex section "1"),
+    // which is only unique per-server - a second, unrelated server can easily
+    // report the same key for a totally different library. The unique index
+    // and the by_library GROUP BY both carry server_id, but nothing exercised
+    // the collision end-to-end: a JOIN or GROUP BY that dropped server_id
+    // would silently fan out or double-count rows across servers.
+    const serverA = await createTestServer({ type: 'plex' });
+    const serverB = await createTestServer({ type: 'plex' });
+    const sharedLibraryId = 'lib-shared';
+
+    await upsertLibraryName(serverA.id, sharedLibraryId, 'Movies (A)');
+    await upsertLibraryName(serverB.id, sharedLibraryId, 'Movies (B)');
+    await insertMovie(serverA.id, sharedLibraryId, 'rk-a1', 'Never Watched A1');
+    await insertMovie(serverA.id, sharedLibraryId, 'rk-a2', 'Never Watched A2');
+    await insertMovie(serverB.id, sharedLibraryId, 'rk-b1', 'Never Watched B1');
+
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/never-watched?serverIds=${serverA.id},${serverB.id}`,
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json<NeverWatchedStatsResponse>();
+    const entries = body.byLibrary.filter((l) => l.libraryId === sharedLibraryId);
+    expect(entries).toHaveLength(2);
+
+    const entryA = entries.find((l) => l.serverId === serverA.id);
+    const entryB = entries.find((l) => l.serverId === serverB.id);
+    expect(entryA?.libraryName).toBe('Movies (A)');
+    expect(entryA?.count).toBe(2);
+    expect(entryB?.libraryName).toBe('Movies (B)');
+    expect(entryB?.count).toBe(1);
+  });
+
   it('reflects a rename after the libraries row is updated', async () => {
     const server = await createTestServer({ type: 'plex' });
     await upsertLibraryName(server.id, 'lib-3', 'Old Name');

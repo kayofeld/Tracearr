@@ -780,16 +780,37 @@ export class LibrarySyncService {
   ): Promise<void> {
     if (libs.length === 0) return;
 
+    // Media-server library names/types go through the same scrub-then-size-limit
+    // boundary as library_items (see upsertItems above): null bytes abort the
+    // whole multi-row INSERT (SQLSTATE 22021), and Postgres rejects rather than
+    // truncates on an overlength varchar. name/type column widths come from
+    // db/schema.ts (libraries.name varchar(255), libraries.type varchar(20)).
+    const rows: Array<{ serverId: string; libraryId: string; name: string; type: string }> = [];
+    for (const lib of libs) {
+      const scrubbed = scrubStringFields({ name: lib.name, type: lib.type });
+      const name = scrubbed.name.trim().slice(0, 255);
+      const type = scrubbed.type.trim().slice(0, 20);
+
+      // A name that is blank/whitespace-only (after scrub+trim) must not be
+      // persisted: it would render as an empty label everywhere the name is
+      // shown. Skip the row entirely rather than writing an empty string -
+      // that leaves any previously-synced good name in place instead of
+      // clobbering it with a blank on a transient/malformed sync.
+      if (name === '') {
+        console.warn(
+          `[LibrarySync] Skipping library ${lib.id} for server ${serverId}: name is blank after scrub/trim`
+        );
+        continue;
+      }
+
+      rows.push({ serverId, libraryId: lib.id, name, type });
+    }
+
+    if (rows.length === 0) return;
+
     await db
       .insert(librariesTable)
-      .values(
-        libs.map((lib) => ({
-          serverId,
-          libraryId: lib.id,
-          name: lib.name,
-          type: lib.type,
-        }))
-      )
+      .values(rows)
       .onConflictDoUpdate({
         target: [librariesTable.serverId, librariesTable.libraryId],
         set: {
