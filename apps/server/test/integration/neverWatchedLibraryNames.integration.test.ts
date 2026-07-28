@@ -14,7 +14,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import { sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
-import type { AuthUser, NeverWatchedStatsResponse } from '@tracearr/shared';
+import { REDIS_KEYS, type AuthUser, type NeverWatchedStatsResponse } from '@tracearr/shared';
 import { createTestServer } from '@tracearr/test-utils/factories';
 import { createMockRedis } from '@tracearr/test-utils/mocks';
 import { db } from '../../src/db/client.js';
@@ -93,23 +93,32 @@ describe('never-watched by-library display names', () => {
     await upsertLibraryName(server.id, 'lib-3', 'Old Name');
     await insertMovie(server.id, 'lib-3', 'rk-3', 'Renamed Library Movie');
 
-    const appBefore = await buildApp();
-    const before = await appBefore.inject({
-      method: 'GET',
-      url: `/never-watched?serverIds=${server.id}`,
-    });
-    await appBefore.close();
-    expect(before.json<NeverWatchedStatsResponse>().byLibrary[0]?.libraryName).toBe('Old Name');
+    const app = await buildApp();
+    try {
+      const before = await app.inject({
+        method: 'GET',
+        url: `/never-watched?serverIds=${server.id}`,
+      });
+      expect(before.json<NeverWatchedStatsResponse>().byLibrary[0]?.libraryName).toBe('Old Name');
 
-    // Simulate the next sync renaming the library on the media server.
-    await upsertLibraryName(server.id, 'lib-3', 'New Name');
+      // Simulate the next sync renaming the library on the media server. A real
+      // sync does two things, so this has to do both: it upserts the libraries
+      // row AND calls invalidateLibraryCaches(), which drops the cached
+      // never-watched payload. Updating only the row would leave the response
+      // served from cache for up to CACHE_TTL.LIBRARY_NEVER_WATCHED (1 hour) and
+      // the assertion below would read a stale name.
+      await upsertLibraryName(server.id, 'lib-3', 'New Name');
+      const cachedKeys = await app.redis.keys(`${REDIS_KEYS.LIBRARY_NEVER_WATCHED}*`);
+      expect(cachedKeys.length).toBeGreaterThan(0);
+      await app.redis.del(...cachedKeys);
 
-    const appAfter = await buildApp();
-    const after = await appAfter.inject({
-      method: 'GET',
-      url: `/never-watched?serverIds=${server.id}`,
-    });
-    await appAfter.close();
-    expect(after.json<NeverWatchedStatsResponse>().byLibrary[0]?.libraryName).toBe('New Name');
+      const after = await app.inject({
+        method: 'GET',
+        url: `/never-watched?serverIds=${server.id}`,
+      });
+      expect(after.json<NeverWatchedStatsResponse>().byLibrary[0]?.libraryName).toBe('New Name');
+    } finally {
+      await app.close();
+    }
   });
 });
