@@ -556,6 +556,12 @@
     "noTerminationsFound": "Pro tohoto uživatele nejsou ukončeny žádné streamy.",
     "noViolationsFound": "Pro tohoto uživatele žádné porušení.",
     "overallTrust": "Overall Trust",
+    "requestsCard": {
+      "neverWatchedOf_one": "{{neverWatched}} of {{count}} request never watched",
+      "neverWatchedOf_other": "{{neverWatched}} of {{count}} requests never watched",
+      "notLinked": "No requests linked to this user",
+      "title": "Ombi Requests"
+    },
     "serverScope": "Server",
     "sessions": "Relace",
     "splitAccount": "Split into separate user",

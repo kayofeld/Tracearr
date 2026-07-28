@@ -556,6 +556,12 @@
     "noTerminationsFound": "Nici o terminare de flux pentru acest utilizator.",
     "noViolationsFound": "Nu există încălcări pentru acest utilizator.",
     "overallTrust": "Overall Trust",
+    "requestsCard": {
+      "neverWatchedOf_one": "{{neverWatched}} of {{count}} request never watched",
+      "neverWatchedOf_other": "{{neverWatched}} of {{count}} requests never watched",
+      "notLinked": "No requests linked to this user",
+      "title": "Ombi Requests"
+    },
     "serverScope": "Server",
     "sessions": "Sesiuni",
     "splitAccount": "Split into separate user",

@@ -119,7 +119,13 @@
     "acrossAllServers": "Across all linked accounts:",
     "overallTrust": "Overall Trust",
     "serverScope": "Server",
-    "allServers": "All servers"
+    "allServers": "All servers",
+    "requestsCard": {
+      "title": "Ombi Requests",
+      "notLinked": "No requests linked to this user",
+      "neverWatchedOf_one": "{{neverWatched}} of {{count}} request never watched",
+      "neverWatchedOf_other": "{{neverWatched}} of {{count}} requests never watched"
+    }
   },
   "history": {
     "title": "History",

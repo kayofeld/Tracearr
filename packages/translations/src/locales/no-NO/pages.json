@@ -556,6 +556,12 @@
     "noTerminationsFound": "Ingen strømopphør for denne brukeren.",
     "noViolationsFound": "Ingen brudd for denne brukeren.",
     "overallTrust": "Overall Trust",
+    "requestsCard": {
+      "neverWatchedOf_one": "{{neverWatched}} of {{count}} request never watched",
+      "neverWatchedOf_other": "{{neverWatched}} of {{count}} requests never watched",
+      "notLinked": "No requests linked to this user",
+      "title": "Ombi Requests"
+    },
     "serverScope": "Server",
     "sessions": "Økter",
     "splitAccount": "Split into separate user",

@@ -556,6 +556,12 @@
     "noTerminationsFound": "Sem terminações de fluxo para este usuário.",
     "noViolationsFound": "Sem violações para este usuário.",
     "overallTrust": "Overall Trust",
+    "requestsCard": {
+      "neverWatchedOf_one": "{{neverWatched}} of {{count}} request never watched",
+      "neverWatchedOf_other": "{{neverWatched}} of {{count}} requests never watched",
+      "notLinked": "No requests linked to this user",
+      "title": "Ombi Requests"
+    },
     "serverScope": "Server",
     "sessions": "Sessões",
     "splitAccount": "Split into separate user",

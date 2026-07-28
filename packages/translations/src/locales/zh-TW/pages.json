@@ -556,6 +556,12 @@
     "noTerminationsFound": "此用户没有流终止。",
     "noViolationsFound": "没有此用户的违规行为。",
     "overallTrust": "Overall Trust",
+    "requestsCard": {
+      "neverWatchedOf_one": "{{neverWatched}} of {{count}} request never watched",
+      "neverWatchedOf_other": "{{neverWatched}} of {{count}} requests never watched",
+      "notLinked": "No requests linked to this user",
+      "title": "Ombi Requests"
+    },
     "serverScope": "Server",
     "sessions": "会话",
     "splitAccount": "Split into separate user",

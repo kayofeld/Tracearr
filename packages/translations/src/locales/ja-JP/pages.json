@@ -556,6 +556,12 @@
     "noTerminationsFound": "このユーザーに対する配信終了はありません。",
     "noViolationsFound": "このユーザーに対する違反はありません。",
     "overallTrust": "Overall Trust",
+    "requestsCard": {
+      "neverWatchedOf_one": "{{neverWatched}} of {{count}} request never watched",
+      "neverWatchedOf_other": "{{neverWatched}} of {{count}} requests never watched",
+      "notLinked": "No requests linked to this user",
+      "title": "Ombi Requests"
+    },
     "serverScope": "Server",
     "sessions": "セッション",
     "splitAccount": "Split into separate user",
