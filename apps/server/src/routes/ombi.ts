@@ -6,7 +6,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import {
   ombiTestConnectionSchema,
   ombiMappingUpsertSchema,
@@ -18,7 +18,7 @@ import {
   type OmbiRequesterResolutionType,
 } from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { ombiRequests, ombiUserMappings, users } from '../db/schema.js';
+import { mediaRequests, mediaRequestUserMappings, users } from '../db/schema.js';
 import { OmbiService } from '../services/ombi.js';
 import { SsrfBlockedError } from '../utils/ssrf.js';
 import { getOmbiSettings, getSetting } from '../services/settings.js';
@@ -29,7 +29,7 @@ import {
   invalidateOmbiCaches,
 } from '../jobs/ombiSyncQueue.js';
 
-/** Matches ombi_requests.ombi_user_id / ombi_user_mappings.ombi_user_id
+/** Matches media_requests.source_user_id / media_request_user_mappings.source_user_id
  * (varchar(64), db/schema.ts). A longer :ombiUserId path param otherwise
  * reaches an insert/update unvalidated and produces an unhandled Postgres
  * error -> 500 (SEC-05) - reject it at the route boundary instead. */
@@ -86,9 +86,10 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * GET /ombi/status - connector configuration + sync health (contract §4).
-   * counts/attribution/mediaMatch are computed on demand from ombi_requests
-   * so they never go stale between sync runs (a mapping change or purge
-   * takes effect immediately - see services/settings.ts OmbiSyncStatusInternal).
+   * counts/attribution/mediaMatch are computed on demand from media_requests
+   * (scoped to source='ombi') so they never go stale between sync runs (a
+   * mapping change or purge takes effect immediately - see
+   * services/settings.ts OmbiSyncStatusInternal).
    */
   app.get('/status', { preHandler: [app.requireOwner] }, async () => {
     const config = await getOmbiSettings();
@@ -98,7 +99,8 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
 
     const countsResult = await db.execute(sql`
       SELECT media_type AS "mediaType", COUNT(*)::int AS "count"
-      FROM ombi_requests
+      FROM media_requests
+      WHERE source = 'ombi'
       GROUP BY media_type
     `);
     let movieRequests = 0;
@@ -118,7 +120,8 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
         COUNT(*) FILTER (WHERE match_method IN ('username', 'provider') AND user_id IS NOT NULL)::int AS "matched",
         COUNT(*) FILTER (WHERE match_method = 'manual' AND user_id IS NOT NULL)::int AS "manual",
         COUNT(*) FILTER (WHERE user_id IS NULL)::int AS "unattributed"
-      FROM ombi_requests
+      FROM media_requests
+      WHERE source = 'ombi'
     `);
     const attribution = (attributionResult.rows[0] ?? {
       matched: 0,
@@ -131,7 +134,7 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
       SELECT
         COUNT(*) FILTER (WHERE li.id IS NOT NULL)::int AS "matched",
         COUNT(*) FILTER (WHERE li.id IS NULL)::int AS "unmatched"
-      FROM ombi_requests r
+      FROM media_requests r
       LEFT JOIN LATERAL (
         SELECT li.id FROM library_items li
         WHERE li.media_type = (CASE WHEN r.media_type = 'movie' THEN 'movie' ELSE 'show' END)
@@ -142,17 +145,19 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
           )
         LIMIT 1
       ) li ON true
+      WHERE r.source = 'ombi'
     `);
     const mediaMatch = (mediaMatchResult.rows[0] ?? { matched: 0, unmatched: 0 }) as {
       matched: number;
       unmatched: number;
     };
 
-    // Purge (DELETE /ombi/data) also deletes ombi_user_mappings (OMB-5) - if
-    // every request row was pruned but manual override mappings remain, the
-    // purge control must still surface or those rows are unpurgeable forever.
+    // Purge (DELETE /ombi/data) also deletes media_request_user_mappings rows
+    // scoped to source='ombi' (OMB-5) - if every request row was pruned but
+    // manual override mappings remain, the purge control must still surface
+    // or those rows are unpurgeable forever.
     const mappingCountResult = await db.execute(sql`
-      SELECT COUNT(*)::int AS "count" FROM ombi_user_mappings
+      SELECT COUNT(*)::int AS "count" FROM media_request_user_mappings WHERE source = 'ombi'
     `);
     const mappingCount = (mappingCountResult.rows[0] as { count: number } | undefined)?.count ?? 0;
 
@@ -182,21 +187,23 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
   app.get('/mappings', { preHandler: [app.requireOwner] }, async () => {
     const [requesterResult, countResult, mappingRows, userRows] = await Promise.all([
       db.execute(sql`
-        SELECT DISTINCT ON (ombi_user_id)
-          ombi_user_id AS "ombiUserId",
-          ombi_username AS "ombiUsername",
-          ombi_alias AS "ombiAlias",
+        SELECT DISTINCT ON (source_user_id)
+          source_user_id AS "ombiUserId",
+          source_username AS "ombiUsername",
+          source_alias AS "ombiAlias",
           user_id AS "userId",
           match_method AS "matchMethod"
-        FROM ombi_requests
-        ORDER BY ombi_user_id, synced_at DESC
+        FROM media_requests
+        WHERE source = 'ombi'
+        ORDER BY source_user_id, synced_at DESC
       `),
       db.execute(sql`
-        SELECT ombi_user_id AS "ombiUserId", COUNT(*)::int AS "requestCount"
-        FROM ombi_requests
-        GROUP BY ombi_user_id
+        SELECT source_user_id AS "ombiUserId", COUNT(*)::int AS "requestCount"
+        FROM media_requests
+        WHERE source = 'ombi'
+        GROUP BY source_user_id
       `),
-      db.select().from(ombiUserMappings),
+      db.select().from(mediaRequestUserMappings).where(eq(mediaRequestUserMappings.source, 'ombi')),
       db.select({ id: users.id, username: users.username }).from(users),
     ]);
 
@@ -253,12 +260,12 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
       };
     });
 
-    // Mapping rows for requesters no longer present in ombi_requests (contract §5.1).
+    // Mapping rows for requesters no longer present in media_requests (contract §5.1).
     const staleMappings: OmbiRequesterMapping[] = mappingRows
-      .filter((m) => !seenOmbiUserIds.has(m.ombiUserId))
+      .filter((m) => !seenOmbiUserIds.has(m.sourceUserId))
       .map((m) => ({
-        ombiUserId: m.ombiUserId,
-        ombiUsername: m.ombiUsername,
+        ombiUserId: m.sourceUserId,
+        ombiUsername: m.sourceUsername,
         ombiAlias: null,
         requestCount: 0,
         resolution: {
@@ -306,33 +313,39 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
 
       // Snapshot a display username for the mapping row: prefer a live request,
       // fall back to a prior mapping snapshot, and finally the id itself so the
-      // insert never fails even for a not-yet-seen Ombi account.
+      // insert never fails even for a not-yet-seen Ombi account. Both lookups
+      // scoped to source='ombi'.
       const [existingRequestRow] = await db
-        .select({ ombiUsername: ombiRequests.ombiUsername })
-        .from(ombiRequests)
-        .where(eq(ombiRequests.ombiUserId, ombiUserId))
+        .select({ ombiUsername: mediaRequests.sourceUsername })
+        .from(mediaRequests)
+        .where(and(eq(mediaRequests.source, 'ombi'), eq(mediaRequests.sourceUserId, ombiUserId)))
         .limit(1);
       const [existingMappingRow] = await db
-        .select({ ombiUsername: ombiUserMappings.ombiUsername })
-        .from(ombiUserMappings)
-        .where(eq(ombiUserMappings.ombiUserId, ombiUserId))
+        .select({ ombiUsername: mediaRequestUserMappings.sourceUsername })
+        .from(mediaRequestUserMappings)
+        .where(
+          and(
+            eq(mediaRequestUserMappings.source, 'ombi'),
+            eq(mediaRequestUserMappings.sourceUserId, ombiUserId)
+          )
+        )
         .limit(1);
       const ombiUsername =
         existingRequestRow?.ombiUsername ?? existingMappingRow?.ombiUsername ?? ombiUserId;
 
       await db
-        .insert(ombiUserMappings)
-        .values({ ombiUserId, ombiUsername, userId })
+        .insert(mediaRequestUserMappings)
+        .values({ source: 'ombi', sourceUserId: ombiUserId, sourceUsername: ombiUsername, userId })
         .onConflictDoUpdate({
-          target: ombiUserMappings.ombiUserId,
-          set: { ombiUsername, userId, updatedAt: new Date() },
+          target: [mediaRequestUserMappings.source, mediaRequestUserMappings.sourceUserId],
+          set: { sourceUsername: ombiUsername, userId, updatedAt: new Date() },
         });
 
       const updatedRows = await db
-        .update(ombiRequests)
+        .update(mediaRequests)
         .set({ userId, matchMethod: 'manual', updatedAt: new Date() })
-        .where(eq(ombiRequests.ombiUserId, ombiUserId))
-        .returning({ id: ombiRequests.id });
+        .where(and(eq(mediaRequests.source, 'ombi'), eq(mediaRequests.sourceUserId, ombiUserId)))
+        .returning({ id: mediaRequests.id });
 
       await invalidateOmbiCaches(app.redis);
 
@@ -357,18 +370,23 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const deleted = await db
-        .delete(ombiUserMappings)
-        .where(eq(ombiUserMappings.ombiUserId, ombiUserId))
-        .returning({ ombiUserId: ombiUserMappings.ombiUserId });
+        .delete(mediaRequestUserMappings)
+        .where(
+          and(
+            eq(mediaRequestUserMappings.source, 'ombi'),
+            eq(mediaRequestUserMappings.sourceUserId, ombiUserId)
+          )
+        )
+        .returning({ ombiUserId: mediaRequestUserMappings.sourceUserId });
 
       if (deleted.length === 0) {
         return reply.notFound('No override exists for this Ombi requester');
       }
 
       const [sample] = await db
-        .select({ ombiUsername: ombiRequests.ombiUsername })
-        .from(ombiRequests)
-        .where(eq(ombiRequests.ombiUserId, ombiUserId))
+        .select({ ombiUsername: mediaRequests.sourceUsername })
+        .from(mediaRequests)
+        .where(and(eq(mediaRequests.source, 'ombi'), eq(mediaRequests.sourceUserId, ombiUserId)))
         .limit(1);
 
       let updated = 0;
@@ -381,14 +399,14 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
           providerUserId: null,
         });
         const updatedRows = await db
-          .update(ombiRequests)
+          .update(mediaRequests)
           .set({
             userId: resolution.userId,
             matchMethod: resolution.matchMethod,
             updatedAt: new Date(),
           })
-          .where(eq(ombiRequests.ombiUserId, ombiUserId))
-          .returning({ id: ombiRequests.id });
+          .where(and(eq(mediaRequests.source, 'ombi'), eq(mediaRequests.sourceUserId, ombiUserId)))
+          .returning({ id: mediaRequests.id });
         updated = updatedRows.length;
       }
 
@@ -411,10 +429,14 @@ export const ombiRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { deletedRequests, deletedMappings } = await db.transaction(async (tx) => {
-      const reqRows = await tx.delete(ombiRequests).returning({ id: ombiRequests.id });
+      const reqRows = await tx
+        .delete(mediaRequests)
+        .where(eq(mediaRequests.source, 'ombi'))
+        .returning({ id: mediaRequests.id });
       const mapRows = await tx
-        .delete(ombiUserMappings)
-        .returning({ ombiUserId: ombiUserMappings.ombiUserId });
+        .delete(mediaRequestUserMappings)
+        .where(eq(mediaRequestUserMappings.source, 'ombi'))
+        .returning({ ombiUserId: mediaRequestUserMappings.sourceUserId });
       return { deletedRequests: reqRows.length, deletedMappings: mapRows.length };
     });
 

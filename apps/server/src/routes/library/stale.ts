@@ -28,12 +28,15 @@ import { buildLibraryCacheKey } from './utils.js';
 type StaleCategory = 'never_watched' | 'stale';
 
 /**
- * Requester attribution from the Ombi connector (mirrors
- * `@tracearr/shared`'s `StaleItemRequestedBy` - contract §7; kept in sync by
- * hand since this route re-declares its response shapes locally rather than
- * importing them). Null when the connector is unconfigured, the item matched
- * no request, or the request is unattributed to a Tracearr user (then
- * ombiUsername still identifies the raw requester).
+ * Requester attribution from a media request connector - Ombi and/or Seerr,
+ * source-generalized by ADR 0006 (mirrors `@tracearr/shared`'s
+ * `StaleItemRequestedBy` - contract §7; kept in sync by hand since this route
+ * re-declares its response shapes locally rather than importing them). Null
+ * when no connector is configured, the item matched no request, or the
+ * request is unattributed to a Tracearr user (then ombiUsername still
+ * identifies the raw requester). `ombiUsername`/`ombiAlias` keep their legacy
+ * names but carry whichever source matched (contract §7 - renaming would
+ * break the frozen wire shape).
  */
 interface StaleItemRequestedBy {
   userId: string | null;
@@ -42,7 +45,7 @@ interface StaleItemRequestedBy {
   ombiAlias: string | null;
   requestedAt: string;
   otherRequesterCount: number;
-  source: 'ombi';
+  source: 'ombi' | 'seerr';
 }
 
 /** Individual stale content item */
@@ -98,13 +101,17 @@ interface RawStaleItemRow {
   watch_count: string;
   category: StaleCategory;
   days_stale: string;
-  // Ombi attribution columns - always present in the row shape (NULL/0 literals
-  // when the connector is unconfigured, so mapping logic never branches per-row).
+  // Attribution columns - always present in the row shape (NULL/0 literals
+  // when no connector is configured, so mapping logic never branches per-row).
   request_user_id: string | null;
   request_username: string | null;
-  request_ombi_username: string | null;
-  request_ombi_alias: string | null;
+  /** Raw source-side username (Ombi userName or Seerr's resolved display username). */
+  request_source_username: string | null;
+  /** Raw source-side alias/display name fallback. */
+  request_source_alias: string | null;
   request_requested_at: string | null;
+  /** Which connector matched ('ombi' | 'seerr'); null when no connector is configured. */
+  request_source: 'ombi' | 'seerr' | null;
   request_distinct_requester_count: number;
 }
 
@@ -120,17 +127,23 @@ interface RawSummaryRow {
 
 /**
  * Match condition joining a paginated stale item (`pi`, from the `paginated_items`
- * CTE - carries imdb_id/tmdb_id/tvdb_id/media_type) to an `ombi_requests` row
- * under the given alias. Mirrors the /stats/requesters join and ADR 0003:
- * imdb -> tmdb -> tvdb precedence, no title fallback (wrong attribution is worse
- * than none). TV requests (`media_type = 'tv'`) match the SHOW item.
+ * CTE - carries imdb_id/tmdb_id/tvdb_id/media_type) to a `media_requests` row
+ * under the given alias, scoped to the currently-configured source set (design
+ * §4.4 - a disconnected source's rows stay retained but invisible). Mirrors the
+ * /stats/requesters join and ADR 0003: imdb -> tmdb -> tvdb precedence, no
+ * title fallback (wrong attribution is worse than none). TV requests
+ * (`media_type = 'tv'`) match the SHOW item.
  */
-function buildRequesterMatchCondition(requestAlias: string): SQL {
+function buildRequesterMatchCondition(requestAlias: string, sources: Array<'ombi' | 'seerr'>): SQL {
   const r = sql.raw(requestAlias);
   return sql`(
     (pi.media_type = 'movie' AND ${r}.media_type = 'movie')
     OR (pi.media_type = 'show' AND ${r}.media_type = 'tv')
   )
+  AND ${r}.source IN (${sql.join(
+    sources.map((s) => sql`${s}`),
+    sql`, `
+  )})
   AND (
     (pi.imdb_id IS NOT NULL AND pi.imdb_id <> '' AND ${r}.imdb_id = pi.imdb_id)
     OR (pi.tmdb_id IS NOT NULL AND pi.tmdb_id <> 0 AND ${r}.tmdb_id = pi.tmdb_id)
@@ -139,58 +152,71 @@ function buildRequesterMatchCondition(requestAlias: string): SQL {
 }
 
 /**
- * Attribution columns for the final SELECT. When unconfigured, these are
- * constant NULL/0 literals (no join, no query cost) so the row shape and
- * mapping logic below never need to branch per-row.
+ * Attribution columns for the final SELECT. When no connector is configured,
+ * these are constant NULL/0 literals (no join, no query cost) so the row
+ * shape and mapping logic below never need to branch per-row.
+ *
+ * `sources` defaults to both connectors so the exported single-argument call
+ * shape used by tests keeps working; the route always passes the real
+ * configured-source set explicitly.
  *
  * Exported (only) so a test can pin the exact ISO-8601 `to_char(...)` format
  * emitted for `request_requested_at` (OMB-2 contract §7 - requestedAt is
  * documented as ISO-8601) without mocking the whole route + a live Postgres.
  */
-export function buildRequestedBySelectFragment(configured: boolean): SQL {
+export function buildRequestedBySelectFragment(
+  configured: boolean,
+  sources: Array<'ombi' | 'seerr'> = ['ombi', 'seerr']
+): SQL {
   if (!configured) {
     return sql`
       NULL::uuid AS request_user_id,
       NULL::text AS request_username,
-      NULL::text AS request_ombi_username,
-      NULL::text AS request_ombi_alias,
+      NULL::text AS request_source_username,
+      NULL::text AS request_source_alias,
       NULL::text AS request_requested_at,
+      NULL::text AS request_source,
       0::int AS request_distinct_requester_count,
     `;
   }
   return sql`
     rb.user_id AS request_user_id,
     rb.username AS request_username,
-    rb.ombi_username AS request_ombi_username,
-    rb.ombi_alias AS request_ombi_alias,
+    rb.source_username AS request_source_username,
+    rb.source_alias AS request_source_alias,
     -- ISO-8601 to match the frozen contract (StaleItemRequestedBy.requestedAt) -
     -- a bare text cast of the timestamp column alone emits Postgres' native
     -- "YYYY-MM-DD HH:MI:SS.US+00" format, not ISO-8601 (OMB-2). Mirrors
     -- routes/stats/requesters.ts.
     to_char(rb.requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS request_requested_at,
+    rb.source AS request_source,
     (
-      SELECT COUNT(DISTINCT r2.ombi_user_id)::int
-      FROM ombi_requests r2
-      WHERE ${buildRequesterMatchCondition('r2')}
+      -- Distinct requester identities across BOTH sources (design §4.4): a
+      -- resolved user counts once even if they hold both an Ombi and a Seerr
+      -- account; unresolved requesters never collide across sources.
+      SELECT COUNT(DISTINCT COALESCE(r2.user_id::text, r2.source || ':' || r2.source_user_id))::int
+      FROM media_requests r2
+      WHERE ${buildRequesterMatchCondition('r2', sources)}
     ) AS request_distinct_requester_count,
   `;
 }
 
 /**
- * LEFT JOIN LATERAL picking the EARLIEST matching request (contract §7:
- * "earliest matching request wins"). Empty fragment when unconfigured - the
- * join is skipped entirely, not merely filtered.
+ * LEFT JOIN LATERAL picking the EARLIEST matching request across every
+ * currently-configured source (contract §7: "earliest matching request
+ * wins", now spanning sources). Empty fragment when no connector is
+ * configured - the join is skipped entirely, not merely filtered.
  */
-function buildRequestedByJoinFragment(configured: boolean): SQL {
+function buildRequestedByJoinFragment(configured: boolean, sources: Array<'ombi' | 'seerr'>): SQL {
   if (!configured) {
     return sql``;
   }
   return sql`
     LEFT JOIN LATERAL (
-      SELECT r.user_id, u.username, r.ombi_username, r.ombi_alias, r.requested_at
-      FROM ombi_requests r
+      SELECT r.user_id, u.username, r.source_username, r.source_alias, r.requested_at, r.source
+      FROM media_requests r
       LEFT JOIN users u ON u.id = r.user_id
-      WHERE ${buildRequesterMatchCondition('r')}
+      WHERE ${buildRequesterMatchCondition('r', sources)}
       ORDER BY r.requested_at ASC
       LIMIT 1
     ) rb ON true
@@ -253,13 +279,26 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
         }
       }
 
-      // Ombi attribution (contract §7): single cheap settings check, then either a
-      // real LEFT JOIN LATERAL + correlated subquery, or zero-cost NULL/0 literals.
-      // This must not add query cost for the common case of no Ombi connector.
-      const ombiSettings = await getSettings(['ombiUrl', 'ombiApiKey']);
-      const ombiConfigured = Boolean(ombiSettings.ombiUrl && ombiSettings.ombiApiKey);
-      const requestedBySelect = buildRequestedBySelectFragment(ombiConfigured);
-      const requestedByJoin = buildRequestedByJoinFragment(ombiConfigured);
+      // Media request attribution (contract §7, generalized by design §4.4/§9):
+      // single cheap settings check across both connectors, then either a real
+      // LEFT JOIN LATERAL + correlated subquery scoped to the configured-source
+      // set, or zero-cost NULL/0 literals. This must not add query cost for the
+      // common case of no connector configured.
+      const requestSettings = await getSettings([
+        'ombiUrl',
+        'ombiApiKey',
+        'seerrUrl',
+        'seerrApiKey',
+      ]);
+      const ombiConfigured = Boolean(requestSettings.ombiUrl && requestSettings.ombiApiKey);
+      const seerrConfigured = Boolean(requestSettings.seerrUrl && requestSettings.seerrApiKey);
+      const configuredSources: Array<'ombi' | 'seerr'> = [
+        ...(ombiConfigured ? (['ombi'] as const) : []),
+        ...(seerrConfigured ? (['seerr'] as const) : []),
+      ];
+      const anyConfigured = configuredSources.length > 0;
+      const requestedBySelect = buildRequestedBySelectFragment(anyConfigured, configuredSources);
+      const requestedByJoin = buildRequestedByJoinFragment(anyConfigured, configuredSources);
 
       // Build filters
       const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
@@ -510,15 +549,20 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
         watchCount: parseInt(row.watch_count, 10),
         category: row.category,
         daysStale: parseInt(row.days_stale, 10),
-        requestedBy: row.request_ombi_username
+        requestedBy: row.request_source_username
           ? {
               userId: row.request_user_id,
               username: row.request_username,
-              ombiUsername: row.request_ombi_username,
-              ombiAlias: row.request_ombi_alias,
+              // Wire field keeps its legacy name (contract §7); carries
+              // whichever source matched.
+              ombiUsername: row.request_source_username,
+              ombiAlias: row.request_source_alias,
               requestedAt: row.request_requested_at!,
               otherRequesterCount: Math.max(0, (row.request_distinct_requester_count || 0) - 1),
-              source: 'ombi' as const,
+              // Populated from the row (design §9) rather than hardcoded, so a
+              // Seerr match reports 'seerr'; falls back to 'ombi' only as a
+              // defensive default (real rows always carry this column).
+              source: row.request_source ?? 'ombi',
             }
           : null,
       }));
@@ -610,10 +654,11 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
       };
 
       // Cache for 1 hour (stale content changes slowly).
-      // SEAM: this cached payload now embeds Ombi requestedBy attribution
-      // (contract §7). Invalidating REDIS_KEYS.LIBRARY_STALE on Ombi sync
-      // completion and mapping changes is owned by the Ombi sync/mapping code
-      // (services/ombi.ts, jobs/ombiSyncQueue.ts) - NOT implemented here.
+      // SEAM: this cached payload now embeds cross-source requestedBy
+      // attribution (contract §7). Invalidating REDIS_KEYS.LIBRARY_STALE on
+      // sync completion and mapping changes for EITHER connector is owned by
+      // that connector's sync/mapping code (services/ombi.ts,
+      // jobs/ombiSyncQueue.ts; the Seerr equivalents) - NOT implemented here.
       await app.redis.setex(cacheKey, CACHE_TTL.LIBRARY_STALE, JSON.stringify(response));
 
       return response;

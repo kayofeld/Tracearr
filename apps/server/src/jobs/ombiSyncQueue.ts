@@ -29,7 +29,7 @@ import { getRedisPrefix, REDIS_KEYS, WS_EVENTS } from '@tracearr/shared';
 import type { OmbiSyncProgressEvent } from '@tracearr/shared';
 import { isMaintenance } from '../serverState.js';
 import { db } from '../db/client.js';
-import { ombiRequests, ombiUserMappings, serverUsers, users } from '../db/schema.js';
+import { mediaRequests, mediaRequestUserMappings, serverUsers, users } from '../db/schema.js';
 import { getPubSubService } from '../services/cache.js';
 import { getOmbiSettings, getSetting, setSetting } from '../services/settings.js';
 import type { OmbiSyncStatusInternal } from '../services/settings.js';
@@ -95,8 +95,12 @@ export interface RequesterResolver {
 export async function buildRequesterResolver(): Promise<RequesterResolver> {
   const [mappingRows, serverUserRows, userRows] = await Promise.all([
     db
-      .select({ ombiUserId: ombiUserMappings.ombiUserId, userId: ombiUserMappings.userId })
-      .from(ombiUserMappings),
+      .select({
+        ombiUserId: mediaRequestUserMappings.sourceUserId,
+        userId: mediaRequestUserMappings.userId,
+      })
+      .from(mediaRequestUserMappings)
+      .where(eq(mediaRequestUserMappings.source, 'ombi')),
     db
       .select({ plexAccountId: serverUsers.plexAccountId, userId: serverUsers.userId })
       .from(serverUsers)
@@ -178,8 +182,9 @@ async function upsertPhase(
     const rows = records.map((r) => {
       const resolution = resolver.resolve(r.requester);
       return {
-        ombiRequestId: r.ombiRequestId,
-        ombiParentRequestId: r.ombiParentRequestId,
+        source: 'ombi' as const,
+        sourceRequestId: r.ombiRequestId,
+        sourceParentRequestId: r.ombiParentRequestId,
         mediaType: r.mediaType,
         title: r.title,
         releaseYear: r.releaseYear,
@@ -191,9 +196,9 @@ async function upsertPhase(
         status: r.status,
         requestedAt: r.requestedAt,
         availableAt: r.availableAt,
-        ombiUserId: r.requester.ombiUserId,
-        ombiUsername: r.requester.ombiUsername,
-        ombiAlias: r.requester.ombiAlias,
+        sourceUserId: r.requester.ombiUserId,
+        sourceUsername: r.requester.ombiUsername,
+        sourceAlias: r.requester.ombiAlias,
         userId: resolution.userId,
         matchMethod: resolution.matchMethod,
         syncedAt: runStartedAt,
@@ -202,12 +207,12 @@ async function upsertPhase(
 
     await db.transaction(async (tx) => {
       await tx
-        .insert(ombiRequests)
+        .insert(mediaRequests)
         .values(rows)
         .onConflictDoUpdate({
-          target: [ombiRequests.mediaType, ombiRequests.ombiRequestId],
+          target: [mediaRequests.source, mediaRequests.mediaType, mediaRequests.sourceRequestId],
           set: {
-            ombiParentRequestId: sqlExcluded('ombi_parent_request_id'),
+            sourceParentRequestId: sqlExcluded('source_parent_request_id'),
             title: sqlExcluded('title'),
             releaseYear: sqlExcluded('release_year'),
             imdbId: sqlExcluded('imdb_id'),
@@ -218,9 +223,9 @@ async function upsertPhase(
             status: sqlExcluded('status'),
             requestedAt: sqlExcluded('requested_at'),
             availableAt: sqlExcluded('available_at'),
-            ombiUserId: sqlExcluded('ombi_user_id'),
-            ombiUsername: sqlExcluded('ombi_username'),
-            ombiAlias: sqlExcluded('ombi_alias'),
+            sourceUserId: sqlExcluded('source_user_id'),
+            sourceUsername: sqlExcluded('source_username'),
+            sourceAlias: sqlExcluded('source_alias'),
             userId: sqlExcluded('user_id'),
             matchMethod: sqlExcluded('match_method'),
             syncedAt: sqlExcluded('synced_at'),
@@ -230,21 +235,33 @@ async function upsertPhase(
 
       if (allowPrune) {
         const deleted = await tx
-          .delete(ombiRequests)
+          .delete(mediaRequests)
           .where(
-            and(eq(ombiRequests.mediaType, mediaType), lt(ombiRequests.syncedAt, runStartedAt))
+            and(
+              eq(mediaRequests.source, 'ombi'),
+              eq(mediaRequests.mediaType, mediaType),
+              lt(mediaRequests.syncedAt, runStartedAt)
+            )
           )
-          .returning({ id: ombiRequests.id });
+          .returning({ id: mediaRequests.id });
         pruned = deleted.length;
       }
     });
   } else if (allowPrune) {
     // Zero live records this run (e.g. the owner deleted everything in Ombi) -
-    // every existing row of this type is now stale and should be pruned too.
+    // every existing row of this type, FOR THIS SOURCE, is now stale and should
+    // be pruned too. Scoped to source='ombi' so a Seerr-only run never touches
+    // Ombi rows and vice versa.
     const deleted = await db
-      .delete(ombiRequests)
-      .where(and(eq(ombiRequests.mediaType, mediaType), lt(ombiRequests.syncedAt, runStartedAt)))
-      .returning({ id: ombiRequests.id });
+      .delete(mediaRequests)
+      .where(
+        and(
+          eq(mediaRequests.source, 'ombi'),
+          eq(mediaRequests.mediaType, mediaType),
+          lt(mediaRequests.syncedAt, runStartedAt)
+        )
+      )
+      .returning({ id: mediaRequests.id });
     pruned = deleted.length;
   }
 

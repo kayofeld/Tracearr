@@ -129,7 +129,9 @@ function mockResolverQueries({
     if ('username' in cols) {
       return { from: () => Promise.resolve(usersRows) } as never;
     }
-    return { from: () => Promise.resolve(mappings) } as never;
+    // Mapping rows query is now scoped with .where(eq(source, 'ombi')) (media_requests
+    // generalization) - chainable so buildRequesterResolver's real .from().where() call resolves.
+    return { from: () => ({ where: () => Promise.resolve(mappings) }) } as never;
   });
 }
 
