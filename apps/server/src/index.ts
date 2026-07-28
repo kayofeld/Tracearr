@@ -42,6 +42,7 @@ import type {
   MaintenanceJobProgress,
   LibrarySyncProgress,
   OmbiSyncProgressEvent,
+  SeerrSyncProgressEvent,
 } from '@tracearr/shared';
 
 import authPlugin, { loadJwtRevokeSettings } from './plugins/auth.js';
@@ -72,6 +73,7 @@ import { tailscaleRoutes } from './routes/tailscale.js';
 import { tasksRoutes } from './routes/tasks.js';
 import { backupRoutes } from './routes/backup.js';
 import { ombiRoutes } from './routes/ombi.js';
+import { seerrRoutes } from './routes/seerr.js';
 import {
   getPollerSettings,
   getNetworkSettings,
@@ -120,6 +122,12 @@ import {
   scheduleOmbiSync,
   shutdownOmbiSyncQueue,
 } from './jobs/ombiSyncQueue.js';
+import {
+  initSeerrSyncQueue,
+  startSeerrSyncWorker,
+  scheduleSeerrSync,
+  shutdownSeerrSyncQueue,
+} from './jobs/seerrSyncQueue.js';
 import {
   initVersionCheckQueue,
   startVersionCheckWorker,
@@ -441,6 +449,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   await app.register(libraryRoutes, { prefix: `${API_BASE_PATH}/library` });
   await app.register(backupRoutes, { prefix: `${API_BASE_PATH}/backup` });
   await app.register(ombiRoutes, { prefix: `${API_BASE_PATH}/ombi` });
+  await app.register(seerrRoutes, { prefix: `${API_BASE_PATH}/seerr` });
 
   // Serve static frontend in production
   const webDistPath = resolve(PROJECT_ROOT, 'apps/web/dist');
@@ -523,6 +532,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     await shutdownMaintenanceQueue();
     await shutdownLibrarySyncQueue();
     await shutdownOmbiSyncQueue();
+    await shutdownSeerrSyncQueue();
     await shutdownVersionCheckQueue();
     await shutdownInactivityCheckQueue();
     await shutdownBackupQueue();
@@ -825,6 +835,25 @@ async function initializeServices(app: FastifyInstance) {
     // Don't throw - the Ombi connector is optional and non-critical
   }
 
+  // Initialize Seerr sync queue (uses Redis for job storage). Always
+  // scheduled regardless of configuration - each firing self-guards and
+  // no-ops silently when Seerr isn't configured (jobs/seerrSyncQueue.ts
+  // runSeerrSync), so configuring/disconnecting the connector takes effect
+  // without a restart.
+  try {
+    initSeerrSyncQueue(redisUrl);
+    startSeerrSyncWorker();
+    setTimeout(() => {
+      scheduleSeerrSync().catch((err) => {
+        app.log.error({ err }, 'Failed to schedule Seerr sync');
+      });
+    }, 5000);
+    app.log.info('Seerr sync queue initialized');
+  } catch (err) {
+    app.log.error({ err }, 'Failed to initialize Seerr sync queue');
+    // Don't throw - the Seerr connector is optional and non-critical
+  }
+
   // Initialize version check queue (uses Redis for job storage and caching)
   try {
     initVersionCheckQueue(redisUrl, app.redis, pubSubService.publish.bind(pubSubService));
@@ -1037,6 +1066,13 @@ async function initializePostListen(app: FastifyInstance) {
           // socket (SEC-04, topology/info disclosure).
           const { jobId, phase, progress } = data as OmbiSyncProgressEvent;
           broadcastToSessions('ombi:sync:progress', { jobId, phase, progress });
+          break;
+        }
+        case WS_EVENTS.SEERR_SYNC_PROGRESS: {
+          // Same SEC-04 redaction as the Ombi case above - `error` can
+          // include the configured Seerr URL, so only phase/progress go out.
+          const { jobId, phase, progress } = data as SeerrSyncProgressEvent;
+          broadcastToSessions('seerr:sync:progress', { jobId, phase, progress });
           break;
         }
         case WS_EVENTS.VERSION_UPDATE:

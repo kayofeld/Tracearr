@@ -70,6 +70,24 @@ export interface OmbiSyncStatusInternal {
 }
 
 /**
+ * Last-run bookkeeping for the Seerr sync job - internal only, written by
+ * jobs/seerrSyncQueue.ts, read by GET /seerr/status (routes/seerr.ts). Same
+ * shape family as OmbiSyncStatusInternal, minus the movie/tv phase split -
+ * Seerr's sync is single-phase (one endpoint serves both media types, design
+ * §6). Live counts/attribution/media-match coverage are computed on demand
+ * from media_requests (source='seerr') instead of cached here, so they never
+ * go stale between runs. See docs/architecture/seerr-connector.md §3, §10.
+ */
+export interface SeerrSyncStatusInternal {
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  /** Cause of the last run's failure; null if the last run had no error. */
+  lastError: string | null;
+  /** Records skipped by Zod validation on the last run. */
+  skippedValidation: number;
+}
+
+/**
  * Internal-only settings — not exposed in the public Settings API.
  * Add new internal keys here; types, defaults, and filtering are all derived.
  */
@@ -78,6 +96,7 @@ const INTERNAL_DEFAULTS = {
   jwtRevokedBefore: null as string | null, // ISO 8601 — tokens issued before this timestamp are rejected
   localLoginEnabled: true,
   ombiSyncStatus: null as OmbiSyncStatusInternal | null,
+  seerrSyncStatus: null as SeerrSyncStatusInternal | null,
   // Version already announced via the app_update_available notification (jobs/versionCheckQueue.ts).
   // Notify once per new version; re-arms when a newer version appears. Persisted (not in-memory)
   // so a server restart does not re-notify for a version already announced.
@@ -257,6 +276,17 @@ export interface OmbiSettings {
 export async function getOmbiSettings(): Promise<OmbiSettings> {
   const s = await getSettings(['ombiUrl', 'ombiApiKey']);
   return { ombiUrl: s.ombiUrl, ombiApiKey: s.ombiApiKey };
+}
+
+/** "Configured" is derived: both url and apiKey set (same gate as Ombi/Tautulli). */
+export interface SeerrSettings {
+  seerrUrl: string | null;
+  seerrApiKey: string | null;
+}
+
+export async function getSeerrSettings(): Promise<SeerrSettings> {
+  const s = await getSettings(['seerrUrl', 'seerrApiKey']);
+  return { seerrUrl: s.seerrUrl, seerrApiKey: s.seerrApiKey };
 }
 
 export async function getBackupScheduleSettings(): Promise<{
