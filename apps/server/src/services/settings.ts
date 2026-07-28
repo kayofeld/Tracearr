@@ -32,6 +32,9 @@ const PUBLIC_DEFAULTS: Settings = {
   // Ombi connector: "configured" iff both are set (same gate as Tautulli above).
   ombiUrl: null,
   ombiApiKey: null,
+  // Seerr connector: "configured" iff both are set (same gate as Ombi above).
+  seerrUrl: null,
+  seerrApiKey: null,
   externalUrl: null,
   trustProxy: false,
   mobileEnabled: false,

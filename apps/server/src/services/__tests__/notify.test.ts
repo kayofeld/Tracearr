@@ -55,6 +55,8 @@ describe('NotificationManager', () => {
     tautulliApiKey: null,
     ombiUrl: null,
     ombiApiKey: null,
+    seerrUrl: null,
+    seerrApiKey: null,
     externalUrl: null,
     trustProxy: false,
     mobileEnabled: false,

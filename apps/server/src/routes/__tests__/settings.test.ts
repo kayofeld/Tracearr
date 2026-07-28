@@ -76,6 +76,8 @@ const mockAllSettings: Settings = {
   tautulliApiKey: 'secret-api-key',
   ombiUrl: null,
   ombiApiKey: null,
+  seerrUrl: null,
+  seerrApiKey: null,
   externalUrl: 'https://tracearr.example.com',
   trustProxy: true,
   mobileEnabled: false,
