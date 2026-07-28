@@ -255,6 +255,8 @@
     "createAccountFailed": "创建账户失败",
     "createAccountHeading": "开始创建你的账户",
     "displayNamePlaceholder": "选择显示名称",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "您的电子邮箱",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

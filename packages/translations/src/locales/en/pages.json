@@ -15,6 +15,8 @@
     "identifierPlaceholder": "Username or email address",
     "username": "Username",
     "usernamePlaceholder": "yourusername",
+    "emailOptionalLabel": "Email (optional)",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
     "emailPlaceholder": "your@email.com",
     "displayNamePlaceholder": "Choose a display name",
     "passwordPlaceholder": "At least 8 characters",

@@ -255,6 +255,8 @@
     "createAccountFailed": "Αποτυχία δημιουργίας λογαριασμού",
     "createAccountHeading": "Δημιουργήστε το λογαριασμό σας για να ξεκινήσετε",
     "displayNamePlaceholder": "Επιλέξτε ένα εμφανισμένο όνομα",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "your@email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

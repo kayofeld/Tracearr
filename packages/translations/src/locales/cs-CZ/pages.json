@@ -255,6 +255,8 @@
     "createAccountFailed": "Vytvoření účtu se nezdařilo",
     "createAccountHeading": "Vytvořte si účet, abyste mohli začít",
     "displayNamePlaceholder": "Vyberte zobrazované jméno",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "vas@email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

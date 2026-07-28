@@ -140,10 +140,7 @@ describe('getServerUserByExternalId', () => {
     const mockServerUser = createMockServerUser();
     mockSelectChain([mockServerUser]);
 
-    const result = await getServerUserByExternalId(
-      mockServerUser.serverId,
-      'external-123'
-    );
+    const result = await getServerUserByExternalId(mockServerUser.serverId, 'external-123');
 
     expect(result).toEqual(mockServerUser);
   });
@@ -570,6 +567,107 @@ describe('syncUserFromMediaServer', () => {
     expect(result).not.toBeNull();
     expect(result!.created).toBe(false);
     expect(result!.serverUser.username).toBe(mediaUser.username);
+  });
+
+  // Regression: users.email is nullable (Postgres allows unlimited NULLs
+  // under users_email_unique), but only because this code path never queries
+  // `eq(users.email, ...)` unless mediaUser.email is truthy. If that guard
+  // were dropped, an empty/undefined email would risk matching (or even
+  // querying against) unrelated rows. These tests pin the guard down.
+  it('never queries or matches by email when the media user has none, and stores NULL', async () => {
+    const noEmailUser = { id: 'external-noemail-1', username: 'noemailuser', isAdmin: false };
+
+    const outerSelectChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([]), // no existing server_user
+    };
+    vi.mocked(db.select).mockReturnValue(outerSelectChain as never);
+
+    const txSelect = vi.fn();
+    const insertUserValues = vi.fn().mockReturnThis();
+    const newUser = createMockUser({ username: 'noemailuser', email: null });
+    const newServerUser = createMockServerUser({
+      externalId: noEmailUser.id,
+      username: 'noemailuser',
+      email: null,
+      serverId,
+    });
+
+    vi.mocked(db.transaction).mockImplementation(async (callback) => {
+      const tx = {
+        select: txSelect, // must never be invoked - no email to match on
+        insert: vi
+          .fn()
+          .mockReturnValueOnce({
+            values: insertUserValues,
+            returning: vi.fn().mockResolvedValue([newUser]),
+          })
+          .mockReturnValueOnce({
+            values: vi.fn().mockReturnThis(),
+            returning: vi.fn().mockResolvedValue([newServerUser]),
+          }),
+      };
+      return callback(tx as never);
+    });
+
+    const result = await syncUserFromMediaServer(serverId, noEmailUser);
+
+    expect(txSelect).not.toHaveBeenCalled();
+    expect(insertUserValues).toHaveBeenCalledWith(expect.objectContaining({ email: null }));
+    expect(result!.created).toBe(true);
+    expect(result!.user.email).toBeNull();
+  });
+
+  it('creates two independent identities for two different email-less media users (no NULL collision)', async () => {
+    async function syncOneNoEmailUser(externalId: string, username: string) {
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnThis(),
+        where: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockResolvedValue([]),
+      } as never);
+
+      const txSelect = vi.fn();
+      const createdUser = createMockUser({ username, email: null });
+      const createdServerUser = createMockServerUser({
+        externalId,
+        username,
+        email: null,
+        serverId,
+      });
+
+      vi.mocked(db.transaction).mockImplementation(async (callback) => {
+        const tx = {
+          select: txSelect,
+          insert: vi
+            .fn()
+            .mockReturnValueOnce({
+              values: vi.fn().mockReturnThis(),
+              returning: vi.fn().mockResolvedValue([createdUser]),
+            })
+            .mockReturnValueOnce({
+              values: vi.fn().mockReturnThis(),
+              returning: vi.fn().mockResolvedValue([createdServerUser]),
+            }),
+        };
+        return callback(tx as never);
+      });
+
+      const result = await syncUserFromMediaServer(serverId, {
+        id: externalId,
+        username,
+        isAdmin: false,
+      });
+      expect(txSelect).not.toHaveBeenCalled();
+      return result!.user;
+    }
+
+    const userA = await syncOneNoEmailUser('external-noemail-a', 'noemail-a');
+    const userB = await syncOneNoEmailUser('external-noemail-b', 'noemail-b');
+
+    expect(userA.email).toBeNull();
+    expect(userB.email).toBeNull();
+    expect(userA.id).not.toBe(userB.id);
   });
 });
 

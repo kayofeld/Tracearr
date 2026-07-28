@@ -255,6 +255,8 @@
     "createAccountFailed": "Account aanmaken mislukt",
     "createAccountHeading": "Maak je account aan om te beginnen",
     "displayNamePlaceholder": "Kies een weergavenaam",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "jouw@email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

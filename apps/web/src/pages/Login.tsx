@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { authClient } from '@/lib/authClient';
 import { api, BASE_URL } from '@/lib/api';
-import type { SetupStatus } from '@tracearr/shared';
+import { SIGN_UP_USERNAME_PATH, type SetupStatus } from '@tracearr/shared';
 import { LogoIcon } from '@/components/brand/Logo';
 
 const DEFAULT_AUTH_METHODS: SetupStatus['authMethods'] = {
@@ -147,15 +147,18 @@ export function Login() {
     setLocalPending(true);
 
     try {
-      // signUp.email's typed client only accepts declared additionalFields;
-      // username and claimCode aren't declared there, so post through $fetch
-      // (the server's sign-up/email schema accepts arbitrary extra fields).
-      const { error } = await authClient.$fetch('/sign-up/email', {
+      // /sign-up/username (signupPlugin.ts) is the only local sign-up path:
+      // email is optional there, unlike Better Auth's built-in
+      // /sign-up/email which hard-requires one. The typed client only
+      // accepts declared additionalFields, so this posts through $fetch
+      // (the server schema accepts the arbitrary extra fields it needs).
+      const trimmedEmail = email.trim();
+      const { error } = await authClient.$fetch(SIGN_UP_USERNAME_PATH, {
         method: 'POST',
         body: {
           name: name.trim(),
           username: signupUsername.trim().toLowerCase(),
-          email: email.trim(),
+          ...(trimmedEmail && { email: trimmedEmail }),
           password,
           ...(requiresClaimCode && { claimCode: claimCode.trim() }),
         },
@@ -452,7 +455,7 @@ export function Login() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="email">{t('settings:account.email')}</Label>
+                    <Label htmlFor="email">{t('pages:login.emailOptionalLabel')}</Label>
                     <Input
                       id="email"
                       type="email"
@@ -460,9 +463,11 @@ export function Login() {
                       placeholder={t('pages:login.emailPlaceholder')}
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      required
                       disabled={localPending}
                     />
+                    <p className="text-muted-foreground text-xs">
+                      {t('pages:login.emailOptionalHint')}
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="password">{t('settings:account.password')}</Label>

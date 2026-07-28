@@ -255,6 +255,8 @@
     "createAccountFailed": "Ha fallat la creació del compte",
     "createAccountHeading": "Creeu el vostre compte per a començar",
     "displayNamePlaceholder": "Trieu un nom de visualització",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "elvostrecorreu@email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",

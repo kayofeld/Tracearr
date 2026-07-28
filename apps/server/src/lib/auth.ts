@@ -10,7 +10,7 @@ import {
 import { adminAc } from 'better-auth/plugins/admin/access';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import type { Redis } from 'ioredis';
-import { LOGIN_ROLES } from '@tracearr/shared';
+import { LOGIN_ROLES, SIGN_UP_USERNAME_PATH } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
@@ -24,6 +24,7 @@ import {
 } from './authGuards.js';
 import { getRedis, closeRedis } from './redisShared.js';
 import { embyPlugin } from './embyPlugin.js';
+import { signupPlugin } from './signupPlugin.js';
 import { betterAuthBasePath } from './basePath.js';
 
 const oidcEnv = {
@@ -124,7 +125,25 @@ function withLoginScopedUsernameLookup(
   };
 }
 
-function buildAuth(redis: Redis) {
+interface BuildAuthOptions {
+  /**
+   * Enable Better Auth's built-in rate limiter. Defaults to `true` - this is
+   * a security control, so it must be switchable only by an explicit,
+   * typed option that a caller opts INTO passing, never by an environment
+   * variable Better Auth reads implicitly (its own default is
+   * `options.rateLimit?.enabled ?? isProduction`, i.e. NODE_ENV-derived - see
+   * create-context.mjs). A deployment that forgets to set NODE_ENV=production
+   * (or sets it to something else) must not silently lose the limiter.
+   * Integration/unit test suites that drive several requests through one
+   * Better Auth instance in-process pass `{ rateLimit: false }` explicitly
+   * (see getAuth() below and signupPlugin.test.ts) so a real per-IP counter
+   * doesn't trip on unrelated requests in the same test file.
+   */
+  rateLimit?: boolean;
+}
+
+function buildAuth(redis: Redis, options: BuildAuthOptions = {}) {
+  const { rateLimit: rateLimitEnabled = true } = options;
   const prefix = process.env.REDIS_PREFIX ?? '';
   const rkey = (k: string) => `${prefix}tracearr:ba:${k}`;
 
@@ -211,7 +230,9 @@ function buildAuth(redis: Redis) {
         (await redis.eval(GET_AND_DELETE_SCRIPT, 1, rkey(key))) as string | null,
     },
     rateLimit: {
-      enabled: true,
+      // See BuildAuthOptions.rateLimit above: this is an explicit, typed
+      // knob (defaulting to enabled), never an environment-variable gate.
+      enabled: rateLimitEnabled,
       storage: 'secondary-storage',
     },
     databaseHooks: {
@@ -234,7 +255,12 @@ function buildAuth(redis: Redis) {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path === '/sign-up/email') {
+        // Both local sign-up variants (email-required core endpoint, and the
+        // email-optional /sign-up/username from signupPlugin) gate on the
+        // same claim code - centralized here rather than duplicated in the
+        // plugin, matching how the built-in endpoint's own handler carries
+        // no claim-code logic either.
+        if (ctx.path === '/sign-up/email' || ctx.path === SIGN_UP_USERNAME_PATH) {
           assertClaimCode((ctx.body as { claimCode?: string } | undefined)?.claimCode);
         }
         if (ctx.path === '/sign-in/oauth2') {
@@ -259,6 +285,7 @@ function buildAuth(redis: Redis) {
       adminPlugin({ adminRoles: ['owner'], roles: { owner: adminAc } }),
       bearer(),
       embyPlugin(),
+      signupPlugin(),
       ...(oidcConfigured
         ? [
             genericOAuth({
@@ -287,11 +314,18 @@ let authInstance: Auth | null = null;
  * Returns the singleton Better Auth instance, constructing it (and its
  * Redis connection) on first call. Must not run at module load time -
  * Phase 1 startup (building the Fastify app) has to succeed without DB/Redis.
+ *
+ * `options` only takes effect on the call that performs the first
+ * construction (singleton) - later calls in the same process return the
+ * already-built instance regardless of what they pass. Production code never
+ * passes `options`; only test suites that need to disable the rate limiter
+ * for an in-process multi-request run do (after `closeAuth()` has reset the
+ * singleton), and they own the singleton lifecycle within that test file.
  */
-export function getAuth(): Auth {
+export function getAuth(options?: BuildAuthOptions): Auth {
   if (authInstance) return authInstance;
 
-  authInstance = buildAuth(getRedis());
+  authInstance = buildAuth(getRedis(), options);
   return authInstance;
 }
 

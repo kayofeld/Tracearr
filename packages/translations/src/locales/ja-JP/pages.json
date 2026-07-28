@@ -255,6 +255,8 @@
     "createAccountFailed": "アカウントの作成に失敗しました",
     "createAccountHeading": "アカウントを作成して開始する",
     "displayNamePlaceholder": "表示名を選択",
+    "emailOptionalHint": "Used to match your account across media servers. Leave blank if you don't have one.",
+    "emailOptionalLabel": "Email (optional)",
     "emailPlaceholder": "your@email.com",
     "embyLoginFailed": "Emby login failed",
     "embyUsername": "Emby username",
