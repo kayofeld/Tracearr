@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { authClient } from '@/lib/authClient';
 import { api, BASE_URL } from '@/lib/api';
-import type { SetupStatus } from '@tracearr/shared';
+import { SIGN_UP_USERNAME_PATH, type SetupStatus } from '@tracearr/shared';
 import { LogoIcon } from '@/components/brand/Logo';
 
 const DEFAULT_AUTH_METHODS: SetupStatus['authMethods'] = {
@@ -153,7 +153,7 @@ export function Login() {
       // accepts declared additionalFields, so this posts through $fetch
       // (the server schema accepts the arbitrary extra fields it needs).
       const trimmedEmail = email.trim();
-      const { error } = await authClient.$fetch('/sign-up/username', {
+      const { error } = await authClient.$fetch(SIGN_UP_USERNAME_PATH, {
         method: 'POST',
         body: {
           name: name.trim(),

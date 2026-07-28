@@ -321,6 +321,16 @@ export const NOTIFICATION_EVENTS = {
 export const API_VERSION = 'v1';
 export const API_BASE_PATH = `/api/${API_VERSION}`;
 
+// Better Auth email-optional local sign-up endpoint (server: signupPlugin.ts,
+// registered as a sibling to the built-in /sign-up/email). Single source of
+// truth for both sides of this path so it can never drift out of sync:
+//   - auth.ts's claim-code hook matches on `ctx.path === SIGN_UP_USERNAME_PATH`
+//     - a renamed copy there fails the claim-code gate OPEN (silently stops
+//       enforcing it on this endpoint), not loud, so it must never be a
+//       second hand-typed literal.
+//   - Login.tsx posts directly to this path via authClient.$fetch.
+export const SIGN_UP_USERNAME_PATH = '/sign-up/username';
+
 // JWT configuration
 export const JWT_CONFIG = {
   ACCESS_TOKEN_EXPIRY: '48h',

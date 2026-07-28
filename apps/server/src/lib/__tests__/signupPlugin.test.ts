@@ -48,7 +48,9 @@ vi.mock('ioredis', () => {
   return { Redis: FakeRedis };
 });
 
-import { buildSignupUserInput } from '../signupPlugin.js';
+import { APIError } from 'better-auth/api';
+import { SIGN_UP_USERNAME_PATH } from '@tracearr/shared';
+import { buildSignupUserInput, linkCredentialAndCreateSession } from '../signupPlugin.js';
 import { getAuth, closeAuth } from '../auth.js';
 import { betterAuthBasePath } from '../basePath.js';
 import { initializeClaimCode, resetClaimCode } from '../../utils/claimCode.js';
@@ -91,6 +93,16 @@ describe('buildSignupUserInput', () => {
 // error (this suite runs without a live Postgres), never a clean 403 - so a
 // 403 here is a meaningful regression signal for the auth.ts wiring, not a
 // coincidence of the unreachable DB.
+//
+// This is also the empirical check for whether Better Auth dispatches
+// ctx.path as exactly SIGN_UP_USERNAME_PATH for a plugin-registered endpoint
+// under a configured basePath (the request below is sent WITH the basePath
+// prefix, matching real traffic). If ctx.path ever carried the basePath
+// prefix, or something else that doesn't exact-match the hook's comparison,
+// the claim-code hook would silently stop matching this path (fail OPEN, no
+// enforcement) and this test would see a 403 turn into a DB-connection
+// failure instead - so a passing 403 here is the actual proof, not an
+// assumption about better-auth's internals.
 describe('POST /sign-up/username claim-code gate', () => {
   afterEach(async () => {
     resetClaimCode();
@@ -102,8 +114,12 @@ describe('POST /sign-up/username claim-code gate', () => {
     process.env.CLAIM_CODE = 'TEST-CODE-1234';
     initializeClaimCode();
 
-    const auth = getAuth();
-    const req = new Request(`http://localhost${betterAuthBasePath()}/sign-up/username`, {
+    // Rate limiting is an explicit opt-out here (never an env-var side
+    // effect, see BuildAuthOptions in auth.ts) - this suite drives real
+    // requests through one in-process instance and doesn't want a per-IP
+    // counter to interfere with the behavior under test.
+    const auth = getAuth({ rateLimit: false });
+    const req = new Request(`http://localhost${betterAuthBasePath()}${SIGN_UP_USERNAME_PATH}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -115,5 +131,98 @@ describe('POST /sign-up/username claim-code gate', () => {
 
     const res = await auth.handler(req);
     expect(res.status).toBe(403);
+  });
+});
+
+// Pins the compensation behavior: internalAdapter.createUser commits the
+// user row on its own, so a failure in the two calls after it (linkAccount,
+// createSession) must not leave that row orphaned with no credential -
+// see the file header on signupPlugin.ts for why that permanently locks the
+// instance out of local auth otherwise. All adapter calls are mocked so this
+// runs with no Better Auth instance or database.
+describe('linkCredentialAndCreateSession', () => {
+  const passwordHash = 'hashed-password';
+  const userId = 'user-1';
+
+  function makeLogger() {
+    return { error: vi.fn() };
+  }
+
+  it('links the credential, creates the session, and never deletes the user on success', async () => {
+    const session = { token: 'session-token' };
+    const adapter = {
+      linkAccount: vi.fn().mockResolvedValue({}),
+      createSession: vi.fn().mockResolvedValue(session),
+      deleteUser: vi.fn().mockResolvedValue(undefined),
+    };
+    const logger = makeLogger();
+
+    const result = await linkCredentialAndCreateSession(adapter, { userId, passwordHash }, logger);
+
+    expect(result).toBe(session);
+    expect(adapter.linkAccount).toHaveBeenCalledWith({
+      userId,
+      providerId: 'credential',
+      accountId: userId,
+      password: passwordHash,
+    });
+    expect(adapter.createSession).toHaveBeenCalledWith(userId);
+    expect(adapter.deleteUser).not.toHaveBeenCalled();
+  });
+
+  it('deletes the orphaned user and rethrows when linkAccount fails', async () => {
+    const linkAccountError = new Error('transient DB error');
+    const adapter = {
+      linkAccount: vi.fn().mockRejectedValue(linkAccountError),
+      createSession: vi.fn(),
+      deleteUser: vi.fn().mockResolvedValue(undefined),
+    };
+    const logger = makeLogger();
+
+    await expect(
+      linkCredentialAndCreateSession(adapter, { userId, passwordHash }, logger)
+    ).rejects.toBeInstanceOf(APIError);
+
+    expect(adapter.deleteUser).toHaveBeenCalledWith(userId);
+    expect(adapter.createSession).not.toHaveBeenCalled();
+  });
+
+  it('deletes the orphaned user and rethrows INTERNAL_SERVER_ERROR when createSession returns falsy', async () => {
+    const adapter = {
+      linkAccount: vi.fn().mockResolvedValue({}),
+      createSession: vi.fn().mockResolvedValue(null),
+      deleteUser: vi.fn().mockResolvedValue(undefined),
+    };
+    const logger = makeLogger();
+
+    const error = await linkCredentialAndCreateSession(
+      adapter,
+      { userId, passwordHash },
+      logger
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(APIError);
+    expect((error as APIError).status).toBe('INTERNAL_SERVER_ERROR');
+    expect(adapter.deleteUser).toHaveBeenCalledWith(userId);
+  });
+
+  it('still rethrows the original failure when the compensating deleteUser itself fails', async () => {
+    const linkAccountError = new Error('transient DB error');
+    const deleteUserError = new Error('delete also failed');
+    const adapter = {
+      linkAccount: vi.fn().mockRejectedValue(linkAccountError),
+      createSession: vi.fn(),
+      deleteUser: vi.fn().mockRejectedValue(deleteUserError),
+    };
+    const logger = makeLogger();
+
+    await expect(
+      linkCredentialAndCreateSession(adapter, { userId, passwordHash }, logger)
+    ).rejects.toBeInstanceOf(APIError);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      'Failed to compensate for incomplete sign-up (orphaned user)',
+      deleteUserError
+    );
   });
 });

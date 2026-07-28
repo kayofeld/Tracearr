@@ -24,7 +24,7 @@ import { eq, isNull } from 'drizzle-orm';
 import { API_BASE_PATH } from '@tracearr/shared';
 import { db } from '../../src/db/client.js';
 import { users } from '../../src/db/schema.js';
-import { closeAuth } from '../../src/lib/auth.js';
+import { getAuth, closeAuth } from '../../src/lib/auth.js';
 import { createBetterAuthHandler } from '../../src/lib/betterAuthRequest.js';
 import { getRedis } from '../../src/lib/redisShared.js';
 import { createTestApp } from '../../src/test/helpers.js';
@@ -37,7 +37,15 @@ async function buildApp(): Promise<FastifyInstance> {
     method: ['GET', 'POST'],
     url: `${API_BASE_PATH}/auth/*`,
     config: { rateLimit: false },
-    handler: createBetterAuthHandler(),
+    // Better Auth's own internal rate limiter now defaults to enabled (see
+    // BuildAuthOptions.rateLimit in lib/auth.ts) - and its built-in rule caps
+    // /sign-up* at 3 requests per 10s. This suite's getAuth() singleton is
+    // shared across every `it()` in the file (only reset in afterAll), so
+    // without this explicit opt-out the later sign-ups here would start
+    // failing with 429s that have nothing to do with the behavior under
+    // test. Disabled here, not via an env var - production keeps the
+    // limiter on by default.
+    handler: createBetterAuthHandler(() => getAuth({ rateLimit: false })),
   });
 
   return app;
