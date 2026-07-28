@@ -11,7 +11,7 @@
 - **Local path:** projects/tracearr/
 - **Default branch:** main
 - **Tracker / board:** GitHub Issues + Projects
-- **CI:** GitHub Actions (`ci.yml`, `nightly.yml`); Docker images to `ghcr.io/connorgallopo/tracearr`; translations via Crowdin
+- **CI:** GitHub Actions (`ci.yml`, `nightly.yml`); Docker images to `ghcr.io/kayofeld/tracearr`; translations via Crowdin
 - **License:** AGPL-3.0 (this is an existing open-source project, not a greenfield build)
 - **Contribution model (updated 2026-07-20): FORK-DIRECT. Paul maintains his own fork `kayofeld/Tracearr` as the live line - NO PRs to upstream `connorgallopo/Tracearr`.** Remotes: `origin` = kayofeld fork (push target), `upstream` = connorgallopo (fetch only, NEVER push). Work on feature branches, Fable-review gate, then merge `--no-ff` into fork `main` and push - Paul authorized direct main merges on the fork (2026-07-20). Claude never opens PRs anywhere (standing rule).
 

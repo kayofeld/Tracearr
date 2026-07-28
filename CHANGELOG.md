@@ -4,6 +4,17 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v1.8.1 — Docker images for the fork
+
+- The fork now **publishes its own container images** to `ghcr.io/kayofeld/tracearr` (linux/amd64 +
+  linux/arm64), built from every release tag: `latest`, the exact version, and `supervised` for the
+  all-in-one variant. Previously the only supported path was building from source, and the compose
+  examples pointed at upstream's images, which do not contain this fork's features.
+- README gains a **Docker / Portainer** section with the tag table, a Portainer stack note (Portainer
+  does not read a local `.env`, so the secrets go in the stack editor), and how to update a container
+  deployment.
+- Compose examples, the Helm chart default, and the Renovate rule now reference the fork's image.
+
 ## v1.8.0 — Ombi connector: who requested what
 
 - New **optional Ombi connector**. Point it at your Ombi instance and Tracearr mirrors the request
