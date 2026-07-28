@@ -216,14 +216,14 @@ export const requesterStatsRoute: FastifyPluginAsync = async (app) => {
             ${serverFilter}
             AND (
               (r.imdb_id IS NOT NULL AND r.imdb_id <> '' AND li.imdb_id = r.imdb_id)
-              OR (r.tmdb_id IS NOT NULL AND li.tmdb_id = r.tmdb_id)
-              OR (r.tvdb_id IS NOT NULL AND li.tvdb_id = r.tvdb_id)
+              OR (r.tmdb_id IS NOT NULL AND r.tmdb_id <> 0 AND li.tmdb_id = r.tmdb_id)
+              OR (r.tvdb_id IS NOT NULL AND r.tvdb_id <> 0 AND li.tvdb_id = r.tvdb_id)
             )
             ORDER BY
               CASE
                 WHEN r.imdb_id IS NOT NULL AND r.imdb_id <> '' AND li.imdb_id = r.imdb_id THEN 0
-                WHEN r.tmdb_id IS NOT NULL AND li.tmdb_id = r.tmdb_id THEN 1
-                WHEN r.tvdb_id IS NOT NULL AND li.tvdb_id = r.tvdb_id THEN 2
+                WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id <> 0 AND li.tmdb_id = r.tmdb_id THEN 1
+                WHEN r.tvdb_id IS NOT NULL AND r.tvdb_id <> 0 AND li.tvdb_id = r.tvdb_id THEN 2
                 ELSE 3
               END,
               li.id

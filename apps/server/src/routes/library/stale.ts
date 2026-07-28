@@ -133,8 +133,8 @@ function buildRequesterMatchCondition(requestAlias: string): SQL {
   )
   AND (
     (pi.imdb_id IS NOT NULL AND pi.imdb_id <> '' AND ${r}.imdb_id = pi.imdb_id)
-    OR (pi.tmdb_id IS NOT NULL AND ${r}.tmdb_id = pi.tmdb_id)
-    OR (pi.tvdb_id IS NOT NULL AND ${r}.tvdb_id = pi.tvdb_id)
+    OR (pi.tmdb_id IS NOT NULL AND pi.tmdb_id <> 0 AND ${r}.tmdb_id = pi.tmdb_id)
+    OR (pi.tvdb_id IS NOT NULL AND pi.tvdb_id <> 0 AND ${r}.tvdb_id = pi.tvdb_id)
   )`;
 }
 
