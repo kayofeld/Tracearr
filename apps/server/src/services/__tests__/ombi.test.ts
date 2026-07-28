@@ -484,6 +484,24 @@ describe('OmbiService.getTvRequests', () => {
     });
   });
 
+  // Regression: the first live sync against a real Ombi 4.47.1 mirrored 0 of 274
+  // TV requests. Ombi sends `denied: null` (not absent) on 279/280 children, and a
+  // Zod `.default(false)` only applies to `undefined` - so every child failed
+  // validation and was skipped. Fixture mirrors the real payload exactly.
+  it('accepts explicit nulls for booleans Ombi leaves unset (denied)', async () => {
+    const childWithNullDenied = { ...parent.childRequests[0], denied: null, approved: true };
+    mockFetch.mockResolvedValue(
+      jsonResponse([{ ...parent, childRequests: [childWithNullDenied] }])
+    );
+
+    const service = new OmbiService('http://localhost:5420', 'key');
+    const { records, skipped } = await service.getTvRequests();
+
+    expect(skipped).toBe(0);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: 'approved', ombiRequestId: 501 });
+  });
+
   it('skips a malformed child but keeps its siblings under the same parent', async () => {
     const badChild = { id: 502 /* missing requestedUser etc */ };
     mockFetch.mockResolvedValue(

@@ -44,7 +44,21 @@ const MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
 const TITLE_MAX = 500; // ombi_requests.title
 const DISPLAY_NAME_MAX = 255; // ombi_requests.ombi_username / ombi_alias
 const IMDB_ID_MAX = 20; // ombi_requests.imdb_id
+
 const OMBI_USER_ID_MAX = 64; // ombi_requests.ombi_user_id / ombi_user_mappings.ombi_user_id
+
+/**
+ * Ombi sends explicit `null` for unset booleans: `denied` is null on 279 of 280
+ * TV child requests and on 2 of 658 movies in the reference instance.
+ * `z.boolean().default(false)` does NOT cover that - a Zod default only applies
+ * to `undefined` - so every one of those records failed validation and was
+ * skipped, which dropped 100% of TV requests on the first live sync.
+ */
+const ombiBoolean = () =>
+  z
+    .boolean()
+    .nullish()
+    .transform((v) => v ?? false);
 
 // ============================================================================
 // Errors
@@ -107,11 +121,11 @@ const ombiMovieRequestSchema = z.object({
     .transform((s) => s.slice(0, DISPLAY_NAME_MAX))
     .nullable()
     .optional(),
-  approved: z.boolean().default(false),
-  denied: z.boolean().default(false),
-  available: z.boolean().default(false),
+  approved: ombiBoolean(),
+  denied: ombiBoolean(),
+  available: ombiBoolean(),
   markedAsAvailable: z.coerce.date().nullable().optional(),
-  is4kRequest: z.boolean().default(false),
+  is4kRequest: ombiBoolean(),
 });
 
 const ombiSeasonRequestSchema = z.object({
@@ -123,9 +137,9 @@ const ombiChildRequestSchema = z.object({
   parentRequestId: z.number(),
   requestedDate: z.coerce.date(),
   requestedUser: ombiRequestedUserSchema,
-  approved: z.boolean().default(false),
-  denied: z.boolean().default(false),
-  available: z.boolean().default(false),
+  approved: ombiBoolean(),
+  denied: ombiBoolean(),
+  available: ombiBoolean(),
   markedAsAvailable: z.coerce.date().nullable().optional(),
   seasonRequests: z.array(ombiSeasonRequestSchema).nullable().optional(),
   releaseYear: z.number().nullable().optional(),
