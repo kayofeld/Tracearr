@@ -60,6 +60,22 @@ const ombiBoolean = () =>
     .nullish()
     .transform((v) => v ?? false);
 
+/**
+ * `releaseYear` on TV children is NOT a year: Ombi sends a date string, and in
+ * the reference instance it is the .NET default "0001-01-01T00:00:00Z" on all
+ * 280 children - i.e. never actually populated. Accept either shape and discard
+ * implausible values so a placeholder never surfaces as "year 1" in the UI.
+ */
+const ombiReleaseYear = () =>
+  z
+    .union([z.number(), z.string()])
+    .nullish()
+    .transform((v) => {
+      if (v === null || v === undefined) return null;
+      const year = typeof v === 'number' ? v : new Date(v).getUTCFullYear();
+      return Number.isFinite(year) && year >= 1900 ? year : null;
+    });
+
 // ============================================================================
 // Errors
 // ============================================================================
@@ -142,7 +158,7 @@ const ombiChildRequestSchema = z.object({
   available: ombiBoolean(),
   markedAsAvailable: z.coerce.date().nullable().optional(),
   seasonRequests: z.array(ombiSeasonRequestSchema).nullable().optional(),
-  releaseYear: z.number().nullable().optional(),
+  releaseYear: ombiReleaseYear(),
 });
 
 /** Parent-level structural check only - childRequests are validated per-element
