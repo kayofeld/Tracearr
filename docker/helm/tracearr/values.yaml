@@ -2,7 +2,7 @@
 
 tracearr:
   image:
-    repository: ghcr.io/connorgallopo/tracearr
+    repository: ghcr.io/kayofeld/tracearr
     tag: ""  # defaults to appVersion
     pullPolicy: IfNotPresent
 

@@ -32,7 +32,9 @@
 >
 > The fork tracks upstream via the `upstream` remote but ships independently: releases, the in-app update
 > checker, and the self-update button all follow **kayofeld/Tracearr** (configurable via
-> `TRACEARR_UPDATE_REPO`). The fork does **not** publish its own Docker images — run it from source.
+> `TRACEARR_UPDATE_REPO`). It publishes its own Docker images at `ghcr.io/kayofeld/tracearr`, so both
+> source and container deployments get the fork's features. See
+> [Docker / Portainer](#docker--portainer-fork-images).
 
 ---
 
@@ -123,10 +125,11 @@ Tracearr handles all three. One install, one interface.
 ## Quick Start
 
 > [!IMPORTANT]
-> This fork is **run from source** — it does not publish its own Docker images. The `ghcr.io/connorgallopo/*`
-> images below are **upstream's** and do **not** include this fork's features. To run the fork, use the
-> [Manual install](#manual-install-source-build) below (or build your own image from this repo). The Docker
-> instructions are kept as a reference for upstream users.
+> This fork publishes **its own Docker images** at `ghcr.io/kayofeld/tracearr`, built from every `v*` release
+> tag. Use those if you deploy with Docker or Portainer. The `ghcr.io/connorgallopo/*` images are
+> **upstream's** and do **not** include this fork's features. Running from source
+> ([Manual install](#manual-install-source-build)) is still fully supported and is the path that gets the
+> in-app self-update button.
 
 ### Manual install (source build)
 
@@ -198,13 +201,19 @@ WantedBy=multi-user.target
 
 Then `sudo systemctl enable --now tracearr` (with the repo at `/opt/Tracearr`, `.env` in that directory, and the `tracearr` user owning it: `sudo chown -R tracearr:tracearr /opt/Tracearr`).
 
-### Docker (upstream images)
+### Docker / Portainer (fork images)
 
-If you'd rather run **upstream** Tracearr (without this fork's features), the upstream images are the fastest path:
+The fork's images are published to GHCR on every release tag, for `linux/amd64` and `linux/arm64`:
+
+| Tag                                    | What it is                                                       |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| `ghcr.io/kayofeld/tracearr:latest`     | Latest release, app only (bring your own Postgres + Redis)       |
+| `ghcr.io/kayofeld/tracearr:1.8.1`      | A specific release, if you'd rather pin                          |
+| `ghcr.io/kayofeld/tracearr:supervised` | All-in-one (app + Postgres/TimescaleDB + Redis in one container) |
 
 ```bash
-# Download compose file
-curl -O https://raw.githubusercontent.com/connorgallopo/Tracearr/main/docker/examples/docker-compose.pg18.yml
+# Download the fork's compose file
+curl -O https://raw.githubusercontent.com/kayofeld/Tracearr/main/docker/examples/docker-compose.pg18.yml
 
 # Generate secrets
 echo "JWT_SECRET=$(openssl rand -hex 32)" > .env
@@ -214,7 +223,16 @@ echo "COOKIE_SECRET=$(openssl rand -hex 32)" >> .env
 docker compose -f docker-compose.pg18.yml up -d
 ```
 
-Open `http://localhost:3000` and connect your Plex, Jellyfin, or Emby server. See upstream's [Docker deployment guide](docker/examples/README.md) and [docs.tracearr.com](https://docs.tracearr.com). To run **this fork** in Docker, build the image yourself from this repo (`docker build -f docker/Dockerfile -t tracearr:fork .`).
+**Portainer:** add a Stack, paste the contents of
+[`docker/examples/docker-compose.pg18.yml`](docker/examples/docker-compose.pg18.yml), and set `JWT_SECRET`
+and `COOKIE_SECRET` as environment variables in the stack editor (Portainer does not read a local `.env`
+file for you). Then deploy the stack.
+
+Open `http://localhost:3000` and connect your Plex, Jellyfin, or Emby server. See the
+[Docker deployment guide](docker/examples/README.md) and [docs.tracearr.com](https://docs.tracearr.com).
+
+> The in-app **Update** button is for bare-metal/systemd installs. On Docker, update by pulling the new
+> image tag and recreating the container (`docker compose pull && docker compose up -d`).
 
 ## Updating
 
@@ -257,9 +275,12 @@ Reference for upstream's published images (this fork does not publish images):
 | `supervised-nightly` | All-in-one nightly build                           |
 
 ```bash
-docker pull ghcr.io/connorgallopo/tracearr:supervised   # all-in-one (upstream)
-docker pull ghcr.io/connorgallopo/tracearr:latest        # stable (upstream)
+docker pull ghcr.io/kayofeld/tracearr:supervised   # all-in-one (this fork)
+docker pull ghcr.io/kayofeld/tracearr:latest       # stable (this fork)
 ```
+
+The fork builds `latest` and `supervised` (plus the exact version tag) from each release. The `next` and
+`nightly` variants in the table above come from upstream's own pipelines.
 
 ### Viewing Logs
 

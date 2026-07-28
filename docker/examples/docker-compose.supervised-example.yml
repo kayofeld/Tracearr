@@ -23,7 +23,7 @@
 
 services:
   tracearr:
-    image: ghcr.io/connorgallopo/tracearr:supervised
+    image: ghcr.io/kayofeld/tracearr:supervised
     container_name: tracearr
     shm_size: 512mb  # Required for PostgreSQL shared memory (increase for large imports)
     mem_limit: 3g    # Minimum 3GB required (PostgreSQL + Redis + Node.js)

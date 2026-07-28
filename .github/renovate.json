@@ -460,7 +460,7 @@
     // never let Renovate pin it to a frozen digest.
     {
       "matchManagers": ["helm-values"],
-      "matchPackageNames": ["ghcr.io/connorgallopo/tracearr"],
+      "matchPackageNames": ["ghcr.io/kayofeld/tracearr"],
       "enabled": false
     },
 
