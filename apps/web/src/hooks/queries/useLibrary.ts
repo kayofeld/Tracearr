@@ -135,7 +135,10 @@ export function useLibraryStale(
   // Optional repeated media-type filter, takes precedence over `mediaType`.
   // Use this to scope the item list to an exact set of media types (e.g. to
   // match a stats endpoint's scope, which may exclude 'artist').
-  mediaTypes?: ('movie' | 'show' | 'artist')[]
+  mediaTypes?: ('movie' | 'show' | 'artist')[],
+  // Scope to items with at least one attributed request (Ombi/Seerr).
+  // Absent/false preserves today's behavior.
+  requestedOnly?: boolean
 ) {
   const sortedIds = [...serverIds].sort().join(',');
   const mediaTypesKey = mediaTypes?.length ? [...mediaTypes].sort().join(',') : undefined;
@@ -153,6 +156,7 @@ export function useLibraryStale(
       sortBy,
       sortOrder,
       mediaTypesKey,
+      requestedOnly ?? false,
     ],
     queryFn: () =>
       api.library.stale(
@@ -165,7 +169,8 @@ export function useLibraryStale(
         mediaType,
         sortBy,
         sortOrder,
-        mediaTypes
+        mediaTypes,
+        requestedOnly
       ),
     staleTime: LIBRARY_STALE_TIME,
     enabled: serverIds.length > 0,

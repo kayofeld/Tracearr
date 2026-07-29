@@ -8,6 +8,8 @@ import { StatCard } from '@/components/ui/stat-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { DataTable, type SortingState } from '@/components/ui/data-table';
 import { ErrorState, LibraryEmptyState, EmptyState } from '@/components/library';
 import { NeverWatchedAgeChart } from '@/components/charts';
@@ -138,6 +140,7 @@ export function LibraryNeverWatched() {
   const { selectedServerIds, isMultiServer } = useServer();
 
   const [mediaTypeFilter, setMediaTypeFilter] = useState<MediaTypeFilter>('all');
+  const [requestedOnly, setRequestedOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [sorting, setSorting] = useState<SortingState>([{ id: 'addedAt', desc: false }]);
   const pageSize = 20;
@@ -146,11 +149,11 @@ export function LibraryNeverWatched() {
   // render even when its contents don't).
   const serverIdsKey = selectedServerIds.join(',');
 
-  // Reset to page 1 whenever the filter or the selected servers change so we
+  // Reset to page 1 whenever a filter or the selected servers change so we
   // don't land on a stale/out-of-range page.
   useEffect(() => {
     setPage(1);
-  }, [mediaTypeFilter, serverIdsKey]);
+  }, [mediaTypeFilter, requestedOnly, serverIdsKey]);
 
   const handleSortingChange = (newSorting: SortingState) => {
     setSorting(newSorting);
@@ -181,6 +184,15 @@ export function LibraryNeverWatched() {
   const showRequesterSource = Boolean(
     requesterStats.data?.configuredSources?.ombi && requesterStats.data?.configuredSources?.seerr
   );
+  // The "Requested only" toggle is only meaningful when at least one request
+  // connector is configured - with none configured every requestedBy is null
+  // and the filter would always yield zero rows. Hide it entirely rather than
+  // show a disabled control users would have to puzzle out (there's no single
+  // good tooltip-length explanation, and the page already degrades this way
+  // for the source badge above).
+  const hasRequestConnector = Boolean(
+    requesterStats.data?.configuredSources?.ombi || requesterStats.data?.configuredSources?.seerr
+  );
 
   // Paginated, sortable item list
   const items = useLibraryStale(
@@ -193,7 +205,8 @@ export function LibraryNeverWatched() {
     mediaTypeParam,
     sortBy,
     sortOrder,
-    mediaTypesParam
+    mediaTypesParam,
+    requestedOnly
   );
 
   const totalPages = Math.ceil((items.data?.pagination.total ?? 0) / pageSize) || 1;
@@ -359,16 +372,30 @@ export function LibraryNeverWatched() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {header}
-        <Tabs
-          value={mediaTypeFilter}
-          onValueChange={(v) => setMediaTypeFilter(v as MediaTypeFilter)}
-        >
-          <TabsList>
-            <TabsTrigger value="all">{t('library.neverWatched.filterAll')}</TabsTrigger>
-            <TabsTrigger value="movie">{t('library.neverWatched.filterMovies')}</TabsTrigger>
-            <TabsTrigger value="show">{t('library.neverWatched.filterSeries')}</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap items-center gap-4">
+          <Tabs
+            value={mediaTypeFilter}
+            onValueChange={(v) => setMediaTypeFilter(v as MediaTypeFilter)}
+          >
+            <TabsList>
+              <TabsTrigger value="all">{t('library.neverWatched.filterAll')}</TabsTrigger>
+              <TabsTrigger value="movie">{t('library.neverWatched.filterMovies')}</TabsTrigger>
+              <TabsTrigger value="show">{t('library.neverWatched.filterSeries')}</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {hasRequestConnector && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="never-watched-requested-only"
+                checked={requestedOnly}
+                onCheckedChange={setRequestedOnly}
+              />
+              <Label htmlFor="never-watched-requested-only" className="font-normal">
+                {t('library.neverWatched.requestedOnlyToggle')}
+              </Label>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* KPI Cards Grid - 4 columns on desktop, 2 on mobile */}
@@ -504,7 +531,11 @@ export function LibraryNeverWatched() {
             sorting={sorting}
             onSortingChange={handleSortingChange}
             isServerFiltered
-            emptyMessage={t('library.neverWatched.emptyTitle')}
+            emptyMessage={
+              requestedOnly
+                ? t('library.neverWatched.requestedOnlyEmptyTitle')
+                : t('library.neverWatched.emptyTitle')
+            }
           />
         </CardContent>
       </Card>

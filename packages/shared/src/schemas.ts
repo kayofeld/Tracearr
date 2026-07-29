@@ -1093,6 +1093,10 @@ export const libraryStaleQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
   timezone: timezoneSchema,
+  // Restrict results to items with a matching media-request attribution
+  // (contract §7 requester join). Default false/absent preserves today's
+  // behaviour byte-for-byte.
+  requestedOnly: booleanStringSchema.default(false),
 });
 
 // Library never-watched statistics query schema
