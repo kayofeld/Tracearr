@@ -37,6 +37,9 @@ import type {
   HistoryAggregatesQueryInput,
   HistoryAggregates,
   VersionInfo,
+  VersionUpdateCapability,
+  VersionUpdateStartResponse,
+  VersionUpdateStatus,
   EngagementStats,
   ShowStatsResponse,
   SetupStatus,
@@ -1436,6 +1439,20 @@ class ApiClient {
     get: () => this.request<Settings>('/settings'),
     update: (data: Partial<Settings>) =>
       this.request<Settings>('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+    /**
+     * Set (or clear, with `url: null`) the Docker/Portainer redeploy webhook.
+     * Deliberately NOT part of `Settings`/`update()` above - the server never
+     * echoes this field back (the embedded webhook UUID is the auth secret),
+     * so it is typed and called separately even though it PATCHes the same
+     * `/settings` endpoint (see updateSettingsSchema in @tracearr/shared and
+     * routes/settings.ts). Read `dockerRedeployConfigured` from
+     * GET /version/update/capability to know the current state.
+     */
+    setDockerRedeployWebhook: (url: string | null) =>
+      this.request<Settings>('/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ dockerRedeployWebhookUrl: url }),
+      }),
     testWebhook: (data: {
       type: 'discord' | 'custom';
       url?: string;
@@ -1792,19 +1809,13 @@ class ApiClient {
     get: () => this.request<VersionInfo>('/version'),
     check: () =>
       this.request<{ message: string }>('/version/check', { method: 'POST', body: '{}' }),
-    updateCapability: () =>
-      this.request<{ available: boolean; enabled: boolean; isDocker: boolean }>(
-        '/version/update/capability'
-      ),
+    updateCapability: () => this.request<VersionUpdateCapability>('/version/update/capability'),
     update: () =>
-      this.request<{ started: boolean; target: string }>('/version/update', {
+      this.request<VersionUpdateStartResponse>('/version/update', {
         method: 'POST',
         body: '{}',
       }),
-    updateStatus: () =>
-      this.request<{ state: string; message: string | null; at: string | null }>(
-        '/version/update/status'
-      ),
+    updateStatus: () => this.request<VersionUpdateStatus>('/version/update/status'),
   };
 
   // Tailscale VPN

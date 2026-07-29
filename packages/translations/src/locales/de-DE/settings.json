@@ -98,6 +98,19 @@
     "uploading": "Hochladen...",
     "version": "Version"
   },
+  "dockerUpdate": {
+    "bareMetalDescription": "This deployment updates in place, so a redeploy webhook doesn't apply here.",
+    "clearConfirmAction": "Yes, remove it",
+    "clearConfirmDescription": "The in-app Update button will stop working on this deployment until a webhook is configured again.",
+    "clearConfirmTitle": "Remove the redeploy webhook?",
+    "configured": "Configured",
+    "description": "Let Tracearr trigger a Portainer redeploy so the in-app Update button works on Docker.",
+    "notConfigured": "Not configured",
+    "title": "Docker Redeploy Webhook",
+    "webhookUrl": "Webhook URL",
+    "webhookUrlHelp": "Paste the redeploy webhook URL from your Portainer stack (Stack → Webhooks). This is a secret - once saved, it can't be viewed again.",
+    "webhookUrlPlaceholder": "https://portainer.example.com/api/webhooks/..."
+  },
   "general": {
     "accentColor": "Akzentfarbe",
     "apiDocs": "API Docs",
@@ -522,7 +535,8 @@
     "ombi": "Requests (Ombi)",
     "seerr": "Requests (Seerr)",
     "servers": "Server",
-    "tailscale": "Tailscale"
+    "tailscale": "Tailscale",
+    "updates": "Updates"
   },
   "tailscale": {
     "authorize": "Autorisieren in Tailscale",
@@ -564,6 +578,9 @@
   "title": "Einstellungen",
   "update": {
     "betaUpdate": "Beta Update",
+    "dockerRestarting": "Waiting for the container to restart.",
+    "dockerTimedOut": "Couldn't confirm the redeploy finished. Refresh once the container is back.",
+    "dockerTriggered": "Redeploy triggered. The container will restart shortly.",
     "failed": "Update failed",
     "inProgress": "Updating. This rebuilds and restarts the server, which takes a minute or two.",
     "newVersion": "Neue Version",

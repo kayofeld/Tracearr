@@ -2018,6 +2018,51 @@ export interface VersionInfo {
   lastChecked: string | null;
 }
 
+// GET /version/update/capability response.
+export interface VersionUpdateCapability {
+  // True iff the in-app update button can be used: owner + bare-metal
+  // self-update enabled, OR owner + Docker with a redeploy webhook configured.
+  available: boolean;
+  // Bare-metal self-update opt-in flag (TRACEARR_SELF_UPDATE=true).
+  enabled: boolean;
+  // True when this instance is running inside a Docker container.
+  isDocker: boolean;
+  // Docker only: whether the owner has configured a Portainer redeploy
+  // webhook (see Settings service dockerRedeployWebhookUrl). Always false
+  // on bare metal.
+  dockerRedeployConfigured: boolean;
+  // Docker only, non-null: an owner-facing caveat for the UI to render -
+  // either how to configure the webhook, or that a redeploy only changes the
+  // running version when the compose stack tracks a moving tag (e.g.
+  // `:latest`); a pinned exact tag (e.g. `:1.9.0`) redeploys unchanged. Null
+  // on bare metal.
+  dockerNote: string | null;
+}
+
+// POST /version/update response.
+export interface VersionUpdateStartResponse {
+  started: boolean;
+  // Version the update is targeting (from the last version check).
+  target: string;
+  // Docker only: this process may be recreated shortly after the webhook
+  // fires, so further progress cannot be observed from here - see
+  // VersionUpdateStatus's 'unknown' state.
+  note?: string;
+}
+
+// Update progress states written by scripts/update.sh (bare metal) into
+// .update-status.json, plus 'idle' (no update run yet) and 'unknown' (Docker
+// only - progress cannot be observed from inside the container once a
+// redeploy webhook has fired, since this process may already be gone).
+export type VersionUpdateState = 'idle' | 'running' | 'restarting' | 'done' | 'failed' | 'unknown';
+
+// GET /version/update/status response.
+export interface VersionUpdateStatus {
+  state: VersionUpdateState;
+  message: string | null;
+  at: string | null;
+}
+
 // =============================================================================
 // Device Compatibility Types
 // =============================================================================

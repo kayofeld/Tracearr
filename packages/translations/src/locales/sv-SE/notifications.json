@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Det gick inte att uppdatera inställningarna",
       "streamTerminateFailed": "Det gick inte att avsluta strömmen",
       "trustScoresResetFailed": "Det gick inte att återställa trust-poäng",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Webhook test misslyckades"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} användaråterställning till 100",
         "message_other": "{{count}} användare återställs till 100",
         "title": "Lita på poäng Återställ"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

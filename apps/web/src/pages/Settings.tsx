@@ -17,6 +17,7 @@ import { OmbiSettings } from '@/components/settings/OmbiSettings';
 import { SeerrSettings } from '@/components/settings/SeerrSettings';
 import { JobsSettings } from '@/components/settings/JobsSettings';
 import { BackupSettings } from '@/components/settings/BackupSettings';
+import { UpdateSettings } from '@/components/settings/UpdateSettings';
 import { NotificationAgentsManager } from '@/components/settings/notification-agents';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Bell } from 'lucide-react';
@@ -36,6 +37,7 @@ function SettingsNav() {
     { href: '/settings/seerr', label: t('tabs.seerr') },
     { href: '/settings/jobs', label: t('tabs.jobs') },
     { href: '/settings/backup', label: t('tabs.backup') },
+    { href: '/settings/updates', label: t('tabs.updates') },
   ];
 
   return (
@@ -97,6 +99,7 @@ export function Settings() {
         <Route path="seerr" element={<SeerrSettings />} />
         <Route path="jobs" element={<JobsSettings />} />
         <Route path="backup" element={<BackupSettings />} />
+        <Route path="updates" element={<UpdateSettings />} />
       </Routes>
     </div>
   );

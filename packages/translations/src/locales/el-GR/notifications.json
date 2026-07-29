@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Αποτυχία ενημέρωσης των ρυθμίσεων",
       "streamTerminateFailed": "Αποτυχία τερματισμού ροής",
       "trustScoresResetFailed": "Αποτυχία επαναφοράς των βαθμολογιών εμπιστοσύνης",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Το τεστ Webhook απέτυχε"
@@ -270,6 +272,12 @@
         "message_one": "Επαναφορά του {{count}} χρήστη στο 100",
         "message_other": "{{count}} users reset to 100",
         "title": "Επαναφορά Βαθμών Εμπιστοσύνης"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

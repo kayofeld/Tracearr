@@ -562,5 +562,103 @@ describe('Settings Routes', () => {
       expect(response.statusCode).toBe(200);
       expect(invalidateSeerrCaches).not.toHaveBeenCalled();
     });
+
+    // ==========================================================================
+    // Docker redeploy webhook (in-app update for Docker deployments) - the
+    // URL embeds the Portainer webhook UUID, which *is* the auth secret, so
+    // it is write-only: never part of `Settings`/getAllSettings(), and any
+    // SSRF rejection must use a fixed generic message rather than relaying
+    // SsrfBlockedError.message (which echoes the raw URL for a malformed input).
+    // ==========================================================================
+
+    it('accepts and persists a valid dockerRedeployWebhookUrl, never echoing it back', async () => {
+      app = await buildTestApp(ownerUser);
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { dockerRedeployWebhookUrl: 'http://portainer.local:9000/api/webhooks/some-uuid' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(setSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dockerRedeployWebhookUrl: 'http://portainer.local:9000/api/webhooks/some-uuid',
+        })
+      );
+      // getAllSettings() only returns PUBLIC_KEYS - the field must never
+      // appear in the response body, unlike ombiUrl/discordWebhookUrl etc.
+      expect(response.json()).not.toHaveProperty('dockerRedeployWebhookUrl');
+    });
+
+    it('allows clearing dockerRedeployWebhookUrl (set to null)', async () => {
+      app = await buildTestApp(ownerUser);
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { dockerRedeployWebhookUrl: null },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(setSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ dockerRedeployWebhookUrl: null })
+      );
+    });
+
+    it('rejects a link-local dockerRedeployWebhookUrl with a generic message (no URL echo)', async () => {
+      app = await buildTestApp(ownerUser);
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { dockerRedeployWebhookUrl: 'http://169.254.169.254/api/webhooks/some-uuid' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const message = response.json().message as string;
+      expect(message).not.toContain('169.254.169.254');
+      expect(message).not.toContain('some-uuid');
+      expect(setSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects an obviously invalid dockerRedeployWebhookUrl shape (zod) without echoing it', async () => {
+      app = await buildTestApp(ownerUser);
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: { dockerRedeployWebhookUrl: 'not a valid url with secret-token' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().message).not.toContain('secret-token');
+      expect(setSettings).not.toHaveBeenCalled();
+    });
+
+    it(
+      'rejects a URL that parses crudely but fails new URL() ' +
+        "(assertSafeProbeUrl's 'Malformed URL' path) without echoing the raw input",
+      async () => {
+        app = await buildTestApp(ownerUser);
+
+        // Passes the shared package's crude permissiveUrlSchema (starts with
+        // http://, no whitespace in the host part) but is not a valid URL per
+        // WHATWG `new URL()` (unterminated IPv6-literal brackets) - so it
+        // reaches assertSafeProbeUrl, which throws
+        // `SsrfBlockedError('Malformed URL: <raw input verbatim>')`. The
+        // route must never relay that message, since here it would echo the
+        // secret-token substring straight back in the response body.
+        const response = await app.inject({
+          method: 'PATCH',
+          url: '/settings',
+          payload: { dockerRedeployWebhookUrl: 'http://[secret-token-in-brackets' },
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(response.json().message).not.toContain('secret-token-in-brackets');
+        expect(setSettings).not.toHaveBeenCalled();
+      }
+    );
   });
 });

@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Échec de la mise à jour des réglages",
       "streamTerminateFailed": "Échec de l'arrêt de la lecture",
       "trustScoresResetFailed": "Échec de la réinitialisation des scores de confiance",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Échec du test du webhook"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} utilisateur réinitialisé à 100",
         "message_other": "{{count}} utilisateurs réinitialisés à 100",
         "title": "Réinitialiser les scores de confiance"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

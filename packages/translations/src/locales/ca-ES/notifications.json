@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Failed to update settings",
       "streamTerminateFailed": "Failed to terminate stream",
       "trustScoresResetFailed": "Failed to reset trust scores",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Webhook test failed"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} user reset to 100",
         "message_other": "{{count}} users reset to 100",
         "title": "Trust Scores Reset"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

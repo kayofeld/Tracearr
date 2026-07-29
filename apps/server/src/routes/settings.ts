@@ -13,6 +13,7 @@ import { notificationManager } from '../services/notifications/index.js';
 import { getAllSettings, getSettings, setSettings } from '../services/settings.js';
 import { invalidateOmbiCaches } from '../jobs/ombiSyncQueue.js';
 import { invalidateSeerrCaches } from '../jobs/seerrSyncQueue.js';
+import { assertSafeProbeUrl, SsrfBlockedError } from '../utils/ssrf.js';
 
 // Re-export service getters so existing import paths still work
 export {
@@ -65,16 +66,49 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
     // Build update object from provided fields
     const updates: Partial<Settings> = {};
+    // dockerRedeployWebhookUrl is intentionally NOT part of `Settings` (it is
+    // write-only, never echoed back - see services/settings.ts
+    // INTERNAL_DEFAULTS) so it is collected separately and validated before
+    // being merged into `updates` below.
+    let dockerRedeployWebhookUrl: string | null | undefined;
 
     for (const [key, value] of Object.entries(body.data)) {
       if (value !== undefined) {
         if (key === 'externalUrl' && typeof value === 'string') {
           // Strip trailing slash for consistency
           updates.externalUrl = value.replace(/\/+$/, '') || null;
+        } else if (key === 'dockerRedeployWebhookUrl') {
+          dockerRedeployWebhookUrl = value as string | null;
         } else {
           (updates as Record<string, unknown>)[key] = value;
         }
       }
+    }
+
+    // SSRF check at save time (contract: validate on save AND before every
+    // outbound call - see routes/version.ts). Loopback/RFC1918 stay allowed,
+    // same as the Ombi/Seerr connectors - Portainer normally runs on the same
+    // host or LAN.
+    if (dockerRedeployWebhookUrl !== undefined) {
+      if (dockerRedeployWebhookUrl !== null) {
+        try {
+          assertSafeProbeUrl(dockerRedeployWebhookUrl);
+        } catch (err) {
+          if (err instanceof SsrfBlockedError) {
+            // Do NOT relay err.message here: for a malformed URL it embeds the
+            // raw input verbatim (`Malformed URL: ${rawUrl}`), and the webhook
+            // UUID *is* the secret (brief §2) - echoing it back would leak it
+            // into the response body. Generic message only, unlike the
+            // Ombi/Seerr test-connection routes which can safely relay
+            // SsrfBlockedError.message (their URL carries no embedded secret).
+            return reply.badRequest(
+              'Invalid or disallowed webhook URL. Must be a valid http(s) URL and not target a link-local address.'
+            );
+          }
+          throw err;
+        }
+      }
+      (updates as Record<string, unknown>).dockerRedeployWebhookUrl = dockerRedeployWebhookUrl;
     }
 
     await setSettings(updates);
