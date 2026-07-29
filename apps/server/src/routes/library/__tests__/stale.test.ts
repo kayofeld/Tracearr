@@ -43,9 +43,24 @@ vi.mock('../../../utils/serverFiltering.js', async () => {
 });
 
 import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { db } from '../../../db/client.js';
 import { getSettings } from '../../../services/settings.js';
-import { libraryStaleRoute, buildRequestedBySelectFragment } from '../stale.js';
+import {
+  libraryStaleRoute,
+  buildRequestedBySelectFragment,
+  buildRequestedOnlyFilterFragment,
+} from '../stale.js';
+
+const pgDialect = new PgDialect();
+/** Compiles a drizzle `sql` fragment to its final SQL text (placeholders for
+ *  params), mirroring jobs/__tests__/cleanupMobileTokens.test.ts's pattern -
+ *  handles nested fragments (unlike the literal-chunk-only renderSqlLiteral
+ *  below), so it can pin text produced by nested sql`` calls (e.g. the
+ *  requestedOnly EXISTS clause built from buildRequesterMatchCondition). */
+function renderCompiledSql(fragment: SQL): string {
+  return pgDialect.sqlToQuery(fragment).sql;
+}
 
 // Renders a drizzle `sql` template's literal chunks back to a string so the
 // exact emitted SQL text can be pinned without a live Postgres (mirrors
@@ -349,4 +364,245 @@ describe('GET /library/stale - requestedBy attribution', () => {
       requestedBy: null,
     });
   });
+});
+
+describe('buildRequestedOnlyFilterFragment', () => {
+  it('is an empty fragment when requestedOnly=false, regardless of configuration', () => {
+    expect(renderCompiledSql(buildRequestedOnlyFilterFragment(false, true, ['ombi'], 'si'))).toBe(
+      ''
+    );
+    expect(renderCompiledSql(buildRequestedOnlyFilterFragment(false, false, [], 'si'))).toBe('');
+  });
+
+  it('is an empty fragment when requestedOnly=true but no connector is configured', () => {
+    expect(renderCompiledSql(buildRequestedOnlyFilterFragment(true, false, [], 'si'))).toBe('');
+  });
+
+  it('emits an EXISTS semi-join scoped to the given item alias and sources when active', () => {
+    const text = renderCompiledSql(buildRequestedOnlyFilterFragment(true, true, ['ombi'], 'si'));
+    expect(text).toContain('EXISTS (');
+    expect(text).toContain('media_requests ro');
+    // Item-side columns reference the passed-in alias, not the paginated_items
+    // ('pi') alias used elsewhere in the route.
+    expect(text).toContain('si.media_type');
+    expect(text).toContain('si.imdb_id');
+    expect(text).not.toContain('pi.media_type');
+  });
+
+  it('scopes the source filter to whichever connectors are configured', () => {
+    const ombiOnly = renderCompiledSql(
+      buildRequestedOnlyFilterFragment(true, true, ['ombi'], 'si')
+    );
+    const both = renderCompiledSql(
+      buildRequestedOnlyFilterFragment(true, true, ['ombi', 'seerr'], 'si')
+    );
+    expect(ombiOnly.toLowerCase()).toContain('ro.source in');
+    expect(both.toLowerCase()).toContain('ro.source in');
+    // Two distinct param placeholders for two sources vs one for a single source.
+    expect(both).not.toBe(ombiOnly);
+  });
+});
+
+describe('GET /library/stale - requestedOnly query param', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    if (app) {
+      await app.close();
+    }
+  });
+
+  it('omitting the flag leaves the executed SQL byte-identical to explicit requestedOnly=false', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      ombiUrl: 'http://ombi.local',
+      ombiApiKey: 'secret',
+    } as never);
+    const ownerUser = createOwnerUser();
+
+    app = await buildTestApp(ownerUser);
+    vi.mocked(db.execute).mockResolvedValue({ rows: [mockRow()] } as never);
+    await app.inject({ method: 'GET', url: '/library/stale' });
+    const omittedSql = renderCompiledSql(vi.mocked(db.execute).mock.calls[0]![0] as SQL);
+    await app.close();
+    vi.mocked(db.execute).mockClear();
+
+    app = await buildTestApp(ownerUser);
+    vi.mocked(db.execute).mockResolvedValue({ rows: [mockRow()] } as never);
+    await app.inject({ method: 'GET', url: '/library/stale?requestedOnly=false' });
+    const explicitFalseSql = renderCompiledSql(vi.mocked(db.execute).mock.calls[0]![0] as SQL);
+
+    expect(explicitFalseSql).toBe(omittedSql);
+    // Confirms the default path carries no trace of the new filter (no added
+    // cost/shape change for the common unfiltered case).
+    expect(omittedSql).not.toContain('EXISTS (');
+    expect(omittedSql).not.toContain('media_requests ro');
+  });
+
+  it('returns only rows with a requester and total reflects the filtered set, composed with mediaTypes + category', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      ombiUrl: 'http://ombi.local',
+      ombiApiKey: 'secret',
+    } as never);
+    const ownerUser = createOwnerUser();
+    app = await buildTestApp(ownerUser);
+
+    // The DB layer is mocked, so this asserts what the route ASKS the DB for
+    // (the compiled SQL text), not live Postgres execution (no local Postgres
+    // available - see integration-test note below). The mock row's summary
+    // fields simulate "only 1 of the underlying rows matched" - the mapping
+    // logic simply relays whatever the (real, in production) filtered CTE
+    // returns, so pagination.total is always the same query's count.
+    vi.mocked(db.execute).mockResolvedValueOnce({
+      rows: [
+        mockRow({
+          request_source_username: 'alice_ombi',
+          request_requested_at: '2023-06-01T00:00:00.000Z',
+          _total_stale_items: '1',
+        }),
+      ],
+    } as never);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/library/stale?requestedOnly=true&category=never_watched&mediaTypes=movie&mediaTypes=show',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{
+      items: Array<{ requestedBy: unknown }>;
+      pagination: { total: number };
+    }>();
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]?.requestedBy).not.toBeNull();
+    expect(body.pagination.total).toBe(1);
+
+    const sqlText = renderCompiledSql(vi.mocked(db.execute).mock.calls[0]![0] as SQL);
+    // All three predicates present...
+    expect(sqlText).toContain('EXISTS (');
+    expect(sqlText).toContain("category = 'never_watched'");
+    expect(sqlText.toLowerCase()).toContain('li.media_type in');
+    // ...and the requestedOnly EXISTS is applied INSIDE filtered_items, i.e.
+    // strictly before summary_stats and paginated_items derive from it - so
+    // the count query and the page query see the exact same filtered rows.
+    // NOTE: "paginated_items" as a bare substring also appears earlier inside
+    // a pre-existing English SQL comment on item_watch_stats
+    // ("Carried through to stale_items/paginated_items purely for..."), so the
+    // CTE-definition keywords ("AS (") are pinned specifically to find the
+    // real CTE boundaries, not that comment.
+    const filteredItemsIdx = sqlText.indexOf('filtered_items AS (');
+    const existsIdx = sqlText.indexOf('EXISTS (');
+    const summaryStatsIdx = sqlText.indexOf('summary_stats AS (');
+    const paginatedItemsCteIdx = sqlText.indexOf('paginated_items AS (');
+    expect(filteredItemsIdx).toBeGreaterThan(-1);
+    expect(existsIdx).toBeGreaterThan(filteredItemsIdx);
+    expect(existsIdx).toBeLessThan(summaryStatsIdx);
+    expect(existsIdx).toBeLessThan(paginatedItemsCteIdx);
+  });
+
+  it('applies requestedOnly to the empty-page fallback summary query too (page beyond the filtered set)', async () => {
+    // When the requested page has no rows (e.g. requestedOnly narrowed the set
+    // and the page offset lands past it), the route re-queries just the
+    // summary. That second query must apply the exact same requestedOnly
+    // predicate - otherwise an out-of-range page would report a summary/total
+    // computed WITHOUT the filter.
+    vi.mocked(getSettings).mockResolvedValue({
+      ombiUrl: 'http://ombi.local',
+      ombiApiKey: 'secret',
+    } as never);
+    const ownerUser = createOwnerUser();
+    app = await buildTestApp(ownerUser);
+    vi.mocked(db.execute)
+      .mockResolvedValueOnce({ rows: [] } as never) // combined query: empty page
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            never_watched_count: '0',
+            stale_count: '0',
+            never_watched_bytes: '0',
+            stale_bytes: '0',
+            total_stale_items: '0',
+            total_stale_bytes: '0',
+          },
+        ],
+      } as never); // fallback summary-only query
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/library/stale?requestedOnly=true&page=5',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(db.execute).toHaveBeenCalledTimes(2);
+    const fallbackSql = renderCompiledSql(vi.mocked(db.execute).mock.calls[1]![0] as SQL);
+    expect(fallbackSql).toContain('EXISTS (');
+    expect(fallbackSql).toContain('media_requests ro');
+    expect(fallbackSql).toContain('si.imdb_id');
+  });
+
+  it('returns an honest empty result set (no DB call) when requestedOnly=true and no connector is configured', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      ombiUrl: null,
+      ombiApiKey: null,
+      seerrUrl: null,
+      seerrApiKey: null,
+    } as never);
+    const ownerUser = createOwnerUser();
+    const redisSetex = vi.fn().mockResolvedValue('OK');
+    app = await buildTestApp(ownerUser, {
+      get: vi.fn().mockResolvedValue(null),
+      setex: redisSetex,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/library/stale?requestedOnly=true',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{
+      items: unknown[];
+      summary: { total: { count: number } };
+      pagination: { total: number };
+    }>();
+    expect(body.items).toEqual([]);
+    expect(body.summary.total.count).toBe(0);
+    expect(body.pagination.total).toBe(0);
+    // Zero-cost short-circuit: never touches the database.
+    expect(db.execute).not.toHaveBeenCalled();
+    // Still cached, like every other response shape.
+    expect(redisSetex).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a distinct cache key for requestedOnly=true vs the default (no cross-contamination)', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      ombiUrl: 'http://ombi.local',
+      ombiApiKey: 'secret',
+    } as never);
+    const ownerUser = createOwnerUser();
+    const redisGet = vi.fn().mockResolvedValue(null);
+    const redisSetex = vi.fn().mockResolvedValue('OK');
+    app = await buildTestApp(ownerUser, { get: redisGet, setex: redisSetex });
+    vi.mocked(db.execute).mockResolvedValue({ rows: [mockRow()] } as never);
+
+    await app.inject({ method: 'GET', url: '/library/stale' });
+    await app.inject({ method: 'GET', url: '/library/stale?requestedOnly=true' });
+
+    const keys = redisGet.mock.calls.map((call) => call[0] as string);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  // NOTE: the assertions above pin the compiled SQL TEXT the route sends to
+  // Postgres (via a mocked db.execute + PgDialect.sqlToQuery), and the route's
+  // response-mapping logic given a canned row set. There is no local Postgres
+  // in this environment, so these are NOT integration tests against a real
+  // database - the actual query has not been executed against real data.
+  // An integration test (real DB, real media_requests/library_items rows,
+  // asserting requestedOnly=true genuinely restricts the returned+counted
+  // rows) should be written and run in an environment with Postgres before
+  // this ships to production.
 });

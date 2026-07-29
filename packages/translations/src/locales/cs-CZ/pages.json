@@ -156,6 +156,8 @@
       "onServerFor": "on server for {{duration}}",
       "requestedByNone": "—",
       "requestedByOthers": "+{{count}}",
+      "requestedOnlyEmptyTitle": "No requested items match",
+      "requestedOnlyToggle": "Requested only",
       "sourceOmbi": "Ombi",
       "sourceSeerr": "Seerr",
       "sourceTooltip": "Attributed via {{source}}",

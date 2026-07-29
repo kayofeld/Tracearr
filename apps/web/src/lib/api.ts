@@ -1265,7 +1265,11 @@ class ApiClient {
       // server-side - pass this to scope the table to an exact set of media
       // types (e.g. ['movie', 'show'] to match the stats endpoint's scope,
       // which never includes 'artist').
-      mediaTypes?: ('movie' | 'show' | 'artist')[]
+      mediaTypes?: ('movie' | 'show' | 'artist')[],
+      // Scope to items that have at least one attributed request (Ombi/Seerr).
+      // Absent/false preserves today's behavior. Appended last to keep every
+      // existing positional call site (StaleContentTabs, Storage) unaffected.
+      requestedOnly?: boolean
     ) => {
       const params = new URLSearchParams();
       if (serverIds?.length) {
@@ -1287,6 +1291,7 @@ class ApiClient {
       }
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
+      if (requestedOnly) params.set('requestedOnly', 'true');
       return this.request<StaleResponse>(`/library/stale?${params.toString()}`);
     },
     neverWatched: (

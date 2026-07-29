@@ -126,28 +126,34 @@ interface RawSummaryRow {
 }
 
 /**
- * Match condition joining a paginated stale item (`pi`, from the `paginated_items`
- * CTE - carries imdb_id/tmdb_id/tvdb_id/media_type) to a `media_requests` row
- * under the given alias, scoped to the currently-configured source set (design
- * §4.4 - a disconnected source's rows stay retained but invisible). Mirrors the
- * /stats/requesters join and ADR 0003: imdb -> tmdb -> tvdb precedence, no
- * title fallback (wrong attribution is worse than none). TV requests
- * (`media_type = 'tv'`) match the SHOW item.
+ * Match condition joining a stale item (under `itemAlias` - the row must carry
+ * imdb_id/tmdb_id/tvdb_id/media_type; used for both the `paginated_items` CTE
+ * and, for `requestedOnly` filtering, the pre-pagination `filtered_items`/`stale_items`
+ * CTEs) to a `media_requests` row under `requestAlias`, scoped to the
+ * currently-configured source set (design §4.4 - a disconnected source's rows
+ * stay retained but invisible). Mirrors the /stats/requesters join and ADR
+ * 0003: imdb -> tmdb -> tvdb precedence, no title fallback (wrong attribution
+ * is worse than none). TV requests (`media_type = 'tv'`) match the SHOW item.
  */
-function buildRequesterMatchCondition(requestAlias: string, sources: Array<'ombi' | 'seerr'>): SQL {
+function buildRequesterMatchCondition(
+  itemAlias: string,
+  requestAlias: string,
+  sources: Array<'ombi' | 'seerr'>
+): SQL {
+  const item = sql.raw(itemAlias);
   const r = sql.raw(requestAlias);
   return sql`(
-    (pi.media_type = 'movie' AND ${r}.media_type = 'movie')
-    OR (pi.media_type = 'show' AND ${r}.media_type = 'tv')
+    (${item}.media_type = 'movie' AND ${r}.media_type = 'movie')
+    OR (${item}.media_type = 'show' AND ${r}.media_type = 'tv')
   )
   AND ${r}.source IN (${sql.join(
     sources.map((s) => sql`${s}`),
     sql`, `
   )})
   AND (
-    (pi.imdb_id IS NOT NULL AND pi.imdb_id <> '' AND ${r}.imdb_id = pi.imdb_id)
-    OR (pi.tmdb_id IS NOT NULL AND pi.tmdb_id <> 0 AND ${r}.tmdb_id = pi.tmdb_id)
-    OR (pi.tvdb_id IS NOT NULL AND pi.tvdb_id <> 0 AND ${r}.tvdb_id = pi.tvdb_id)
+    (${item}.imdb_id IS NOT NULL AND ${item}.imdb_id <> '' AND ${r}.imdb_id = ${item}.imdb_id)
+    OR (${item}.tmdb_id IS NOT NULL AND ${item}.tmdb_id <> 0 AND ${r}.tmdb_id = ${item}.tmdb_id)
+    OR (${item}.tvdb_id IS NOT NULL AND ${item}.tvdb_id <> 0 AND ${r}.tvdb_id = ${item}.tvdb_id)
   )`;
 }
 
@@ -196,7 +202,7 @@ export function buildRequestedBySelectFragment(
       -- account; unresolved requesters never collide across sources.
       SELECT COUNT(DISTINCT COALESCE(r2.user_id::text, r2.source || ':' || r2.source_user_id))::int
       FROM media_requests r2
-      WHERE ${buildRequesterMatchCondition('r2', sources)}
+      WHERE ${buildRequesterMatchCondition('pi', 'r2', sources)}
     ) AS request_distinct_requester_count,
   `;
 }
@@ -216,11 +222,44 @@ function buildRequestedByJoinFragment(configured: boolean, sources: Array<'ombi'
       SELECT r.user_id, u.username, r.source_username, r.source_alias, r.requested_at, r.source
       FROM media_requests r
       LEFT JOIN users u ON u.id = r.user_id
-      WHERE ${buildRequesterMatchCondition('r', sources)}
+      WHERE ${buildRequesterMatchCondition('pi', 'r', sources)}
       ORDER BY r.requested_at ASC
       LIMIT 1
     ) rb ON true
   `;
+}
+
+/**
+ * `requestedOnly` predicate: keeps only rows with AT LEAST ONE matching
+ * request row, applied inside `filtered_items` (before the summary aggregation
+ * and before pagination) so `pagination.total` and the returned page always
+ * agree - the count query and the page query are literally the same CTE.
+ *
+ * Deliberately an existence check, not the earliest-request LATERAL join used
+ * for display attribution: filtering only needs "does a match exist", so an
+ * EXISTS (semi-join) is used here instead of duplicating the ORDER BY/LIMIT 1
+ * lateral for every pre-pagination row. The earliest-request LATERAL join
+ * still runs, unchanged, against the already-paginated page for the
+ * `requestedBy` display fields.
+ *
+ * Returns an empty fragment when `requestedOnly` is false (today's default
+ * query keeps its exact shape/cost) or when no connector is configured
+ * (that case is short-circuited before this is ever called - see the route
+ * handler - so this fragment is never actually reached unconfigured+true).
+ */
+export function buildRequestedOnlyFilterFragment(
+  requestedOnly: boolean,
+  configured: boolean,
+  sources: Array<'ombi' | 'seerr'>,
+  itemAlias: string
+): SQL {
+  if (!requestedOnly || !configured) {
+    return sql``;
+  }
+  return sql`AND EXISTS (
+    SELECT 1 FROM media_requests ro
+    WHERE ${buildRequesterMatchCondition(itemAlias, 'ro', sources)}
+  )`;
 }
 
 export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
@@ -251,6 +290,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
         sortOrder,
         page,
         pageSize,
+        requestedOnly,
       } = query.data;
       const authUser = request.user;
 
@@ -261,12 +301,14 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
         ? mediaTypes.slice().sort().join(',')
         : (mediaType ?? 'all');
 
-      // Build cache key with all varying params
+      // Build cache key with all varying params. requestedOnly must be part of
+      // the key (not just the query) - otherwise a cached unfiltered response
+      // would be served back for the filtered request and vice versa.
       const serverCacheSegment = resolvedIds ? resolvedIds.slice().sort().join(',') : 'all';
       const cacheKey = buildLibraryCacheKey(
         REDIS_KEYS.LIBRARY_STALE,
         serverCacheSegment,
-        `${libraryId ?? 'all'}-${mediaTypesSegment}-${staleDays}-${category}-${sortBy}-${sortOrder}-${page}-${pageSize}`
+        `${libraryId ?? 'all'}-${mediaTypesSegment}-${staleDays}-${category}-${sortBy}-${sortOrder}-${page}-${pageSize}-${requestedOnly}`
       );
 
       // Try cache first
@@ -300,6 +342,26 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
       const requestedBySelect = buildRequestedBySelectFragment(anyConfigured, configuredSources);
       const requestedByJoin = buildRequestedByJoinFragment(anyConfigured, configuredSources);
 
+      // requestedOnly with no connector configured: there is nothing to match
+      // against (the join fragment is skipped entirely), so an honest empty
+      // result set is returned rather than silently ignoring the flag or
+      // running a query that can never match. Short-circuits before touching
+      // the DB - zero added query cost.
+      if (requestedOnly && !anyConfigured) {
+        const emptyResponse: StaleResponse = {
+          items: [],
+          summary: {
+            neverWatched: { count: 0, sizeBytes: 0 },
+            stale: { count: 0, sizeBytes: 0 },
+            total: { count: 0, sizeBytes: 0 },
+            threshold: { days: staleDays },
+          },
+          pagination: { page, pageSize, total: 0 },
+        };
+        await app.redis.setex(cacheKey, CACHE_TTL.LIBRARY_STALE, JSON.stringify(emptyResponse));
+        return emptyResponse;
+      }
+
       // Build filters
       const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
       const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
@@ -321,6 +383,18 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           : category === 'stale'
             ? sql`AND category = 'stale'`
             : sql``;
+
+      // requestedOnly filter (empty fragment - and thus zero added cost - unless
+      // requestedOnly=true; the no-connector+requestedOnly case already
+      // returned above). Applied inside filtered_items/filtered so the count
+      // (summary_stats) and the page (paginated_items) read the exact same
+      // filtered rows - see buildRequestedOnlyFilterFragment.
+      const requestedOnlyFilter = buildRequestedOnlyFilterFragment(
+        requestedOnly,
+        anyConfigured,
+        configuredSources,
+        'si'
+      );
 
       // Sort column mapping - use sql.raw() for identifiers
       const sortColumnMap: Record<string, string> = {
@@ -469,11 +543,14 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           )
         ),
         filtered_items AS (
-          SELECT * FROM stale_items
+          SELECT * FROM stale_items si
           WHERE 1=1
             ${categoryFilter}
+            ${requestedOnlyFilter}
         ),
-        -- Summary aggregation computed once over all filtered items
+        -- Summary aggregation computed once over all filtered items (this is
+        -- also where requestedOnly is applied, so summary_stats/total and the
+        -- paginated page below always agree - same filtered_items rows).
         summary_stats AS (
           SELECT
             COUNT(*) FILTER (WHERE category = 'never_watched') AS never_watched_count,
@@ -604,7 +681,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             GROUP BY child.grandparent_rating_key, child.server_id
           ),
           item_watch_stats AS (
-            SELECT li.id, li.server_id,
+            SELECT li.id, li.server_id, li.media_type, li.imdb_id, li.tmdb_id, li.tvdb_id,
               CASE WHEN li.media_type IN ('show', 'artist') THEN COALESCE(cs.total_size, li.file_size) ELSE li.file_size END AS file_size,
               CASE WHEN li.media_type IN ('show', 'artist') THEN cws.last_watched ELSE MAX(sess.stopped_at) END AS last_watched
             FROM library_items li
@@ -612,13 +689,13 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             LEFT JOIN child_watch_stats cws ON li.media_type IN ('show', 'artist') AND cws.grandparent_rating_key = li.rating_key AND cws.server_id = li.server_id
             LEFT JOIN sessions sess ON li.media_type NOT IN ('show', 'artist') AND sess.rating_key = li.rating_key AND sess.server_id = li.server_id AND sess.duration_ms >= 120000
             WHERE li.media_type NOT IN ('episode', 'track', 'season', 'album') ${serverFilter} ${libraryFilter} ${mediaTypeFilter}
-            GROUP BY li.id, li.server_id, li.media_type, li.file_size, cs.total_size, cws.last_watched
+            GROUP BY li.id, li.server_id, li.media_type, li.imdb_id, li.tmdb_id, li.tvdb_id, li.file_size, cs.total_size, cws.last_watched
           ),
           stale_items AS (
-            SELECT id, file_size, CASE WHEN last_watched IS NULL THEN 'never_watched' ELSE 'stale' END AS category
+            SELECT id, media_type, imdb_id, tmdb_id, tvdb_id, file_size, CASE WHEN last_watched IS NULL THEN 'never_watched' ELSE 'stale' END AS category
             FROM item_watch_stats WHERE (last_watched IS NULL OR last_watched < NOW() - INTERVAL '1 day' * ${staleDays})
           ),
-          filtered AS (SELECT * FROM stale_items WHERE 1=1 ${categoryFilter})
+          filtered AS (SELECT * FROM stale_items si WHERE 1=1 ${categoryFilter} ${requestedOnlyFilter})
           SELECT COUNT(*) FILTER (WHERE category = 'never_watched') AS never_watched_count,
             COUNT(*) FILTER (WHERE category = 'stale') AS stale_count,
             COALESCE(SUM(file_size) FILTER (WHERE category = 'never_watched'), 0)::text AS never_watched_bytes,

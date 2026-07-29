@@ -235,6 +235,8 @@
       "filterAll": "All",
       "filterMovies": "Movies",
       "filterSeries": "Series",
+      "requestedOnlyToggle": "Requested only",
+      "requestedOnlyEmptyTitle": "No requested items match",
       "ageDistribution": "Age Distribution",
       "ageDistributionDesc": "How long never-watched content has been sitting on the server",
       "ageChartEmptyTitle": "No never-watched content",
