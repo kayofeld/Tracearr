@@ -1117,11 +1117,20 @@ async function initializePostListen(app: FastifyInstance) {
 
   // Log network settings status
   const networkSettings = await getNetworkSettings();
-  const envTrustProxy = process.env.TRUST_PROXY === 'true';
+  // Use the same parser Fastify is configured from, not a `=== 'true'` check:
+  // TRUST_PROXY also accepts a hop count or a CIDR/IP list, and those are the
+  // recommended forms. Comparing against the string 'true' warned a correctly
+  // configured `TRUST_PROXY=1` deployment that the variable was unset, and the
+  // old message then steered the operator to the any-hop form that lets a
+  // client pick its own rate-limit bucket via X-Forwarded-For.
+  const envTrustProxy = resolveTrustProxy(process.env.TRUST_PROXY) !== false;
   if (networkSettings.trustProxy && !envTrustProxy) {
     app.log.warn(
-      'Trust proxy is enabled in settings but TRUST_PROXY env var is not set. ' +
-        'Set TRUST_PROXY=true and restart for reverse proxy support.'
+      'Trust proxy is enabled in settings but TRUST_PROXY is not set in the environment. ' +
+        'Set TRUST_PROXY to the number of proxies in front of Tracearr (TRUST_PROXY=1 for a ' +
+        'single reverse proxy), or to a comma-separated list of trusted proxy IPs/CIDRs, then ' +
+        'restart. Avoid TRUST_PROXY=true: it trusts every hop, so a client can choose the ' +
+        'address Tracearr rate-limits on.'
     );
   }
   if (networkSettings.externalUrl) {

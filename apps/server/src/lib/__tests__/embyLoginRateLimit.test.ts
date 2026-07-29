@@ -98,7 +98,15 @@ describe('POST /emby/login rate limit (real mount)', () => {
 
     for (let i = 0; i < 5; i++) {
       const res = await auth.handler(loginRequest());
-      expect(res.status).not.toBe(429);
+      // 400 ("No Emby server is configured") is the real handler answering on
+      // the mocked empty database. Asserting the exact status, rather than
+      // merely `not 429`, is what pins the ENDPOINT to EMBY_LOGIN_PATH: a 404
+      // would satisfy `not 429`, so if the route registration drifted off the
+      // constant while the rate-limit matcher stayed on it, this loop would
+      // still pass while the live endpoint fell back to the lenient default
+      // limit. Rate-limit rules are evaluated before routing, so the 429 below
+      // alone cannot prove the endpoint is mounted here.
+      expect(res.status).toBe(400);
     }
 
     const sixth = await auth.handler(loginRequest());

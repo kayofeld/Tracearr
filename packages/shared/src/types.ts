@@ -276,6 +276,15 @@ export interface SetupStatus {
  */
 export const EMBY_LOGIN_FAILURE_REASONS = {
   INVALID_CREDENTIALS: 'invalid_credentials',
+  /**
+   * DO NOT emit this for a username that does not match the owner's linked
+   * Emby account. The diagnosis is deliberately scoped to that one account,
+   * and answering "no such user" for an arbitrary submitted name is exactly
+   * the enumeration oracle that scoping closed (security review F1): it would
+   * let an anonymous caller probe which accounts exist on the owner's Emby
+   * server. Kept in the union only for the owner's own account, where it
+   * distinguishes a deleted Emby account from a rejected password.
+   */
   USER_NOT_FOUND: 'user_not_found',
   WRONG_PASSWORD: 'wrong_password',
   ACCOUNT_DISABLED: 'account_disabled',
