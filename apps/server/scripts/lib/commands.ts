@@ -17,6 +17,7 @@ export const {
   authAccounts,
   authSessions,
   plexAccounts,
+  servers,
   hashPassword,
   setSetting,
   getSetting,
@@ -293,6 +294,14 @@ export async function enableLocalLoginCommand(): Promise<void> {
  * restore, or a compensation failure can leave one), so without this command
  * that refusal is a permanent brick rather than a recovery path.
  *
+ * CR-5: `ownerless-with-data` covers a wider set of surviving artifacts than
+ * "a user row with no owner role" - a setup compensation that deletes the
+ * created user but fails to delete the inserted server row leaves ZERO user
+ * rows and one orphaned `servers` row. This command cannot recover that case
+ * (there is no username to promote); the error message below names the
+ * actual remedy (`list-servers` / `delete-server <id>`) rather than repeating
+ * "No user named" with no next step.
+ *
  * Refuses if an owner already exists - checked up front, and re-checked by
  * the users_single_owner partial unique index at the update itself, so a
  * race against a concurrent claim (e.g. a browser claim landing between the
@@ -311,7 +320,20 @@ export async function promoteOwnerCommand(opts: { username: string }): Promise<v
   }
 
   const user = await findUserByUsername(opts.username);
-  if (!user) throw new Error(`No user named ${opts.username}`);
+  if (!user) {
+    const [anyUser] = await db.select({ id: users.id }).from(users).limit(1);
+    if (!anyUser) {
+      throw new Error(
+        `No user named ${opts.username}, and no user rows exist at all on this instance ` +
+          '(a previous setup attempt likely deleted the owner user during compensation while an ' +
+          'orphaned server row survived). There is no user to promote - run ' +
+          '`pnpm --filter @tracearr/server cli list-servers` to see the surviving server(s), then ' +
+          '`cli delete-server <id>` on each to return the instance to `unclaimed` so it can be set ' +
+          'up again normally.'
+      );
+    }
+    throw new Error(`No user named ${opts.username}`);
+  }
 
   try {
     await db
@@ -326,4 +348,45 @@ export async function promoteOwnerCommand(opts: { username: string }): Promise<v
     }
     throw error;
   }
+}
+
+export interface ServerSummary {
+  id: string;
+  name: string;
+  type: string;
+  url: string;
+}
+
+/**
+ * Lists every configured server row - the counterpart recovery step to
+ * `promote-owner` (CR-5): when a failed Emby setup's compensation deletes the
+ * created user but fails to delete the inserted server, the surviving
+ * artifact is a `servers` row, not a user, and `delete-server <id>` below is
+ * the actual remedy.
+ */
+export async function listServersCommand(): Promise<ServerSummary[]> {
+  return db
+    .select({ id: servers.id, name: servers.name, type: servers.type, url: servers.url })
+    .from(servers)
+    .orderBy(asc(servers.createdAt));
+}
+
+/**
+ * Deletes a server row by id (console-only recovery, CR-5). Mirrors
+ * `DELETE /servers/:id` (routes/servers.ts): a plain delete, related rows
+ * cascade at the database. Deleting the last surviving `servers`/`users`/
+ * `auth_accounts` row on an `ownerless-with-data` instance returns it to
+ * `unclaimed` (authGuards.ts's `getInstanceClaimState`), so it can go through
+ * /emby/setup or /sign-up/username again normally - the one case
+ * `promote-owner` cannot recover because no user row exists to promote.
+ */
+export async function deleteServerCommand(opts: { id: string }): Promise<void> {
+  const [server] = await db
+    .select({ id: servers.id })
+    .from(servers)
+    .where(eq(servers.id, opts.id))
+    .limit(1);
+  if (!server) throw new Error(`No server found with id ${opts.id}`);
+
+  await db.delete(servers).where(eq(servers.id, opts.id));
 }

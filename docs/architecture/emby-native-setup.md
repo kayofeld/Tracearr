@@ -15,18 +15,26 @@ survived (separate endpoint, refined invariant, two credentials, compensation ov
 transaction, SR-02 closed at the database). Four stated controls did not actually hold. This
 revision resolves them and corrects four factual errors.
 
-| Finding | Resolution | Section |
-|---|---|---|
-| SEC-01 the gate is "no owner row", not "fresh instance" | Three-state instance model; setup allowed only when *unclaimed*; a recovery state that refuses the client URL and demands a claim code | 3, 6 |
-| SEC-02 a second `emby` row makes login nondeterministic | Deterministic, fail-closed resolution in `/emby/login`; setup never inserts a second row; two designs depending on owner decision 3 | 4 |
-| SEC-03 SSRF control does not survive a deliberate attacker | New `safeProbe` module: manual redirects, hostname resolution, connect-time re-validation, widened deny list, no upstream status in client errors | 8 |
-| SEC-04 the SR-02 index may silently never exist | Moved to a drizzle migration (aborts startup on failure), `(role)` form, plus a post-migration existence assertion | 7.1 |
-| SEC-05 the `user.create` hook is not the funnel | Sentence corrected (the funnel is the database); violation mapped to 403 at both Plex sites; `/plex/connect` reordered | 7.2 |
-| SEC-06 duplicate-URL 409 can make setup un-retryable | Resolved by construction: a leftover server row puts the instance in the recovery state, which adopts the row | 6.3, 7.3 |
-| SEC-07 rate limiting enabled but unbounded here | Mandatory `customRules` entry plus a concurrency cap and a total outbound budget, all constants | 9 |
-| SEC-09/10/11 | URL canonicalization and userinfo rejection; logger redaction plus a test; T7 wording corrected | 8.4, 10, 11 |
+| Finding                                                    | Resolution                                                                                                                                        | Section     |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| SEC-01 the gate is "no owner row", not "fresh instance"    | Three-state instance model; setup allowed only when _unclaimed_; a recovery state that refuses the client URL and demands a claim code            | 3, 6        |
+| SEC-02 a second `emby` row makes login nondeterministic    | Deterministic, fail-closed resolution in `/emby/login`; setup never inserts a second row; two designs depending on owner decision 3               | 4           |
+| SEC-03 SSRF control does not survive a deliberate attacker | New `safeProbe` module: manual redirects, hostname resolution, connect-time re-validation, widened deny list, no upstream status in client errors | 8           |
+| SEC-04 the SR-02 index may silently never exist            | Moved to a drizzle migration (aborts startup on failure), `(role)` form, plus a post-migration existence assertion                                | 7.1         |
+| SEC-05 the `user.create` hook is not the funnel            | Sentence corrected (the funnel is the database); violation mapped to 403 at both Plex sites; `/plex/connect` reordered                            | 7.2         |
+| SEC-06 duplicate-URL 409 can make setup un-retryable       | Resolved by construction: a leftover server row puts the instance in the recovery state, which adopts the row                                     | 6.3, 7.3    |
+| SEC-07 rate limiting enabled but unbounded here            | Mandatory `customRules` entry plus a concurrency cap and a total outbound budget, all constants                                                   | 9           |
+| SEC-09/10/11                                               | URL canonicalization and userinfo rejection; logger redaction plus a test; T7 wording corrected                                                   | 8.4, 10, 11 |
 
 Corrections to statements revision 1 made as fact are in section 12.
+
+**Implementation correction (CR-3/IMP-01, post-review):** the SEC-06 resolution above ("a leftover
+server row puts the instance in the recovery state, which adopts the row") does not hold. The
+adoption path it describes could never succeed - `assertSignupAllowed()` refuses
+`ownerless-with-data` unconditionally with no adoption exception - so the code sent two outbound
+probes and the operator's real Emby password before failing anyway. §6.3, §6.4, and the T2 row in
+§10 are corrected: `ownerless-with-data` refuses unconditionally, console-only, before any outbound
+call. See §6.3 and §7.4/CR-5 for the corrected recovery path.
 
 ## 1. Goal and requirement
 
@@ -50,7 +58,7 @@ it is the right credential for (section 5).
 - Deciding whether an in-app set-password surface ships here. Owner decision 2.
 - OIDC changes, and any change to the local `/sign-up/username` handler itself.
 
-One thing that *is* in scope and was not in revision 1: two small changes outside the new plugin,
+One thing that _is_ in scope and was not in revision 1: two small changes outside the new plugin,
 because the design's own claims are false without them. `/emby/login` gains a fail-closed branch for
 ambiguous server configuration (section 4), and `plexPlugin.ts` gains unique-violation mapping plus
 a statement reorder (section 7.2).
@@ -108,11 +116,11 @@ export async function getInstanceClaimState(): Promise<InstanceClaimState>;
 
 Derivation, four `limit(1)` selects issued in parallel:
 
-| owner row | any `users` row | any `auth_accounts` row | any `servers` row | state |
-|---|---|---|---|---|
-| yes | - | - | - | `owned` |
-| no | no | no | no | `unclaimed` |
-| no | otherwise any of the three present | | | `ownerless-with-data` |
+| owner row | any `users` row                    | any `auth_accounts` row | any `servers` row | state                 |
+| --------- | ---------------------------------- | ----------------------- | ----------------- | --------------------- |
+| yes       | -                                  | -                       | -                 | `owned`               |
+| no        | no                                 | no                      | no                | `unclaimed`           |
+| no        | otherwise any of the three present |                         |                   | `ownerless-with-data` |
 
 How each state is reached, and what `/emby/setup` does:
 
@@ -197,7 +205,7 @@ whichever the owner picks:
 - **Design B, multiple Emby servers are supported.** No uniqueness constraint. Instead, authentication
   authority becomes explicit: add `servers.is_auth_authority boolean not null default false` with
   `CREATE UNIQUE INDEX servers_single_auth_authority ON servers (is_auth_authority) WHERE
-  is_auth_authority;`. `/emby/login` resolves the authority row and fails closed when none is set.
+is_auth_authority;`. `/emby/login` resolves the authority row and fails closed when none is set.
   Setup sets the flag on the row it creates or adopts. `POST /servers` gains a way to move the flag,
   which is an owner-authenticated operation. This is more surface, and it is only worth building if
   the answer to decision 3 is yes.
@@ -288,42 +296,54 @@ copy. No server-side error string ever contains an upstream status, status text,
    `NOT_EMBY_ADMIN`.
 7. **Persist, compensated (section 7.3).**
    a. `internalAdapter.createUser({ name: username, username })`, which runs the same `user.create`
-      hook chain as the better-auth signup paths: `assertSignupAllowed` again as defense in depth,
-      forced `role: 'owner'`, and the username plugin's normalization and uniqueness. No `email`
-      (column nullable) and no `passwordHash`, which is the point of the feature.
+   hook chain as the better-auth signup paths: `assertSignupAllowed` again as defense in depth,
+   forced `role: 'owner'`, and the username plugin's normalization and uniqueness. No `email`
+   (column nullable) and no `passwordHash`, which is the point of the feature.
    b. Insert the `servers` row: `{ name: serverName ?? 'Emby', type: 'emby', url: canonicalUrl,
-      token: apiKey, color: pickServerColor(...) }`, the same shape `POST /servers` uses.
+   token: apiKey, color: pickServerColor(...) }`, the same shape `POST /servers` uses.
    c. Insert the `auth_accounts` link `{ providerId: 'emby', accountId: authResult.id, userId,
-      accessToken: authResult.token }`, the same insert `embyPlugin.ts` performs on first bind.
+   accessToken: authResult.token }`, the same insert `embyPlugin.ts` performs on first bind.
    d. `internalAdapter.createSession` plus `setSessionCookie`, through the same helper shape as
-      `createEmbySession`.
+   `createEmbySession`.
 8. **Response.** `{ authorized: true, user: { id, username, role: 'owner' }, server: { id, name, url } }`
    as the shared type `EmbySetupResult` (section 13).
 
-### 6.3 The `ownerless-with-data` branch
+### 6.3 The `ownerless-with-data` branch (revised: console-only, no network adoption)
 
-Same numbered steps with three differences, all from section 3: the claim code is required whatever
-the configured default (missing configuration is itself a refusal, code `INSTANCE_RECOVERY`); step 4
-is skipped because the URL comes from `resolveConfiguredEmbyServerUrl()` rather than the body; and
-step 7b adopts the existing `servers` row instead of inserting, updating its token only when the
-supplied key verified in step 5 and never touching its URL.
+**Correction to the original revision 2 text of this section** (CR-3/IMP-01 finding): this state
+refuses UNCONDITIONALLY at step 2, before any other step runs - no claim-code check, no attempt to
+resolve an existing `servers` row, no probe of the operator's Emby server, and their credentials for
+that request are never sent anywhere. There is no adoption path (updating an existing `servers` row's
+token and continuing) for this state at all.
+
+The original design allowed adoption when a claim code was supplied and exactly one `servers` row
+could be resolved. That path could never actually succeed: `createOwnerUser` runs through Better
+Auth's `user.create` before-hook, which calls `assertSignupAllowed()` - and that function refuses
+`ownerless-with-data` unconditionally with no adoption exception (authGuards.ts). The result was two
+probes and the operator's real Emby password sent to their own server, followed by a generic 500
+`SETUP_FAILED` - worse than a clean, immediate refusal. Console-only recovery is not merely the
+cheaper fix; it is what `authGuards.ts` (`assertSignupAllowed`, `assertOAuthSignupClaimCode`) and the
+CLI's own `promote-owner` doc comment already assumed - the every-claim-path gate of owner decision 6
+already means this, and section 6.3 is corrected to say so explicitly, so all three now agree. See
+also §7.4 and CR-5 (`apps/server/scripts/lib/commands.ts`'s `list-servers`/`delete-server`) for the
+recovery path when compensation leaves an orphaned `servers` row with zero user rows.
 
 ### 6.4 Failure paths
 
-| Step | Condition | HTTP | Code | State left behind |
-|---|---|---|---|---|
-| 1 | claim code required, missing or wrong | 403 | `CLAIM_CODE` | none |
-| 2 | owner already exists | 403 | `INSTANCE_OWNED` | none |
-| 2 | ownerless with data, no claim code configured, or no resolvable Emby server, or ambiguous resolution | 403 | `INSTANCE_RECOVERY` | none, no outbound request |
-| 3 | concurrency cap reached | 503 | `BUSY` | none |
-| 4 | malformed URL, userinfo, query or fragment present, blocked scheme, denied literal or resolved address | 400 | `URL_REJECTED` | none, no outbound request |
-| 5 | Emby unreachable, or the probe was redirected | 503 | `SERVER_UNREACHABLE` | none |
-| 5 | API key rejected | 401 | `KEY_REJECTED` | none |
-| 5 | API key not admin | 403 | `KEY_NOT_ADMIN` | none |
-| 6 | bad username or password | 401 | `BAD_CREDENTIALS` | none |
-| 6 | account is not an Emby admin | 403 | `NOT_EMBY_ADMIN` | none |
-| 7a | single-owner unique index violated (lost the race) | 403 | `INSTANCE_OWNED` | none, their insert never landed |
-| 7b-7d | any persistence or session failure | 500 | `SETUP_FAILED` | none after compensation, or the recovery state plus a logged marker if compensation itself failed |
+| Step  | Condition                                                                                              | HTTP | Code                 | State left behind                                                                                 |
+| ----- | ------------------------------------------------------------------------------------------------------ | ---- | -------------------- | ------------------------------------------------------------------------------------------------- |
+| 1     | claim code required, missing or wrong                                                                  | 403  | `CLAIM_CODE`         | none                                                                                              |
+| 2     | owner already exists                                                                                   | 403  | `INSTANCE_OWNED`     | none                                                                                              |
+| 2     | ownerless with data (unconditional - console-only recovery, no claim-code or resolution check)         | 403  | `INSTANCE_RECOVERY`  | none, no outbound request                                                                         |
+| 3     | concurrency cap reached                                                                                | 503  | `BUSY`               | none                                                                                              |
+| 4     | malformed URL, userinfo, query or fragment present, blocked scheme, denied literal or resolved address | 400  | `URL_REJECTED`       | none, no outbound request                                                                         |
+| 5     | Emby unreachable, or the probe was redirected                                                          | 503  | `SERVER_UNREACHABLE` | none                                                                                              |
+| 5     | API key rejected                                                                                       | 401  | `KEY_REJECTED`       | none                                                                                              |
+| 5     | API key not admin                                                                                      | 403  | `KEY_NOT_ADMIN`      | none                                                                                              |
+| 6     | bad username or password                                                                               | 401  | `BAD_CREDENTIALS`    | none                                                                                              |
+| 6     | account is not an Emby admin                                                                           | 403  | `NOT_EMBY_ADMIN`     | none                                                                                              |
+| 7a    | single-owner unique index violated (lost the race)                                                     | 403  | `INSTANCE_OWNED`     | none, their insert never landed                                                                   |
+| 7b-7d | any persistence or session failure                                                                     | 500  | `SETUP_FAILED`       | none after compensation, or the recovery state plus a logged marker if compensation itself failed |
 
 The web client surfaces each code on the relevant field group: URL and key for `URL_REJECTED`,
 `SERVER_UNREACHABLE`, `KEY_REJECTED`, `KEY_NOT_ADMIN`; username and password for `BAD_CREDENTIALS`
@@ -440,7 +460,7 @@ So: compensation, ordered so the contended step is first.
 1. `createUser` first, because it is the race gate. If it loses, nothing else exists yet.
 2. Then the `servers` write, the `auth_accounts` link and the session, each wrapped so that on any
    failure the handler deletes in reverse order whatever it created: the `servers` row if it was
-   *inserted* by this attempt (never a row it adopted), then the user through
+   _inserted_ by this attempt (never a row it adopted), then the user through
    `internalAdapter.deleteUser`, which cascades sessions and `auth_accounts` per the `signupPlugin.ts`
    precedent. Then rethrow as 500 `SETUP_FAILED`. Compensation failures never mask the original error.
 
@@ -473,6 +493,18 @@ This increment therefore adds one CLI command, `promote-owner <username>`, in `c
 an owner already exists, sets `role='owner'` on the named user, and prints the follow-up
 `reset-password` invocation. It is console-only, it is guarded by the same single-owner index, and it
 is what makes the SEC-01 refusal a recovery rather than a brick. Not contract surface; backend work.
+
+**CR-5 correction:** `promote-owner` only recovers the case where a non-owner user row survives to
+promote. A failed-setup compensation (§7.3) that deletes the created user but fails to delete the
+inserted server row leaves an `ownerless-with-data` instance with ZERO user rows and one orphaned
+`servers` row - `promote-owner` has nothing to promote there, and the pre-fix `OWNERLESS_INSTANCE_RECOVERY_MESSAGE`
+pointed at it anyway, a dead end. Two more CLI commands cover the user-less case: `list-servers`
+(enumerates every `servers` row) and `delete-server <id>` (a plain delete, mirroring `DELETE
+/servers/:id`). Deleting the last surviving `servers`/`users`/`auth_accounts` row returns the instance
+to `unclaimed`, so it can go through `/emby/setup` or `/sign-up/username` again normally.
+`OWNERLESS_INSTANCE_RECOVERY_MESSAGE` and the setup-flow compensation log (`embySetupPlugin.ts`) now
+name the command matching whichever artifact actually survives, rather than always naming
+`promote-owner`.
 
 ## 8. Outbound probe hardening (the SEC-03 fix)
 
@@ -535,7 +567,7 @@ Denied:
 - `fd00:ec2::254` (AWS IPv6 metadata) and `192.0.0.192` (Oracle metadata).
 - `224.0.0.0/4` and `ff00::/8` (multicast), `255.255.255.255` (broadcast).
 - IPv4-mapped IPv6 forms of every IPv4 rule above. The existing decoder
-  (`extractIPv4FromMapped`, `ssrf.ts:37-55`) is reused, but its result now runs the *full* rule set
+  (`extractIPv4FromMapped`, `ssrf.ts:37-55`) is reused, but its result now runs the _full_ rule set
   rather than only the link-local check.
 
 Deliberately still allowed, because blocking them would break the product's primary audience:
@@ -568,7 +600,7 @@ that can hold four sequential outbound waits open.
 Three constants, all module-level, none derived from the request:
 
 ```ts
-export const SETUP_RATE_LIMIT = { window: 60, max: 5 } as const;  // per IP
+export const SETUP_RATE_LIMIT = { window: 60, max: 5 } as const; // per IP
 export const MAX_CONCURRENT_SETUP_PROBES = 2;
 export const SETUP_PROBE_TIMEOUT_MS = 5_000;
 export const SETUP_TOTAL_BUDGET_MS = 15_000;
@@ -588,18 +620,18 @@ export const SETUP_TOTAL_BUDGET_MS = 15_000;
 
 ## 10. Threat model for this path
 
-| # | Threat | Disposition |
-|---|---|---|
-| T1 | Post-setup auth bypass: attacker points a login-ish endpoint at their own Emby, passes isAdmin, binds as owner (the `embyPlugin.ts` NOTE's attack) | Closed by construction. `/emby/login` still resolves the URL server-side, and now fails closed when that resolution is ambiguous (section 4.1). `/emby/setup` returns 403 in the `owned` state before reading the URL. The `users_single_owner` index, now created by migration, backstops the race variant. |
-| T2 | Takeover of an ownerless-but-populated instance (the SEC-01 attack): claim it, become owner, then use the owner-only `pg_dump` backup export to read plaintext `servers.token` and Plex tokens | Closed for this endpoint by section 3: the client URL is ignored, the URL is resolved server-side, and the claim code is required unconditionally, so a network attacker with no claim code cannot claim the instance at all. Startup and every refusal log `OWNERLESS_INSTANCE_WITH_DATA`. Residual: `/sign-up/username` still permits the claim half in that state, which is pre-existing and is owner decision 6. |
-| T3 | Drive-by claim of a genuinely unclaimed instance (SR-03) | Not widened by this path. An unclaimed instance is already claimable through `/sign-up/username` with no Emby at all, and proof-of-Emby-admin cannot distinguish the legitimate operator's Emby from an attacker's own box, so it is not usable as an authentication factor at first run. The claim-code gate applies with full parity. The real fix is claim-code default-on, owner decision 1, which the reviewer treats as close to a prerequisite for this feature. |
-| T4 | SSRF and internal probing through `serverUrl` | Section 8: canonicalization and userinfo rejection, a widened deny list applied to literals and to every resolved address, manual redirects with 3xx as hard failure, connect-time re-validation, fixed request shapes, no response echo, no upstream status in client errors, the unclaimed-only window, claim-code precedence, and the bounds of section 9. Residual, stated plainly: loopback and RFC1918 stay allowed by deliberate policy, so an unauthenticated party who can reach an unclaimed instance can still learn whether an internal `host:port` answers, at 5 requests per minute per IP with a 15 s budget. Owner decision 4. |
-| T5 | Concurrent-claim race (SR-02) | Closed at the database by `users_single_owner`, now created by a migration that aborts startup on failure and is asserted present on boot (7.1). Race losers map to 403 on the setup path and, after 7.2, on both Plex paths too. |
-| T6 | Credential exposure in transit: the Emby password and API key are relayed to an operator-typed URL, possibly over http | Same posture as `/emby/login` and `POST /servers` today, both of which accept http, which is the homelab reality. The password goes only to the URL the same user typed into the same form, so there is no confused deputy. Body fields are never logged (section 11), and error messages never echo credentials. |
-| T7 | Token at rest | `servers.token` stays plaintext, an existing and deliberate repo decision ("DB is localhost-only", `servers.ts:19`). No change and no new copies. `auth_accounts.accessToken` stores the user token exactly as `/emby/login` already does. T2 is the reason this matters: the backup export is the amplifier, which is why the state gate is the control. |
-| T8 | State probing of the endpoint | Post-setup, every request in the `owned` state gets the same fixed 403 with the signup path's message, before any I/O. Correcting revision 1's wording, which the review found inexact: the responses are *not* uniform across all states, and cannot be. With the claim code enabled an attacker without the code sees `CLAIM_CODE`; on an ownerless-with-data instance they see `INSTANCE_RECOVERY`. Neither discloses anything `GET /setup/status` does not already publish (`needsSetup`, `hasServers`, `hasPasswordAuth`, `routes/setup.ts:37-44`). The property that matters is narrower and does hold: **once an owner exists, the endpoint is indistinguishable from the local signup path and performs no I/O.** |
-| T9 | Owner lockout by an Emby outage: the owner has no local password, Emby is down, so they cannot log in | Accepted trade-off, inherent to "no separate local password" as requested. Correcting revision 1: there is **no in-app set-password surface**. The only recovery is console access to `pnpm reset-password` (`apps/server/scripts/reset-password.ts`), which requires an existing owner row and prompts for a new password. `/setup/status.hasPasswordAuth` already models password-less instances, and OIDC remains available when configured. Whether to build an in-app set-password endpoint in this increment is owner decision 2; if the answer is no, the setup screen carries the warning (6.5) and the runbook carries the exact command. |
-| T10 | Pre-auth outbound probing as a *new* capability | It is not new. Correcting revision 1: `/plex/connect` (`plexPlugin.ts:399-446`) already accepts a client-supplied `serverUri` on an unauthenticated pre-claim endpoint. It is guarded, contrary to the review's wording: `PlexClient.verifyServerAdmin` calls `assertSafeProbeUrl` first (`plex/client.ts:628-637`). But it is guarded by the literal-only check, so it follows redirects, never resolves hostnames, and is not re-validated on connect. The new endpoint is therefore a *better-behaved instance of an existing capability*, and fixing the class properly means routing `/plex/connect` through `safeProbeJson` as well. Owner decision 5. |
+| #   | Threat                                                                                                                                                                                         | Disposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1  | Post-setup auth bypass: attacker points a login-ish endpoint at their own Emby, passes isAdmin, binds as owner (the `embyPlugin.ts` NOTE's attack)                                             | Closed by construction. `/emby/login` still resolves the URL server-side, and now fails closed when that resolution is ambiguous (section 4.1). `/emby/setup` returns 403 in the `owned` state before reading the URL. The `users_single_owner` index, now created by migration, backstops the race variant.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| T2  | Takeover of an ownerless-but-populated instance (the SEC-01 attack): claim it, become owner, then use the owner-only `pg_dump` backup export to read plaintext `servers.token` and Plex tokens | Closed for this endpoint by section 3 as corrected (§6.3, CR-3/IMP-01): the endpoint refuses `ownerless-with-data` unconditionally and before any outbound call - there is no claim-code-gated network adoption path at all, only console-only recovery, matching `authGuards.ts`'s `assertSignupAllowed`/`assertOAuthSignupClaimCode`. Startup and every refusal log `OWNERLESS_INSTANCE_WITH_DATA`. Residual: `/sign-up/username` still permits the claim half in that state, which is pre-existing and is owner decision 6.                                                                                                                                                                                            |
+| T3  | Drive-by claim of a genuinely unclaimed instance (SR-03)                                                                                                                                       | Not widened by this path. An unclaimed instance is already claimable through `/sign-up/username` with no Emby at all, and proof-of-Emby-admin cannot distinguish the legitimate operator's Emby from an attacker's own box, so it is not usable as an authentication factor at first run. The claim-code gate applies with full parity. The real fix is claim-code default-on, owner decision 1, which the reviewer treats as close to a prerequisite for this feature.                                                                                                                                                                                                                                                   |
+| T4  | SSRF and internal probing through `serverUrl`                                                                                                                                                  | Section 8: canonicalization and userinfo rejection, a widened deny list applied to literals and to every resolved address, manual redirects with 3xx as hard failure, connect-time re-validation, fixed request shapes, no response echo, no upstream status in client errors, the unclaimed-only window, claim-code precedence, and the bounds of section 9. Residual, stated plainly: loopback and RFC1918 stay allowed by deliberate policy, so an unauthenticated party who can reach an unclaimed instance can still learn whether an internal `host:port` answers, at 5 requests per minute per IP with a 15 s budget. Owner decision 4.                                                                            |
+| T5  | Concurrent-claim race (SR-02)                                                                                                                                                                  | Closed at the database by `users_single_owner`, now created by a migration that aborts startup on failure and is asserted present on boot (7.1). Race losers map to 403 on the setup path and, after 7.2, on both Plex paths too.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| T6  | Credential exposure in transit: the Emby password and API key are relayed to an operator-typed URL, possibly over http                                                                         | Same posture as `/emby/login` and `POST /servers` today, both of which accept http, which is the homelab reality. The password goes only to the URL the same user typed into the same form, so there is no confused deputy. Body fields are never logged (section 11), and error messages never echo credentials.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| T7  | Token at rest                                                                                                                                                                                  | `servers.token` stays plaintext, an existing and deliberate repo decision ("DB is localhost-only", `servers.ts:19`). No change and no new copies. `auth_accounts.accessToken` stores the user token exactly as `/emby/login` already does. T2 is the reason this matters: the backup export is the amplifier, which is why the state gate is the control.                                                                                                                                                                                                                                                                                                                                                                 |
+| T8  | State probing of the endpoint                                                                                                                                                                  | Post-setup, every request in the `owned` state gets the same fixed 403 with the signup path's message, before any I/O. Correcting revision 1's wording, which the review found inexact: the responses are _not_ uniform across all states, and cannot be. With the claim code enabled an attacker without the code sees `CLAIM_CODE`; on an ownerless-with-data instance they see `INSTANCE_RECOVERY`. Neither discloses anything `GET /setup/status` does not already publish (`needsSetup`, `hasServers`, `hasPasswordAuth`, `routes/setup.ts:37-44`). The property that matters is narrower and does hold: **once an owner exists, the endpoint is indistinguishable from the local signup path and performs no I/O.** |
+| T9  | Owner lockout by an Emby outage: the owner has no local password, Emby is down, so they cannot log in                                                                                          | Accepted trade-off, inherent to "no separate local password" as requested. Correcting revision 1: there is **no in-app set-password surface**. The only recovery is console access to `pnpm reset-password` (`apps/server/scripts/reset-password.ts`), which requires an existing owner row and prompts for a new password. `/setup/status.hasPasswordAuth` already models password-less instances, and OIDC remains available when configured. Whether to build an in-app set-password endpoint in this increment is owner decision 2; if the answer is no, the setup screen carries the warning (6.5) and the runbook carries the exact command.                                                                        |
+| T10 | Pre-auth outbound probing as a _new_ capability                                                                                                                                                | It is not new. Correcting revision 1: `/plex/connect` (`plexPlugin.ts:399-446`) already accepts a client-supplied `serverUri` on an unauthenticated pre-claim endpoint. It is guarded, contrary to the review's wording: `PlexClient.verifyServerAdmin` calls `assertSafeProbeUrl` first (`plex/client.ts:628-637`). But it is guarded by the literal-only check, so it follows redirects, never resolves hostnames, and is not re-validated on connect. The new endpoint is therefore a _better-behaved instance of an existing capability_, and fixing the class properly means routing `/plex/connect` through `safeProbeJson` as well. Owner decision 5.                                                              |
 
 ## 11. Owner decisions
 
@@ -677,20 +709,20 @@ Recorded explicitly, because downstream engineers implement these statements lit
 
 All re-verified in the worktree during this revision.
 
-| Block | Where | Reused for |
-|---|---|---|
-| `EmbyClient.verifyServerAdmin(apiKey, url)` | `apps/server/src/services/mediaServer/emby/client.ts:146-235` | Validating the API key is admin-level; distinguishes `CONNECTION_FAILED` / `INVALID_KEY` / `NOT_ADMIN`. Gains an injectable fetcher (8.1) |
-| `EmbyClient.authenticate(url, username, password)` | same file, `94-125` | Authenticating the human; returns the auth result or `null` on 401. Gains an injectable fetcher |
-| `assertSafeProbeUrl` / `SsrfBlockedError` | `apps/server/src/utils/ssrf.ts` | Pre-flight URL vetting, widened per 8.3 and wrapped by `safeProbe.ts` |
-| `assertSignupAllowed()` / `assertClaimCode()` | `apps/server/src/lib/authGuards.ts:9-25` | Kept as the hook-chain defense in depth; the endpoint's own gate is the new `getInstanceClaimState()` in the same file |
-| Centralized claim-code hook | `apps/server/src/lib/auth.ts:256-277`, keyed on shared path constants | Claim-code enforcement for the new path (one added `ctx.path` comparison) |
-| `internalAdapter.createUser` + the `user.create` before-hook | `auth.ts:238-254` (forces `role: 'owner'`, re-runs `assertSignupAllowed`) | Owner-user creation with the same hook chain as the better-auth signup paths. Not a universal funnel, see 7.2 |
-| Compensation pattern | `apps/server/src/lib/signupPlugin.ts` (`linkCredentialAndCreateSession`) | The failure and rollback shape for multi-step persistence (7.3) |
-| Emby identity link insert + `auth_accounts_one_emby_per_user` | `embyPlugin.ts` (insert), `db/timescale.ts:668-672` (index) | Binding the Emby account to the owner. Note the index's location is the pattern this revision deliberately moves away from for security constraints (7.1) |
-| Migration-created unique index | `users_login_username_unique`, referenced by `db/__tests__/loginUsernameCollision.integration.test.ts:26-30` | The precedent for creating `users_single_owner` in a migration |
-| Server-row creation shape | `apps/server/src/routes/servers.ts:104-161` | The `servers` insert mirrors it (name, type `emby`, url, token, color) |
-| Session establishment | `embyPlugin.ts` `createEmbySession` | Logging the new owner in at the end of setup |
-| CLI recovery commands | `apps/server/scripts/cli.ts:111-123`, `scripts/reset-password.ts` | The documented recovery path, extended with `promote-owner` (7.4) |
+| Block                                                         | Where                                                                                                        | Reused for                                                                                                                                                |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EmbyClient.verifyServerAdmin(apiKey, url)`                   | `apps/server/src/services/mediaServer/emby/client.ts:146-235`                                                | Validating the API key is admin-level; distinguishes `CONNECTION_FAILED` / `INVALID_KEY` / `NOT_ADMIN`. Gains an injectable fetcher (8.1)                 |
+| `EmbyClient.authenticate(url, username, password)`            | same file, `94-125`                                                                                          | Authenticating the human; returns the auth result or `null` on 401. Gains an injectable fetcher                                                           |
+| `assertSafeProbeUrl` / `SsrfBlockedError`                     | `apps/server/src/utils/ssrf.ts`                                                                              | Pre-flight URL vetting, widened per 8.3 and wrapped by `safeProbe.ts`                                                                                     |
+| `assertSignupAllowed()` / `assertClaimCode()`                 | `apps/server/src/lib/authGuards.ts:9-25`                                                                     | Kept as the hook-chain defense in depth; the endpoint's own gate is the new `getInstanceClaimState()` in the same file                                    |
+| Centralized claim-code hook                                   | `apps/server/src/lib/auth.ts:256-277`, keyed on shared path constants                                        | Claim-code enforcement for the new path (one added `ctx.path` comparison)                                                                                 |
+| `internalAdapter.createUser` + the `user.create` before-hook  | `auth.ts:238-254` (forces `role: 'owner'`, re-runs `assertSignupAllowed`)                                    | Owner-user creation with the same hook chain as the better-auth signup paths. Not a universal funnel, see 7.2                                             |
+| Compensation pattern                                          | `apps/server/src/lib/signupPlugin.ts` (`linkCredentialAndCreateSession`)                                     | The failure and rollback shape for multi-step persistence (7.3)                                                                                           |
+| Emby identity link insert + `auth_accounts_one_emby_per_user` | `embyPlugin.ts` (insert), `db/timescale.ts:668-672` (index)                                                  | Binding the Emby account to the owner. Note the index's location is the pattern this revision deliberately moves away from for security constraints (7.1) |
+| Migration-created unique index                                | `users_login_username_unique`, referenced by `db/__tests__/loginUsernameCollision.integration.test.ts:26-30` | The precedent for creating `users_single_owner` in a migration                                                                                            |
+| Server-row creation shape                                     | `apps/server/src/routes/servers.ts:104-161`                                                                  | The `servers` insert mirrors it (name, type `emby`, url, token, color)                                                                                    |
+| Session establishment                                         | `embyPlugin.ts` `createEmbySession`                                                                          | Logging the new owner in at the end of setup                                                                                                              |
+| CLI recovery commands                                         | `apps/server/scripts/cli.ts:111-123`, `scripts/reset-password.ts`                                            | The documented recovery path, extended with `promote-owner` (7.4)                                                                                         |
 
 ## 14. Contract freeze checklist (`packages/shared`)
 
@@ -785,6 +817,7 @@ the `promote-owner` CLI command, and the tests.
 Grouped by the finding each case exists to prove. Cases marked (new) come from the review.
 
 **State gate (SEC-01)**
+
 - Setup refused on an ownerless instance holding `servers` rows (new); the same with only `users`
   rows; the same with only `auth_accounts` rows.
 - In that state the submitted `serverUrl` is ignored: a body pointing at an attacker host with a
@@ -795,11 +828,13 @@ Grouped by the finding each case exists to prove. Cases marked (new) come from t
   zero outbound HTTP (assert against a mocked fetch).
 
 **Server resolution (SEC-02)**
+
 - With two `emby` rows, `/emby/login` fails closed rather than picking one (new). Under design A, the
   second insert is rejected by `servers_single_emby` instead.
 - Setup on an ownerless-with-data instance adopts the existing `emby` row and never creates a second.
 
 **Outbound probes (SEC-03)**
+
 - Redirect to metadata rejected: the probed host answers `302 Location: http://169.254.169.254/...`
   and the request fails without following (new). Repeat with `307` and a request body, asserting the
   body is never re-sent (new).
@@ -814,6 +849,7 @@ Grouped by the finding each case exists to prove. Cases marked (new) come from t
   canonical origin with no credentials, no query and no fragment.
 
 **Single-owner constraint (SEC-04)**
+
 - Index existence asserted after a clean startup by querying `pg_indexes` (new).
 - A database seeded with two owner rows fails the migration with the actionable message and the
   server does not start (new; this replaces revision 1's "boots with a warning" case, which is no
@@ -822,27 +858,32 @@ Grouped by the finding each case exists to prove. Cases marked (new) come from t
   exactly one owner; the loser gets 403; no orphan `servers` or `auth_accounts` rows.
 
 **Plex paths (SEC-05)**
+
 - A race loser on `/plex/check-pin` and on `/plex/connect` gets 403, not 500 (new).
 - A failed user insert at `/plex/connect` leaves no newly created `servers` row and does not overwrite
   an existing row's token (new).
 
 **Compensation and retry (SEC-06)**
+
 - Fault injection at the server insert, the link insert and the session create: the instance is
   unclaimed or in the recovery state as appropriate, and a retry succeeds.
 - A compensation failure that leaves a `servers` row logs `INSTANCE REQUIRES MANUAL RECOVERY`, and a
   retry with the claim code adopts that row rather than returning a conflict (new).
 
 **Bounds (SEC-07)**
+
 - The sixth request within a minute from one IP is rate-limited before any outbound call (new).
 - The third concurrent request returns `BUSY` with no outbound call (new).
 - A probe against a host that never answers is abandoned at `SETUP_PROBE_TIMEOUT_MS`, and the whole
   request at `SETUP_TOTAL_BUDGET_MS`.
 
 **Secrets (SEC-10)**
+
 - Logs free of `apiKey` and `password` across the whole flow, including the failure paths, asserted by
   capturing the logger (new).
 
 **Continuity**
+
 - Claim code enabled means enforced before any outbound request (the mocked fetch is never called on a
   wrong code).
 - Post-setup login continuity: `/emby/login` with the same Emby credentials succeeds and matches the

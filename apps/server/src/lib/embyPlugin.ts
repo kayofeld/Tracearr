@@ -24,6 +24,10 @@ import { eq, and, asc } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { users, servers, authAccounts } from '../db/schema.js';
 import { EmbyClient } from '../services/mediaServer/index.js';
+import {
+  isUniqueViolationOn,
+  AUTH_ACCOUNTS_ONE_EMBY_PER_USER_CONSTRAINT,
+} from '../utils/dbErrors.js';
 
 const EMBY_PROVIDER = 'emby';
 
@@ -246,8 +250,10 @@ export const embyPlugin = () =>
             } catch (err) {
               // The `one Emby per user` partial unique index rejects a second,
               // different Emby account racing to bind the owner. The loser is
-              // denied rather than silently sharing owner access.
-              if (err instanceof Error && err.message.includes('auth_accounts_one_emby_per_user')) {
+              // denied rather than silently sharing owner access. (CR-2 fix:
+              // drizzle wraps the driver error in DrizzleQueryError, whose own
+              // .message never names the constraint - see dbErrors.ts.)
+              if (isUniqueViolationOn(err, AUTH_ACCOUNTS_ONE_EMBY_PER_USER_CONSTRAINT)) {
                 throw new APIError('FORBIDDEN', {
                   message: 'This Emby account is not the Tracearr owner.',
                 });

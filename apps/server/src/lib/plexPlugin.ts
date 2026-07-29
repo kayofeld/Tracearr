@@ -29,6 +29,8 @@ import { db } from '../db/client.js';
 import { users, servers, serverUsers, plexAccounts, authAccounts } from '../db/schema.js';
 import { PlexClient } from '../services/mediaServer/index.js';
 import { testServerConnections } from '../services/mediaServer/plex/connectionTest.js';
+import { parseUsersResponse } from '../services/mediaServer/plex/parser.js';
+import { plexHeaders } from '../utils/http.js';
 import { syncServer } from '../services/sync.js';
 import { getUserById, getUserByPlexAccountId } from '../services/userService.js';
 import { getRedis } from './redisShared.js';
@@ -474,14 +476,47 @@ export const plexPlugin = () =>
             });
             const adminCheck = await PlexClient.verifyServerAdmin(plexToken, serverUri, probeFetch);
             if (!adminCheck.success) {
+              // IMP-04 fix: `adminCheck.message` can carry upstream detail
+              // (resolved-address/DNS-rebinding text from the hardened probe,
+              // or a raw connection-error message) that this pre-auth,
+              // client-supplied-URL endpoint must not echo back (SEC-03c,
+              // same property /emby/setup already holds) - log the real
+              // detail server-side, return a fixed string to the caller.
+              ctx.context.logger.error('Plex connect admin check failed', {
+                code: adminCheck.code,
+                detail: adminCheck.message,
+              });
               if (adminCheck.code === PlexClient.AdminVerifyError.CONNECTION_FAILED) {
-                throw new APIError('SERVICE_UNAVAILABLE', { message: adminCheck.message });
+                throw new APIError('SERVICE_UNAVAILABLE', {
+                  message: 'Could not reach the Plex server.',
+                });
               }
-              throw new APIError('FORBIDDEN', { message: adminCheck.message });
+              throw new APIError('FORBIDDEN', {
+                message: 'This Plex account is not an administrator on this server.',
+              });
             }
 
-            const pmsClient = new PlexClient({ url: serverUri, token: plexToken });
-            const localAccounts = await pmsClient.getUsers();
+            // IMP-04 fix: this pre-auth, client-supplied `serverUri` probe
+            // must stay on the SAME hardened fetcher used for the admin
+            // check above. The previous code built a plain `PlexClient`
+            // instance and called its `getUsers()`, which hardcodes the
+            // unhardened default `fetchJson` internally (PlexClient's
+            // instance methods have no injectable fetcher - they are used
+            // everywhere else in the app for already-trusted, post-setup
+            // server URLs) - so the connect-time re-validation, resolved-
+            // address pinning, and manual-redirect-as-failure this endpoint
+            // just proved itself worthy of for the admin check was silently
+            // dropped for the very next outbound call to the same
+            // attacker-reachable URL. Replicates exactly what
+            // `PlexClient.getUsers()` does (GET `/accounts`, same headers,
+            // same parser), routed through `probeFetch` instead.
+            const localAccountsData = await probeFetch<unknown>(
+              `${serverUri.replace(/\/$/, '')}/accounts`,
+              {
+                headers: plexHeaders(plexToken),
+              }
+            );
+            const localAccounts = parseUsersResponse(localAccountsData);
             const ownerLocalAccount = localAccounts.find((a) => a.isAdmin) ?? localAccounts[0];
             const ownerLocalId = ownerLocalAccount?.id ?? '1';
 

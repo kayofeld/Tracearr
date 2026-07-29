@@ -128,7 +128,17 @@ export class EmbyClient extends BaseMediaServerClient {
 
       return parseAuthResponse(data);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('401')) {
+      // CR-4 fix: discriminate on the typed status code, not a message
+      // substring. The pre-fix check (`error.message.includes('401')`)
+      // happened to work for the default `fetchJson` path (its
+      // `HttpClientError`'s default message literally contains "401"), but
+      // `safeProbeJson` (the setup plugin's hardened fetcher, SEC-03c) throws
+      // a fixed, generic message that never contains a status code at all -
+      // so a wrong password on that path fell through to `throw error` and
+      // surfaced as an uncaught 500, rather than the null this function's
+      // contract promises for bad credentials. `HttpClientError.statusCode`
+      // is populated by both fetchers now (utils/http.ts, utils/safeProbe.ts).
+      if (error instanceof HttpClientError && error.statusCode === 401) {
         return null;
       }
       throw error;

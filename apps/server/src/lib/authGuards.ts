@@ -30,8 +30,11 @@ export type InstanceClaimState = 'unclaimed' | 'ownerless-with-data' | 'owned';
  */
 export const OWNERLESS_INSTANCE_RECOVERY_MESSAGE =
   'This instance holds existing data but has no owner. Setup is disabled. ' +
-  'Recover from the server console with ' +
-  '`pnpm --filter @tracearr/server cli promote-owner <username>` and then `pnpm reset-password`.';
+  'Recover from the server console: if a non-owner user row still exists, run ' +
+  '`pnpm --filter @tracearr/server cli promote-owner <username>` and then `pnpm reset-password`; ' +
+  'if no user row exists at all (only a leftover server row - CR-5), run ' +
+  '`pnpm --filter @tracearr/server cli list-servers` and `cli delete-server <id>` to return the ' +
+  'instance to unclaimed. Run `cli list-users` first to see which case applies.';
 
 /** Greppable marker for the loud, persistent operator signal (design §3). */
 export const OWNERLESS_INSTANCE_LOG_MARKER = 'OWNERLESS_INSTANCE_WITH_DATA';
@@ -93,8 +96,16 @@ export async function assertSignupAllowed(): Promise<void> {
 export function assertClaimCode(claimCode: string | undefined): void {
   if (!isClaimCodeEnabled()) return;
   if (!claimCode || !validateClaimCode(claimCode)) {
+    // CR-6 fix: this runs in auth.ts's centralized `hooks.before`, ahead of
+    // the endpoint handler, so for EMBY_SETUP_PATH it throws directly to
+    // better-auth's router - embySetupPlugin.ts's own error-mapping catch
+    // block (which adds `code` per CR-1) never sees it. Without a top-level
+    // `code` here, `EmbySetupErrorCode`'s first member ('CLAIM_CODE') is
+    // never actually emitted on the wire, and the client's exhaustive switch
+    // falls back to English prose for this specific case only.
     throw new APIError('FORBIDDEN', {
       message: 'Claim code is required for first-time setup',
+      code: 'CLAIM_CODE',
     });
   }
 }

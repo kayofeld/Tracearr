@@ -16,6 +16,8 @@
  *   list-users                                List users and their login methods
  *   enable-local-login                        Re-enable local username/password login
  *   promote-owner <username>                  Promote a user to owner (ownerless-with-data recovery)
+ *   list-servers                              List configured servers (ownerless-with-data recovery)
+ *   delete-server <id>                        Delete a server row (ownerless-with-data recovery)
  */
 
 import { randomBytes } from 'node:crypto';
@@ -27,6 +29,8 @@ import {
   listUsersCommand,
   enableLocalLoginCommand,
   promoteOwnerCommand,
+  listServersCommand,
+  deleteServerCommand,
   shutdown,
 } from './lib/commands.ts';
 
@@ -39,6 +43,8 @@ Usage:
   cli list-users
   cli enable-local-login
   cli promote-owner <username>
+  cli list-servers
+  cli delete-server <id>
 `;
 
 function promptPassword(): Promise<string> {
@@ -118,6 +124,29 @@ async function runPromoteOwner(args: string[]): Promise<void> {
   );
 }
 
+async function runListServers(): Promise<void> {
+  const rows = await listServersCommand();
+  if (rows.length === 0) {
+    console.log('\nNo servers configured.\n');
+    return;
+  }
+  console.log('\nid                                    name                 type      url');
+  console.log('-'.repeat(90));
+  for (const row of rows) {
+    console.log(`${row.id.padEnd(38)}${row.name.padEnd(21)}${row.type.padEnd(10)}${row.url}`);
+  }
+  console.log();
+}
+
+async function runDeleteServer(args: string[]): Promise<void> {
+  const [id] = args;
+  if (!id) {
+    throw new Error('Usage: cli delete-server <id>');
+  }
+  await deleteServerCommand({ id });
+  console.log(`\nServer ${id} deleted.\n`);
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
 
@@ -140,6 +169,12 @@ async function main(): Promise<void> {
         break;
       case 'promote-owner':
         await runPromoteOwner(args);
+        break;
+      case 'list-servers':
+        await runListServers();
+        break;
+      case 'delete-server':
+        await runDeleteServer(args);
         break;
       default:
         console.log(USAGE);

@@ -58,9 +58,34 @@ describe('EmbyClient.authenticate', () => {
   });
 
   it('returns null on a 401 (bad credentials)', async () => {
-    mockFetchJson.mockRejectedValue(new Error('emby request failed: 401 Unauthorized'));
+    mockFetchJson.mockRejectedValue(httpError(401));
     const result = await EmbyClient.authenticate(URL, 'demo', 'wrong');
     expect(result).toBeNull();
+  });
+
+  it('CR-4: still returns null on a 401 whose message carries NO status code at all (the safeProbeJson/setup shape)', async () => {
+    // Pins the regression: the pre-fix check was `error.message.includes('401')`,
+    // which only worked by the accident that the default fetchJson path's
+    // HttpClientError message happens to contain "401". safeProbeJson (the
+    // /emby/setup hardened fetcher) throws HttpClientError with a FIXED,
+    // generic message (SEC-03c) that never contains a status code - so the
+    // discrimination has to be on `.statusCode`, not the message text.
+    mockFetchJson.mockRejectedValue(
+      new HttpClientError({
+        service: 'emby',
+        statusCode: 401,
+        statusText: 'nope',
+        url: `${URL}/Users/AuthenticateByName`,
+        message: 'Could not reach the server.',
+      })
+    );
+    const result = await EmbyClient.authenticate(URL, 'demo', 'wrong');
+    expect(result).toBeNull();
+  });
+
+  it('rethrows a non-401 HttpClientError rather than swallowing it as bad credentials', async () => {
+    mockFetchJson.mockRejectedValue(httpError(500));
+    await expect(EmbyClient.authenticate(URL, 'demo', 'wrong')).rejects.toThrow();
   });
 });
 

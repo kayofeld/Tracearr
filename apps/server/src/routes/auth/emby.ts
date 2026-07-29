@@ -13,6 +13,7 @@ import { EmbyClient } from '../../services/mediaServer/index.js';
 // Token encryption removed - tokens now stored in plain text (DB is localhost-only)
 import { generateTokens } from './utils.js';
 import { syncServer } from '../../services/sync.js';
+import { isUniqueViolationOn, SERVERS_SINGLE_EMBY_CONSTRAINT } from '../../utils/dbErrors.js';
 
 // Schema for API key connection
 const embyConnectApiKeySchema = z.object({
@@ -63,15 +64,33 @@ export const embyRoutes: FastifyPluginAsync = async (app) => {
         .limit(1);
 
       if (server.length === 0) {
-        const inserted = await db
-          .insert(servers)
-          .values({
-            name: serverName,
-            type: 'emby',
-            url: serverUrl,
-            token: apiKey,
-          })
-          .returning();
+        let inserted;
+        try {
+          inserted = await db
+            .insert(servers)
+            .values({
+              name: serverName,
+              type: 'emby',
+              url: serverUrl,
+              token: apiKey,
+            })
+            .returning();
+        } catch (insertError) {
+          // IMP-05: the select-then-insert above is a check-then-act race -
+          // two concurrent connect requests can both see zero rows and both
+          // insert. `servers_single_emby` (the single-Emby product rule)
+          // rejects the loser at the database, and that raw driver error was
+          // falling through to the generic 500 below. Race losers get a
+          // clean, actionable 409 instead - same mapping precedent as
+          // embySetupPlugin.ts and plexPlugin.ts's `users_single_owner`
+          // handling (utils/dbErrors.ts).
+          if (isUniqueViolationOn(insertError, SERVERS_SINGLE_EMBY_CONSTRAINT)) {
+            return reply.conflict(
+              'Another Emby server is already configured; only one Emby server is supported per instance.'
+            );
+          }
+          throw insertError;
+        }
         server = inserted;
       } else {
         const existingServer = server[0]!;

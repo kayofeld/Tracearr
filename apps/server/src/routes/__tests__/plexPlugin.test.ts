@@ -12,6 +12,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 
 vi.mock('../../db/client.js', () => ({
   db: {
@@ -87,6 +90,39 @@ import { plexPlugin } from '../../lib/plexPlugin.js';
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
+/**
+ * IMP-04: plexConnect's local-accounts fetch now goes through the hardened
+ * `probeFetch` (real `safeProbeJson`). CR-4/IMP-02's fix means the real
+ * (non-`fetchImpl`-injected) path no longer calls the global `fetch` at all
+ * - it connects directly via `node:http`/`node:https` (safeProbe.ts) so
+ * `Host`/TLS `servername` can be set independent of the pinned connection
+ * address, something the standard `fetch()` API does not allow. Stubbing
+ * global `fetch` (`mockFetch` above) therefore has NO effect on this call;
+ * a real local listener is required. Real parsing (`parseUsersResponse`/
+ * `parseLocalUser`) applies to its response - unlike the old class-level
+ * `PlexClient.getUsers()` mock, which handed back whatever raw object
+ * literal the test wrote - so `isAdmin` is derived from `id === '1'`,
+ * matching real Plex semantics, not an object literal's own `isAdmin` field.
+ */
+async function withLocalAccountsServer(
+  accountIds: string[] = ['1']
+): Promise<{ serverUri: string; close: () => Promise<void> }> {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        MediaContainer: { Account: accountIds.map((id) => ({ id, name: `user-${id}` })) },
+      })
+    );
+  });
+  await new Promise<void>((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise));
+  const { port } = server.address() as AddressInfo;
+  return {
+    serverUri: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolvePromise) => server.close(() => resolvePromise())),
+  };
+}
+
 // Thenable chain mock: every builder method returns the chain, awaiting it
 // resolves to the configured rows. Covers select/insert/update terminals.
 function makeChain(result: unknown = []) {
@@ -96,6 +132,23 @@ function makeChain(result: unknown = []) {
   }
   chain.then = (resolve: (v: unknown) => unknown) => resolve(result);
   return chain;
+}
+
+/**
+ * CR-2 fixture: the REAL shape drizzle-orm 0.45's node-postgres driver
+ * produces for a unique_violation - `DrizzleQueryError`'s own `.message`
+ * never contains the constraint name (drizzle-orm/errors.js); the pg
+ * `DatabaseError` (carrying `.code`/`.constraint`) lives at `.cause` (see
+ * utils/dbErrors.ts). A bare `Error` with the constraint name IN the message
+ * is a shape drizzle never actually produces.
+ */
+function makeWrappedUniqueViolation(constraint: string): DrizzleQueryError {
+  const cause = new Error(
+    `duplicate key value violates unique constraint "${constraint}"`
+  ) as Error & { code: string; constraint: string };
+  cause.code = '23505';
+  cause.constraint = constraint;
+  return new DrizzleQueryError('insert into "user" ...', [], cause);
 }
 
 /** Same shape as makeChain, but awaiting the chain rejects instead of resolving. */
@@ -373,9 +426,7 @@ describe('plex better auth plugin', () => {
       vi.mocked(isClaimCodeEnabled).mockReturnValue(true);
       vi.mocked(validateClaimCode).mockReturnValue(true);
       vi.mocked(db.insert).mockReturnValueOnce(
-        makeRejectingChain(
-          new Error('duplicate key value violates unique constraint "users_single_owner"')
-        ) as never
+        makeRejectingChain(makeWrappedUniqueViolation('users_single_owner')) as never
       );
 
       await expect(
@@ -455,7 +506,7 @@ describe('plex better auth plugin', () => {
       mockRedis.del.mockResolvedValue(1);
       pushClaimStateSelects(); // unclaimed
       vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({ success: true } as never);
-      mockGetUsers.mockResolvedValue([{ id: 'plex-local-1', isAdmin: true }]);
+      const accountsServer = await withLocalAccountsServer(['1']);
 
       // Contended user insert now runs BEFORE the server select/insert (SEC-05
       // fix, design §7.2 reorder), so the insert-return order is user, then
@@ -468,13 +519,50 @@ describe('plex better auth plugin', () => {
         .mockReturnValueOnce(makeChain([{ id: 'server-1' }]) as never)
         .mockReturnValueOnce(makeChain([{ id: 'plexacct-1' }]) as never);
 
-      const { result, ctx } = await callEndpoint('plexConnect', connectPayload);
+      try {
+        const { result, ctx } = await callEndpoint('plexConnect', {
+          ...connectPayload,
+          serverUri: accountsServer.serverUri,
+        });
 
-      expect(result.response.authorized).toBe(true);
-      expect((result.response.user as { id: string }).id).toBe('user-1');
-      expect(ctx.createSession).toHaveBeenCalledWith('user-1');
-      expect(mockSetSessionCookie).toHaveBeenCalledTimes(1);
-      expect(mockRedis.del).toHaveBeenCalledWith(expect.stringContaining('temp-abc'));
+        expect(result.response.authorized).toBe(true);
+        expect((result.response.user as { id: string }).id).toBe('user-1');
+        expect(ctx.createSession).toHaveBeenCalledWith('user-1');
+        expect(mockSetSessionCookie).toHaveBeenCalledTimes(1);
+        expect(mockRedis.del).toHaveBeenCalledWith(expect.stringContaining('temp-abc'));
+      } finally {
+        await accountsServer.close();
+      }
+    });
+
+    // IMP-04 boundary test: verifyServerAdmin is fully mocked in this suite
+    // (it never touches the real safeProbeJson/global fetch here), so this
+    // is the ONLY test that proves the accounts-fetch step - the previously
+    // unhardened `pmsClient.getUsers()` call - independently applies the
+    // SAME SSRF hardening, rather than relying on whatever the (mocked, in
+    // this file) admin check happened to validate. `serverUri` targets the
+    // cloud metadata address, which `assertSafeProbeUrl`'s deny list blocks
+    // outright, at the accounts-fetch step's OWN literal pre-flight - the
+    // real `safeProbeJson`, not a class-level mock, is what's running here.
+    it('IMP-04: the local-accounts fetch is independently SSRF-hardened, not just the admin check', async () => {
+      mockRedis.get.mockResolvedValue(JSON.stringify(storedTempData));
+      pushClaimStateSelects(); // unclaimed
+      vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({ success: true } as never);
+      // No mockAccountsFetch() call - if the accounts fetch reached the
+      // network at all, mockFetch's default `{ ok: true, ... }` (no `.json`)
+      // would throw a DIFFERENT error (TypeError: response.json is not a
+      // function) than the SSRF rejection this test expects, so a passing
+      // assertion here is proof the request never left assertSafeProbeUrl.
+
+      await expect(
+        callEndpoint('plexConnect', {
+          ...connectPayload,
+          serverUri: 'http://169.254.169.254:32400',
+        })
+      ).rejects.toMatchObject({ statusCode: 500 });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
     });
 
     // SEC-05 fix (design §7.2): the contended user insert now runs BEFORE the
@@ -485,17 +573,19 @@ describe('plex better auth plugin', () => {
       mockRedis.get.mockResolvedValue(JSON.stringify(storedTempData));
       pushClaimStateSelects(); // unclaimed
       vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({ success: true } as never);
-      mockGetUsers.mockResolvedValue([{ id: 'plex-local-1', isAdmin: true }]);
+      const accountsServer = await withLocalAccountsServer(['1']);
 
       vi.mocked(db.insert).mockReturnValueOnce(
-        makeRejectingChain(
-          new Error('duplicate key value violates unique constraint "users_single_owner"')
-        ) as never
+        makeRejectingChain(makeWrappedUniqueViolation('users_single_owner')) as never
       );
 
-      await expect(callEndpoint('plexConnect', connectPayload)).rejects.toMatchObject({
-        statusCode: 403,
-      });
+      try {
+        await expect(
+          callEndpoint('plexConnect', { ...connectPayload, serverUri: accountsServer.serverUri })
+        ).rejects.toMatchObject({ statusCode: 403 });
+      } finally {
+        await accountsServer.close();
+      }
       // Only the 4 claim-state selects ran - the "existing server" select
       // (which would run right after the user insert in the new order) never
       // fires, and only the failed user insert happened: no server

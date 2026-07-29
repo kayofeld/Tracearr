@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import { randomUUID } from 'node:crypto';
@@ -111,6 +112,23 @@ function mockDbInsert(result: unknown[]) {
   };
   vi.mocked(db.insert).mockReturnValue(chain as never);
   return chain;
+}
+
+/**
+ * CR-2 fixture: the REAL shape drizzle-orm 0.45's node-postgres driver
+ * produces for a unique_violation - `DrizzleQueryError`'s own `.message`
+ * never contains the constraint name (drizzle-orm/errors.js); the pg
+ * `DatabaseError` (carrying `.code`/`.constraint`) lives at `.cause` (see
+ * utils/dbErrors.ts). A bare `Error` with the constraint name IN the message
+ * is a shape drizzle never actually produces.
+ */
+function makeWrappedUniqueViolation(constraint: string): DrizzleQueryError {
+  const cause = new Error(
+    `duplicate key value violates unique constraint "${constraint}"`
+  ) as Error & { code: string; constraint: string };
+  cause.code = '23505';
+  cause.constraint = constraint;
+  return new DrizzleQueryError('insert into "servers" ...', [], cause);
 }
 
 function mockDbInsertRejecting(err: Error) {
@@ -468,9 +486,7 @@ describe('Server Routes', () => {
         return chain as never;
       });
 
-      mockDbInsertRejecting(
-        new Error('duplicate key value violates unique constraint "servers_single_emby"')
-      );
+      mockDbInsertRejecting(makeWrappedUniqueViolation('servers_single_emby'));
 
       const response = await app.inject({
         method: 'POST',

@@ -38,16 +38,19 @@ import { db } from '../db/client.js';
 import { servers, authAccounts } from '../db/schema.js';
 import { EmbyClient } from '../services/mediaServer/index.js';
 import { asJsonFetcher } from '../utils/safeProbe.js';
-import { isUniqueViolationOn, USERS_SINGLE_OWNER_CONSTRAINT } from '../utils/dbErrors.js';
+import { assertSafeProbeUrl, SsrfBlockedError } from '../utils/ssrf.js';
+import {
+  isUniqueViolationOn,
+  USERS_SINGLE_OWNER_CONSTRAINT,
+  SERVERS_SINGLE_EMBY_CONSTRAINT,
+} from '../utils/dbErrors.js';
 import { createLogger } from '../utils/logger.js';
-import { isClaimCodeEnabled } from '../utils/claimCode.js';
 import {
   getInstanceClaimState,
   OWNERLESS_INSTANCE_RECOVERY_MESSAGE,
   OWNERLESS_INSTANCE_LOG_MARKER,
   type InstanceClaimState,
 } from './authGuards.js';
-import { resolveConfiguredEmbyServerRow } from './embyPlugin.js';
 
 const EMBY_PROVIDER = 'emby';
 const logger = createLogger('embySetupPlugin');
@@ -167,18 +170,6 @@ interface AuthenticateResult {
 /** Every piece of I/O runEmbySetup needs, injected so the flow is unit-testable without a DB/Emby/Better Auth instance. */
 export interface EmbySetupPorts {
   getClaimState(): Promise<InstanceClaimState>;
-  /**
-   * Whether a claim code is configured at all (CLAIM_CODE env var set). The
-   * centralized hook in auth.ts already enforces a CONFIGURED code being
-   * correct before this function ever runs; this port covers the narrower
-   * case design §3 calls out separately: in `ownerless-with-data`, the code
-   * is required UNCONDITIONALLY, so an instance with no code configured at
-   * all must refuse rather than let the hook's usual "disabled means no-op"
-   * behavior wave the request through.
-   */
-  isClaimCodeConfigured(): boolean;
-  /** Resolves the existing Emby server row for the ownerless-with-data recovery branch. May throw AmbiguousEmbyServerError. */
-  resolveEmbyServer(): Promise<{ id: string; name: string; url: string } | null>;
   verifyServerAdmin(apiKey: string, url: string): Promise<VerifyAdminResult>;
   authenticate(url: string, username: string, password: string): Promise<AuthenticateResult | null>;
   createOwnerUser(username: string): Promise<{ id: string }>;
@@ -187,7 +178,6 @@ export interface EmbySetupPorts {
     url: string;
     token: string;
   }): Promise<{ id: string; name: string; url: string }>;
-  updateServerToken(serverId: string, token: string): Promise<void>;
   linkEmbyAccount(input: { userId: string; accountId: string; accessToken: string }): Promise<void>;
   createSession(userId: string): Promise<{ token: string } | null>;
   deleteServer(serverId: string): Promise<void>;
@@ -197,6 +187,36 @@ export interface EmbySetupPorts {
 
 const FIXED_URL_REJECTED_MESSAGE = 'The server URL is invalid or not permitted.';
 const FIXED_SERVER_UNREACHABLE_MESSAGE = 'Could not reach the Emby server.';
+
+/**
+ * The `owned`/`ownerless-with-data` refusal, both of which are unconditional
+ * and precede any outbound call - shared by `runEmbySetup`'s own gate AND the
+ * HTTP endpoint's pre-slot-acquisition check (CR-10/IMP-11 below), so both
+ * call sites agree on the exact code/message and neither drifts from the
+ * other. Returns `null` for `unclaimed` (nothing to refuse here).
+ */
+function claimStateRefusal(state: InstanceClaimState): EmbySetupError | null {
+  if (state === 'owned') {
+    return new EmbySetupError(
+      'INSTANCE_OWNED',
+      403,
+      'This Tracearr instance already has an owner. Only the owner can log in.'
+    );
+  }
+  if (state === 'ownerless-with-data') {
+    // CR-3/IMP-01 (console-only recovery, owner decision - design §3/§6.3 as
+    // amended): this state refuses UNCONDITIONALLY and before any outbound
+    // call - no claim-code check, no attempt to resolve an existing Emby
+    // server row, no probe of the operator's Emby server, and their
+    // credentials for this request are never sent anywhere. There is no
+    // network adoption path for an ownerless-but-populated instance, full
+    // stop; the fixed message names the CLI-only recovery (matches
+    // authGuards.ts's assertSignupAllowed/assertOAuthSignupClaimCode, which
+    // refuse the same state the same way - every claim path now agrees).
+    return new EmbySetupError('INSTANCE_RECOVERY', 403, OWNERLESS_INSTANCE_RECOVERY_MESSAGE);
+  }
+  return null;
+}
 
 /**
  * The full setup flow (design §6.2/§6.3), state-gated and compensated. No
@@ -210,50 +230,47 @@ export async function runEmbySetup(
   input: EmbySetupInput,
   ports: EmbySetupPorts
 ): Promise<EmbySetupResult> {
+  // CR-9/IMP-06: a per-attempt correlation id for the compensation-failure
+  // log below - minted here (not threaded in from the HTTP layer) so this
+  // function stays pure/ctx-free and unit-testable with no request object.
+  const requestId = randomUUID();
   const state = await ports.getClaimState();
 
-  if (state === 'owned') {
-    throw new EmbySetupError(
-      'INSTANCE_OWNED',
-      403,
-      'This Tracearr instance already has an owner. Only the owner can log in.'
-    );
+  const refusal = claimStateRefusal(state);
+  if (refusal) {
+    if (state === 'ownerless-with-data') {
+      ports.logError(
+        `${OWNERLESS_INSTANCE_LOG_MARKER}: refused /emby/setup - instance holds data but has no owner`
+      );
+    }
+    throw refusal;
   }
 
   let canonicalUrl: string;
-  let existingServer: { id: string; name: string; url: string } | null = null;
+  try {
+    canonicalUrl = canonicalizeSetupUrl(input.serverUrl);
+  } catch {
+    throw new EmbySetupError('URL_REJECTED', 400, FIXED_URL_REJECTED_MESSAGE);
+  }
 
-  if (state === 'ownerless-with-data') {
-    ports.logError(
-      `${OWNERLESS_INSTANCE_LOG_MARKER}: refused /emby/setup - instance holds data but has no owner`
-    );
-    // Unconditional in this state (design §3, item 1): a disabled claim code
-    // is normally a no-op (see the centralized hook in auth.ts), but here the
-    // absence of ANY configured code is itself the refusal - the instance
-    // cannot be claimed from the network until the operator sets CLAIM_CODE
-    // and restarts, or recovers through the CLI.
-    if (!ports.isClaimCodeConfigured()) {
-      throw new EmbySetupError('INSTANCE_RECOVERY', 403, OWNERLESS_INSTANCE_RECOVERY_MESSAGE);
-    }
-    let resolved: { id: string; name: string; url: string } | null;
-    try {
-      resolved = await ports.resolveEmbyServer();
-    } catch {
-      // Ambiguous resolution also refuses in this state (design §3) - no
-      // partial-trust fallback to "pick one and continue".
-      resolved = null;
-    }
-    if (!resolved) {
-      throw new EmbySetupError('INSTANCE_RECOVERY', 403, OWNERLESS_INSTANCE_RECOVERY_MESSAGE);
-    }
-    existingServer = resolved;
-    canonicalUrl = resolved.url;
-  } else {
-    try {
-      canonicalUrl = canonicalizeSetupUrl(input.serverUrl);
-    } catch {
+  // CR-7 fix: a denied LITERAL address (e.g. the cloud metadata IP,
+  // 169.254.169.254) must map to 400 URL_REJECTED (design §6.4 row 4), not
+  // 503 SERVER_UNREACHABLE. Without this explicit pre-check, the denial only
+  // ever surfaced deep inside safeProbeJson's own literal pre-flight
+  // (`ProbeBlockedError`), which EmbyClient.verifyServerAdmin's broad
+  // connectivity-check `catch` swallows into the generic CONNECTION_FAILED
+  // code (it does not distinguish a blocked URL from an actually-unreachable
+  // one) - so the client saw a misleading "server unreachable" instead of
+  // "URL rejected", and never before any outbound call as the fixed-URL path
+  // above already guarantees. Checked here, synchronously, before any port
+  // is touched.
+  try {
+    assertSafeProbeUrl(canonicalUrl);
+  } catch (err) {
+    if (err instanceof SsrfBlockedError) {
       throw new EmbySetupError('URL_REJECTED', 400, FIXED_URL_REJECTED_MESSAGE);
     }
+    throw err;
   }
 
   const adminCheck = await ports.verifyServerAdmin(input.apiKey, canonicalUrl);
@@ -302,22 +319,13 @@ export async function runEmbySetup(
       throw err;
     }
 
-    let serverResult: { id: string; name: string; url: string };
-    if (existingServer) {
-      // Adopt, never duplicate: update the token only after it verified
-      // above, and never touch the row's URL or name (design §6.3).
-      await ports.updateServerToken(existingServer.id, input.apiKey);
-      serverResult = existingServer;
-    } else {
-      const serverName = input.serverName?.trim() || 'Emby';
-      const inserted = await ports.insertServer({
-        name: serverName,
-        url: canonicalUrl,
-        token: input.apiKey,
-      });
-      insertedServerId = inserted.id;
-      serverResult = inserted;
-    }
+    const serverName = input.serverName?.trim() || 'Emby';
+    const serverResult = await ports.insertServer({
+      name: serverName,
+      url: canonicalUrl,
+      token: input.apiKey,
+    });
+    insertedServerId = serverResult.id;
 
     await ports.linkEmbyAccount({
       userId: createdUser.id,
@@ -338,29 +346,78 @@ export async function runEmbySetup(
   } catch (err) {
     if (err instanceof EmbySetupError) throw err;
 
-    // Compensation (design §7.3): reverse order, and never delete a row this
-    // attempt merely adopted. Compensation failures never mask the original
-    // error - they log a greppable recovery marker naming the CLI commands
-    // and the request still surfaces as SETUP_FAILED below.
+    // IMP-05: `servers_single_emby` (the single-Emby product rule, owner
+    // decision 3) was unmapped here - a race against a server row created
+    // through another path (e.g. an operator using POST /servers directly
+    // between this attempt's state check and its own insertServer call)
+    // fell through to the generic SETUP_FAILED below and surfaced as a raw
+    // 500. Determined up front so compensation below still runs unchanged
+    // (this attempt's own user row is deleted; no server to delete - this
+    // attempt never inserted one), and only the FINAL thrown code differs:
+    // INSTANCE_RECOVERY names the actual resulting state accurately - a
+    // servers row now exists with no owner, console-only recovery, same as
+    // the ownerless-with-data branch above.
+    const isServerConflict = isUniqueViolationOn(err, SERVERS_SINGLE_EMBY_CONSTRAINT);
+
+    // CR-9/IMP-06: log the ORIGINAL cause of this SETUP_FAILED. Without this,
+    // the root reason the flow broke (e.g. a real DB error from insertServer)
+    // was visible only if compensation ALSO failed (the "INSTANCE REQUIRES
+    // MANUAL RECOVERY" logs further down cover only THAT failure) - the
+    // common case of a clean compensation left no trace of why setup failed
+    // in the first place. Message + requestId + claim state only - never the
+    // raw error object (IMP-12's logger redaction protects context values
+    // generally, but there is no reason to hand the whole object over here
+    // when the message is all that is needed for diagnosis).
+    ports.logError('Emby setup failed - compensating', {
+      requestId,
+      claimState: state,
+      cause: err instanceof Error ? err.message : String(err),
+    });
+
+    // Compensation (design §7.3): reverse order. Compensation failures never
+    // mask the original error - the request still surfaces as SETUP_FAILED
+    // below - but the recovery log CR-5 fixes to name the command that
+    // matches what actually survives, computed only after BOTH deletes have
+    // been attempted (which artifact(s) survive isn't knowable until then):
+    // the owner user row (createOwnerUser's before-hook sets role='owner' at
+    // creation) surviving means the instance is `owned`, already recoverable
+    // with `reset-password`, no promotion needed; only the server row
+    // surviving (the common case this bug produces: user delete succeeds,
+    // server delete fails) leaves ZERO user rows, so `promote-owner` has
+    // nothing to promote and the real remedy is deleting the server row.
+    let serverDeleteError: unknown;
+    let userDeleteError: unknown;
     if (insertedServerId) {
       await ports.deleteServer(insertedServerId).catch((cleanupErr: unknown) => {
-        ports.logError(
-          'INSTANCE REQUIRES MANUAL RECOVERY: failed to delete orphaned server row after a ' +
-            'failed Emby setup. Recover with `pnpm --filter @tracearr/server cli list-users` ' +
-            'and `cli promote-owner <username>`.',
-          { err: cleanupErr }
-        );
+        serverDeleteError = cleanupErr;
       });
     }
     if (createdUser) {
       await ports.deleteUser(createdUser.id).catch((cleanupErr: unknown) => {
-        ports.logError(
-          'INSTANCE REQUIRES MANUAL RECOVERY: failed to delete orphaned owner user after a ' +
-            'failed Emby setup. Recover with `pnpm --filter @tracearr/server cli list-users` ' +
-            'and `cli promote-owner <username>`.',
-          { err: cleanupErr }
-        );
+        userDeleteError = cleanupErr;
       });
+    }
+    if (userDeleteError) {
+      ports.logError(
+        'INSTANCE REQUIRES MANUAL RECOVERY: failed to delete the orphaned owner user row after ' +
+          'a failed Emby setup attempt. The instance now has an owner with no working login - ' +
+          'recover with `pnpm --filter @tracearr/server cli reset-password <username>`.',
+        { err: userDeleteError }
+      );
+    }
+    if (serverDeleteError) {
+      ports.logError(
+        'INSTANCE REQUIRES MANUAL RECOVERY: failed to delete the orphaned Emby server row after ' +
+          'a failed Emby setup attempt.' +
+          (userDeleteError
+            ? ''
+            : ' No user row survives to promote - recover with ' +
+              '`pnpm --filter @tracearr/server cli list-servers` and `cli delete-server <id>`.'),
+        { err: serverDeleteError }
+      );
+    }
+    if (isServerConflict) {
+      throw new EmbySetupError('INSTANCE_RECOVERY', 403, OWNERLESS_INSTANCE_RECOVERY_MESSAGE);
     }
     throw new EmbySetupError('SETUP_FAILED', 500, 'Failed to complete setup.');
   }
@@ -381,18 +438,19 @@ async function createSetupSession(ctx: SetupEndpointCtx, userId: string) {
   return session;
 }
 
-function buildRealPorts(ctx: SetupEndpointCtx): EmbySetupPorts {
-  const budgetDeadline = Date.now() + SETUP_TOTAL_BUDGET_MS;
-  const totalBudgetController = new AbortController();
-  const budgetTimer = setTimeout(
-    () => totalBudgetController.abort(),
-    Math.max(0, budgetDeadline - Date.now())
-  );
-  budgetTimer.unref();
-
+/**
+ * `totalBudgetSignal` is built and owned by the endpoint handler (CR-13/
+ * IMP-10 fix), not here: the handler's own `finally` clears the underlying
+ * timer once the request is done, success or failure. Building it inside
+ * this function with no reference returned to the caller meant the endpoint
+ * could never clear it - a harmless-but-sloppy leftover timer per request
+ * (its own `.unref()` keeps it from blocking process exit, but it still
+ * fires pointlessly ~15s after every already-completed request).
+ */
+function buildRealPorts(ctx: SetupEndpointCtx, totalBudgetSignal: AbortSignal): EmbySetupPorts {
   const fetchImpl = asJsonFetcher({
     timeoutMs: SETUP_PROBE_TIMEOUT_MS,
-    signal: totalBudgetController.signal,
+    signal: totalBudgetSignal,
     onUpstreamError: (detail) => {
       logger.error('Emby setup probe failed', detail);
     },
@@ -400,8 +458,6 @@ function buildRealPorts(ctx: SetupEndpointCtx): EmbySetupPorts {
 
   return {
     getClaimState: getInstanceClaimState,
-    isClaimCodeConfigured: isClaimCodeEnabled,
-    resolveEmbyServer: resolveConfiguredEmbyServerRow,
     verifyServerAdmin: (apiKey, url) => EmbyClient.verifyServerAdmin(apiKey, url, fetchImpl),
     authenticate: (url, username, password) =>
       EmbyClient.authenticate(url, username, password, fetchImpl),
@@ -429,12 +485,6 @@ function buildRealPorts(ctx: SetupEndpointCtx): EmbySetupPorts {
         .returning({ id: servers.id, name: servers.name, url: servers.url });
       if (!inserted) throw new Error('Failed to insert Emby server row');
       return inserted;
-    },
-    updateServerToken: async (serverId, token) => {
-      await db
-        .update(servers)
-        .set({ token, updatedAt: new Date() })
-        .where(eq(servers.id, serverId));
     },
     linkEmbyAccount: async ({ userId, accountId, accessToken }) => {
       await db.insert(authAccounts).values({
@@ -464,29 +514,71 @@ export const embySetupPlugin = () =>
         EMBY_SETUP_PATH,
         { method: 'POST', body: setupBody },
         async (ctx) => {
-          if (!acquireSetupProbeSlot()) {
-            throw new APIError('SERVICE_UNAVAILABLE', {
-              message: 'Too many setup attempts are already in progress. Try again shortly.',
-              body: { code: 'BUSY' },
+          // CR-10/IMP-11: check the claim state BEFORE ever acquiring a
+          // concurrency slot. `owned` and `ownerless-with-data` both refuse
+          // unconditionally with no outbound Emby call at all
+          // (claimStateRefusal/runEmbySetup above), so neither should ever
+          // compete for - or be blocked by - the slot pool that exists
+          // specifically to bound outbound probes (SEC-07, design §9). Before
+          // this fix, an already-`owned` instance under concurrent setup-probe
+          // load from unrelated attempts could be wrongly told `BUSY` instead
+          // of its real, instant `INSTANCE_OWNED`. `runEmbySetup` re-derives
+          // the SAME state right after (one more cheap DB read) as the
+          // authoritative check - this is a fast-path short-circuit sharing
+          // the exact same `claimStateRefusal` logic, not a second authority.
+          const earlyState = await getInstanceClaimState();
+          const earlyRefusal = claimStateRefusal(earlyState);
+          if (earlyRefusal) {
+            throw new APIError(httpStatusToApiStatus(earlyRefusal.httpStatus), {
+              message: earlyRefusal.message,
+              code: earlyRefusal.code,
             });
           }
 
+          if (!acquireSetupProbeSlot()) {
+            // better-call's APIError(status, body) writes `body` verbatim as
+            // the wire response (see better-call/dist/to-response.mjs:
+            // `toResponse(data.body, ...)`) - `code` MUST be a top-level key
+            // of the 2nd arg, never nested under its own `body` key, or the
+            // client's `error.code` switch (Login.tsx) never matches and every
+            // setup error falls back to this English prose (CR-1).
+            throw new APIError('SERVICE_UNAVAILABLE', {
+              message: 'Too many setup attempts are already in progress. Try again shortly.',
+              code: 'BUSY',
+            });
+          }
+
+          // CR-13/IMP-10: owned by this handler (not buildRealPorts) so the
+          // `finally` below can `clearTimeout` it once the request is done,
+          // success or failure, instead of leaving it to fire pointlessly
+          // ~15s later on an already-finished request every time.
+          const totalBudgetController = new AbortController();
+          const budgetTimer = setTimeout(
+            () => totalBudgetController.abort(),
+            SETUP_TOTAL_BUDGET_MS
+          );
+          budgetTimer.unref();
+
           try {
-            const result = await runEmbySetup(ctx.body, buildRealPorts(ctx));
+            const result = await runEmbySetup(
+              ctx.body,
+              buildRealPorts(ctx, totalBudgetController.signal)
+            );
             return ctx.json(result);
           } catch (err) {
             if (err instanceof EmbySetupError) {
               throw new APIError(httpStatusToApiStatus(err.httpStatus), {
                 message: err.message,
-                body: { code: err.code },
+                code: err.code,
               });
             }
             logger.error('Unexpected error in /emby/setup', { err });
             throw new APIError('INTERNAL_SERVER_ERROR', {
               message: 'Failed to complete setup.',
-              body: { code: 'SETUP_FAILED' },
+              code: 'SETUP_FAILED',
             });
           } finally {
+            clearTimeout(budgetTimer);
             releaseSetupProbeSlot();
           }
         }

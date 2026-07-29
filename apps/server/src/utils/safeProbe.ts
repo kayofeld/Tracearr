@@ -15,10 +15,16 @@
  *      the whole request; there is no "use the good one" fallback, because a
  *      name that resolves to both a legitimate and a denied address is
  *      exactly the rebinding shape being defended against.
- *   3. Pin the connection to the already-validated addresses: the custom
- *      `connect.lookup` handed to undici's `Agent` returns the closure-
- *      captured, pre-validated address list instead of re-resolving, so
- *      there is no TOCTOU gap between the check and the connect.
+ *   3. Pin the connection to the already-validated address (spec §8.2's
+ *      documented FALLBACK mechanism, not the originally-intended one - see
+ *      below): the request is made directly against the validated literal
+ *      IP via Node's raw `http`/`https` modules (NOT the standard `fetch()`
+ *      API - see why below), carrying the original hostname as an explicit
+ *      `Host` header and, for https, an explicit TLS `servername` (SNI), so
+ *      name-based virtual hosting and certificate validation on the target
+ *      server both still work correctly. There is no TOCTOU gap between the
+ *      check and the connect - there is no hostname left in the request for
+ *      a second DNS lookup to re-resolve.
  *   4. `redirect: 'manual'` - any 3xx is a hard failure (`ProbeFailedError`
  *      with code 'REDIRECTED'), following the exact pattern already proven
  *      in this repo for Ombi/Seerr (services/ombi.ts, services/seerr.ts):
@@ -27,22 +33,53 @@
  *   5. Bounded by a per-call timeout; the caller composes several calls under
  *      one shared total budget (see SETUP_TOTAL_BUDGET_MS in embySetupPlugin.ts).
  *   6. Throws only messages safe to return to a client: upstream status,
- *      status text and body are never included (SEC-03c). Callers that want
- *      the detail for server-side logging get it via `onUpstreamError`.
+ *      status text and body are never included in the thrown MESSAGE
+ *      (SEC-03c). Callers that want the detail for server-side logging get
+ *      it via `onUpstreamError`. A non-ok response DOES throw the real
+ *      status as data (`HttpClientError.statusCode` - CR-4 fix): the caller
+ *      needs it to discriminate 401/403 from a genuine connection failure
+ *      (EmbyClient.verifyServerAdmin/authenticate both branch on
+ *      `error instanceof HttpClientError && error.statusCode === ...`,
+ *      exactly what the plain, unhardened `fetchJson` path already throws -
+ *      see utils/http.ts). Only the MESSAGE stays fixed and generic; the
+ *      status code itself is not upstream prose.
  *
- * The undici `Agent.connect.lookup` pinning (step 3) is the one piece the
- * design itself marks **inferred - unverified** (that undici's `connect`
- * options forward a custom `lookup` to `net`/`tls` in the Node runtime this
- * repo bundles, and that TLS SNI still carries the original hostname).
- * Verify with a build-time spike against a live server before relying on
- * this for a first production rollout with an untrusted network path; the
- * DNS-resolution + address-validation steps (2) do not depend on that
- * assumption and hold regardless.
+ * IMP-02: step 3's ORIGINALLY-intended mechanism - an undici `Agent` whose
+ * `connect.lookup` pins the resolved+validated address, handed to the
+ * global `fetch` as its `dispatcher` - was marked **inferred - unverified**
+ * in the design and is now CONFIRMED BROKEN against this repo's actual
+ * dependency versions, not merely unverified: Node's global `fetch`
+ * validates a passed `dispatcher` against its OWN internally bundled
+ * `undici`'s shape, and a directly-installed `undici` package instance
+ * (`^8.2.0` here) never satisfies that check - every call throws
+ * `InvalidArgumentError: invalid onRequestStart method`
+ * (`UND_ERR_INVALID_ARG`), reproduced empirically before writing this fix.
+ *
+ * The documented fallback (request the literal IP with an explicit `Host`
+ * header) turned out to have a SECOND empirically-confirmed problem: the
+ * standard `fetch()` API treats `Host` as a forbidden request header (per
+ * the WHATWG Fetch spec) and silently overrides it with the connection's
+ * own address, so a plain `fetch(pinnedUrl, { headers: { Host: original } })`
+ * never actually sends the original hostname either. Node's raw `http`/
+ * `https` modules are NOT bound by that restriction - `http.request({
+ * hostname: pinnedIp, headers: { Host: original } })` sends exactly the
+ * `Host` given, independent of the connection address, and `https.request`
+ * additionally accepts a `servername` option for TLS SNI, independent of
+ * `hostname` too - both confirmed empirically. So the real fallback
+ * (`pinnedNodeRequest` below) uses `node:http`/`node:https` directly rather
+ * than `fetch()`, which fully resolves the SNI/virtual-hosting caveat the
+ * spec's fallback clause anticipated, instead of merely documenting it.
+ * safeProbe.test.ts's real-connect-pinning describe block exercises this
+ * end to end (a local listener, no `fetchImpl` injected) and asserts the
+ * original Host header actually arrives. The DNS-resolution +
+ * address-validation steps (2) do not depend on any of this and hold
+ * regardless.
  */
 
 import dns from 'node:dns';
-import { Agent } from 'undici';
-import type { HttpRequestOptions } from './http.js';
+import http from 'node:http';
+import https from 'node:https';
+import { HttpClientError, type HttpRequestOptions } from './http.js';
 import { assertSafeProbeUrl, isDeniedProbeAddress, SsrfBlockedError } from './ssrf.js';
 
 /** Thrown by the pre-flight checks (steps 1-2): the URL or its resolved address(es) are denied. */
@@ -53,7 +90,15 @@ export class ProbeBlockedError extends Error {
   }
 }
 
-/** Thrown once the probe actually ran (steps 4-6): connection/redirect/parse failure. */
+/**
+ * Thrown once the probe actually ran: network-level unreachability
+ * (`UNREACHABLE`, e.g. connect/timeout/invalid-JSON failure - the fetch call
+ * itself never completed with a response) or a blocked redirect
+ * (`REDIRECTED`). A response that DID complete but came back non-ok (401,
+ * 403, 500, ...) throws `HttpClientError` instead (CR-4 fix), carrying the
+ * real `statusCode` so callers can discriminate an auth rejection from an
+ * actual connection failure - see the file header, point 6.
+ */
 export class ProbeFailedError extends Error {
   readonly code: 'UNREACHABLE' | 'REDIRECTED';
   constructor(code: 'UNREACHABLE' | 'REDIRECTED', message: string) {
@@ -80,9 +125,24 @@ export interface SafeProbeOptions {
 export interface SafeProbeDeps {
   /** Defaults to `dns.promises.lookup(hostname, { all: true })`. Test seam. */
   lookup?: (hostname: string) => Promise<{ address: string; family: number }[]>;
-  /** Defaults to the global `fetch`. Test seam - when supplied, no undici Agent is built,
-   *  so the resolved-address pinning (step 3) is bypassed; only used in tests. */
+  /**
+   * Defaults to `pinnedNodeRequest` (real `node:http`/`node:https`, address
+   * pinning applied). Test seam - when supplied, no address pinning is
+   * applied at all (the given function is called with the URL exactly as
+   * given); only used in tests.
+   */
   fetchImpl?: typeof fetch;
+}
+
+/** The subset of the Fetch API's `Response` this module actually consumes - satisfied by both a real `Response` (the test-seam `fetchImpl` path) and `pinnedNodeRequest`'s return value (the real path). */
+interface MinimalResponse {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly statusText: string;
+  /** Fetch's manual-redirect marker, mirrored here for the real path (see `pinnedNodeRequest`) so both paths share the exact same `response.type === 'opaqueredirect'` check (file header, step 4). */
+  readonly type: string;
+  text(): Promise<string>;
+  json(): Promise<unknown>;
 }
 
 function combineSignals(...signals: (AbortSignal | undefined)[]): AbortSignal {
@@ -127,6 +187,79 @@ async function resolveAndValidate(
 }
 
 /**
+ * The real (non-test) request path (spec §8.2 step 3, IMP-02 fix): connects
+ * directly to `pinnedAddress` (already validated by `resolveAndValidate`)
+ * using `node:http`/`node:https`, never the target's hostname - carrying the
+ * original `Host` header and, for https, the original TLS `servername` -
+ * both confirmed to work via these raw modules where the standard `fetch()`
+ * API silently does not (file header). Manual-redirect handling mirrors
+ * `fetch({redirect:'manual'})`'s own `opaqueredirect` marker rather than
+ * introducing a second convention: raw `http`/`https` never follow
+ * redirects themselves, so any 3xx status is simply read directly off
+ * `res.statusCode` here and reported the same way.
+ */
+function pinnedNodeRequest(
+  targetUrl: URL,
+  pinnedAddress: { address: string; family: number },
+  originalHost: string,
+  originalHostname: string,
+  init: { method: string; headers?: Record<string, string>; body?: string; signal: AbortSignal }
+): Promise<MinimalResponse> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const isHttps = targetUrl.protocol === 'https:';
+    const transport = isHttps ? https : http;
+    const port = targetUrl.port ? Number(targetUrl.port) : isHttps ? 443 : 80;
+
+    const req = transport.request(
+      {
+        hostname: pinnedAddress.address,
+        port,
+        path: `${targetUrl.pathname}${targetUrl.search}`,
+        method: init.method,
+        headers: { ...(init.headers ?? {}), Host: originalHost },
+        // https only: TLS SNI independent of the connection address, so
+        // certificate validation checks against the ORIGINAL hostname, not
+        // the bare pinned IP (which a normal server certificate would never
+        // cover).
+        ...(isHttps ? { servername: originalHostname } : {}),
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const status = res.statusCode ?? 0;
+          const bodyText = Buffer.concat(chunks).toString('utf8');
+          resolvePromise({
+            ok: status >= 200 && status < 300,
+            status,
+            statusText: res.statusMessage ?? '',
+            type: status >= 300 && status < 400 ? 'opaqueredirect' : 'basic',
+            text: () => Promise.resolve(bodyText),
+            json: () => Promise.resolve(JSON.parse(bodyText)),
+          });
+        });
+        res.on('error', rejectPromise);
+      }
+    );
+
+    req.on('error', rejectPromise);
+
+    const onAbort = () => {
+      req.destroy(init.signal.reason instanceof Error ? init.signal.reason : new Error('Aborted'));
+    };
+    if (init.signal.aborted) {
+      onAbort();
+    } else {
+      init.signal.addEventListener('abort', onAbort, { once: true });
+      req.once('close', () => init.signal.removeEventListener('abort', onAbort));
+    }
+
+    if (init.body) req.write(init.body);
+    req.end();
+  });
+}
+
+/**
  * The hardened fetch-and-parse-JSON primitive described in the file header.
  * `url` must already be the canonicalized origin the caller intends to
  * store/echo (see the setup plugin's canonicalization step) - this function
@@ -157,41 +290,33 @@ export async function safeProbeJson<T>(
   const signal = combineSignals(timeoutSignal, opts.signal);
 
   const fetchImpl = deps.fetchImpl;
-  // Step 3: pin the connection to the addresses already validated above - no
-  // second DNS query at connect time, so there is no TOCTOU gap between the
-  // check and the connection undici actually makes. Only built for the real
-  // fetch path; an injected fetchImpl (tests) bypasses the Agent entirely.
-  const dispatcher = fetchImpl
-    ? undefined
-    : new Agent({
-        connect: {
-          lookup: (
-            _hostname: string,
-            _options: unknown,
-            callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void
-          ) => {
-            const first = validatedAddresses[0];
-            if (!first) {
-              callback(new Error('No validated address available'), '', 0);
-              return;
-            }
-            callback(null, first.address, first.family);
-          },
-        },
-      });
 
-  let response: Response;
+  // Step 3 (spec §8.2/§8.3, IMP-02 fix): pin the connection to the address
+  // already validated above - no second DNS query at connect time, so there
+  // is no TOCTOU gap between the check and the connection actually made. See
+  // the file header for why this uses `pinnedNodeRequest` (real `node:http`/
+  // `node:https`) rather than the standard `fetch()` API when no test
+  // `fetchImpl` is injected.
+  let response: MinimalResponse;
   try {
-    response = await (fetchImpl ?? fetch)(url, {
-      method: opts.method ?? 'GET',
-      headers: opts.headers,
-      body: opts.body,
-      // Step 4: never follow a redirect - see file header for why 'manual'
-      // plus response.type is the correct check rather than status/Location.
-      redirect: 'manual',
-      signal,
-      ...(dispatcher ? ({ dispatcher } as Record<string, unknown>) : {}),
-    });
+    if (fetchImpl) {
+      response = await fetchImpl(url, {
+        method: opts.method ?? 'GET',
+        headers: opts.headers,
+        body: opts.body,
+        // Step 4: never follow a redirect - see file header for why 'manual'
+        // plus response.type is the correct check rather than status/Location.
+        redirect: 'manual',
+        signal,
+      });
+    } else {
+      response = await pinnedNodeRequest(parsed, validatedAddresses[0]!, parsed.host, hostname, {
+        method: opts.method ?? 'GET',
+        headers: opts.headers,
+        body: opts.body,
+        signal,
+      });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unable to reach server';
     opts.onUpstreamError?.({ statusText: message });
@@ -211,7 +336,24 @@ export async function safeProbeJson<T>(
       // ignore - body unavailable
     }
     opts.onUpstreamError?.({ status: response.status, statusText: response.statusText, body });
-    throw new ProbeFailedError('UNREACHABLE', 'Could not reach the server.');
+    // CR-4 fix: the real HTTP status has to reach the caller so it can
+    // discriminate 401/403 from a genuine connection failure (EmbyClient's
+    // verifyServerAdmin/authenticate both branch on
+    // `error instanceof HttpClientError && error.statusCode === ...`, exactly
+    // the class the plain, unhardened `fetchJson` path already throws here -
+    // see utils/http.ts's assertResponseOk). `ProbeFailedError` carried no
+    // status at all, so every non-ok response - including 401 and 403 -
+    // collapsed into the same generic "unreachable" case. The MESSAGE stays
+    // the fixed, safe string regardless of status (SEC-03c: upstream status
+    // text and body are never echoed to the client); only `statusCode` is
+    // populated from the real response, for server-side/caller logic only.
+    throw new HttpClientError({
+      service: opts.service,
+      statusCode: response.status,
+      statusText: response.statusText,
+      url,
+      message: 'Could not reach the server.',
+    });
   }
 
   try {

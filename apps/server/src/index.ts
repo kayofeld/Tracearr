@@ -621,9 +621,17 @@ async function initializeServices(app: FastifyInstance) {
   // can go missing silently is the failure mode the review objected to. Cheap
   // query, runs once, and it names the remedy rather than just complaining.
   try {
+    // CR-12 fix: `pg_indexes` is unqualified across every schema visible to
+    // the connection, not just the one Tracearr actually operates in - an
+    // identically-named index sitting in an unrelated schema (a different
+    // tenant/app sharing this database, a leftover from a schema migration)
+    // would satisfy this check while the schema Tracearr's queries actually
+    // run against has neither index, silently defeating the very belt-and-
+    // braces assertion this block exists for.
     const present = await db.execute(sql`
       SELECT indexname FROM pg_indexes
       WHERE indexname IN ('users_single_owner', 'servers_single_emby')
+        AND schemaname = current_schema()
     `);
     const found = new Set(
       (present.rows as Array<{ indexname: string }>).map((row) => row.indexname)
@@ -640,6 +648,30 @@ async function initializeServices(app: FastifyInstance) {
     }
   } catch (err) {
     app.log.warn({ err }, 'Could not verify auth-integrity indexes');
+  }
+
+  // CR-8/IMP-09: surface OWNERLESS_INSTANCE_WITH_DATA at STARTUP, not only on
+  // a refusal. Before this, an operator whose instance ended up
+  // `ownerless-with-data` (a deleted owner, a partial restore, a failed
+  // setup compensation) got no signal at all unless someone actually tried
+  // to sign up or run /emby/setup and hit the refusal - an instance can sit
+  // silently unrecoverable-from-the-browser for an arbitrary time with
+  // nothing in the logs pointing at why. One log line at boot, once, makes
+  // the state visible immediately on every restart.
+  try {
+    const { getInstanceClaimState, OWNERLESS_INSTANCE_LOG_MARKER } =
+      await import('./lib/authGuards.js');
+    const claimState = await getInstanceClaimState();
+    if (claimState === 'ownerless-with-data') {
+      app.log.error(
+        `${OWNERLESS_INSTANCE_LOG_MARKER}: this instance holds existing data but has no owner. ` +
+          'Local/OIDC signup and /emby/setup will refuse until recovered from the console with ' +
+          '`pnpm --filter @tracearr/server cli promote-owner <username>` (or `cli list-servers` / ' +
+          '`cli delete-server <id>` if no user row survives) and then `pnpm reset-password`.'
+      );
+    }
+  } catch (err) {
+    app.log.warn({ err }, 'Could not check instance claim state at startup');
   }
 
   // Build prepared statements now that the db pool is ready
