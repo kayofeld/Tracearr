@@ -17,6 +17,7 @@ export type {
   UserRole,
   AuthUser,
   SetupStatus,
+  EmbyLoginFailureReason,
   UserLocation,
   UserDevice,
   UserMergeResult,
@@ -487,6 +488,7 @@ export {
   API_VERSION,
   API_BASE_PATH,
   SIGN_UP_USERNAME_PATH,
+  EMBY_LOGIN_PATH,
   JWT_CONFIG,
   POLLING_INTERVALS,
   POLLER_CONFIG,
@@ -530,6 +532,9 @@ export {
 
 // Role helper exports
 export { ROLE_PERMISSIONS, LOGIN_ROLES, canLogin, hasMinRole, isOwner, isActive } from './types.js';
+
+// Emby login failure reason codes (POST /emby/login error body `code` field)
+export { EMBY_LOGIN_FAILURE_REASONS } from './types.js';
 
 // Session constants
 export { MEDIA_TYPES, DEFAULT_STREAM_DETAILS } from './types.js';

@@ -44,6 +44,7 @@ describe('oidc gating', () => {
       const { db } = await import('../../db/client.js');
       const emptyChain = () => ({
         from: vi.fn().mockReturnThis(),
+        innerJoin: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         limit: vi.fn().mockResolvedValue([]),
       });
