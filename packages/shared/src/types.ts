@@ -244,9 +244,11 @@ export interface SetupStatus {
 /**
  * Response body for a successful POST /api/auth/emby/setup (see
  * EMBY_SETUP_PATH in constants.ts and embySetupPlugin.ts on the server).
- * `server.url` is the canonical origin actually used - in the
- * ownerless-with-data recovery branch that is the server-resolved URL
- * rather than the one the client submitted.
+ * `server.url` is the canonical origin actually used - the setup flow only
+ * ever reaches this success shape from the `unclaimed` state (CR-3/IMP-01:
+ * an `ownerless-with-data` instance refuses unconditionally and never
+ * produces this response - recovery is console-only, see
+ * OWNERLESS_INSTANCE_RECOVERY_MESSAGE in authGuards.ts).
  */
 export interface EmbySetupResult {
   authorized: true;

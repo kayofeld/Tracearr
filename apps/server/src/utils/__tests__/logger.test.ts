@@ -66,6 +66,23 @@ describe('redactLogContext', () => {
     });
   });
 
+  it('NEW-01: strips the same params tail from a BARE STRING value, not only from inside an Error object - the old `{ cause: err.message }` call-site shape that bypassed the Error-shape rebuild above', () => {
+    const secretAccessToken = 'super-secret-emby-access-token-98765';
+    const err = new DrizzleQueryError(
+      'insert into "auth_accounts" ("user_id","access_token") values ($1,$2)',
+      ['user-1', secretAccessToken],
+      new Error('some db failure')
+    );
+
+    // Simulates the exact leak this fix closes: a call site logging the
+    // Error's `.message` STRING directly (as embySetupPlugin.ts's compensation
+    // log used to) rather than the Error object itself.
+    const result = redactLogContext({ cause: err.message }) as { cause: string };
+
+    expect(result.cause).not.toContain(secretAccessToken);
+    expect(result.cause).toContain('insert into "auth_accounts"');
+  });
+
   it('leaves a context with no sensitive shape untouched (message, request id, claim state)', () => {
     const result = redactLogContext({ requestId: 'req-1', claimState: 'unclaimed', attempt: 2 });
     expect(result).toEqual({ requestId: 'req-1', claimState: 'unclaimed', attempt: 2 });

@@ -189,6 +189,27 @@ describe('safeProbeJson', () => {
     expect((error as ProbeFailedError).code).toBe('UNREACHABLE');
     expect((error as Error).message).not.toMatch(/ECONNREFUSED/);
   });
+
+  it('NR-2: bounds a hanging DNS lookup by the same per-probe timeout, rejecting UNREACHABLE rather than hanging indefinitely', async () => {
+    // Never resolves - simulates an attacker-controlled resolver that just
+    // never answers. Before the fix, the timeout signal was only built AFTER
+    // this awaited, so this lookup would hang the whole call forever.
+    const hangingLookup = vi.fn(() => new Promise<never>(() => undefined));
+    const start = Date.now();
+
+    const error = await safeProbeJson(
+      'http://hanging-dns-test.invalid/',
+      { service: 'test', timeoutMs: 50 },
+      { lookup: hangingLookup }
+    ).catch((e: unknown) => e);
+
+    const elapsedMs = Date.now() - start;
+    expect(error).toBeInstanceOf(ProbeFailedError);
+    expect((error as ProbeFailedError).code).toBe('UNREACHABLE');
+    // Bounded by timeoutMs (50ms) - generous margin for CI scheduling jitter,
+    // but nowhere near "hangs forever".
+    expect(elapsedMs).toBeLessThan(2000);
+  });
 });
 
 // ============================================================================
@@ -351,4 +372,106 @@ describe('safeProbeJson: real connect-pinning end to end (no fetchImpl injected,
       await close();
     }
   });
+
+  it('NEW-03: sends an explicit Content-Length for a POST body through the real pinned request path (never chunked)', async () => {
+    let receivedContentLength: string | undefined;
+    let receivedTransferEncoding: string | undefined;
+    const { port, close } = await withLocalServer((req, res) => {
+      receivedContentLength = req.headers['content-length'];
+      receivedTransferEncoding = req.headers['transfer-encoding'];
+      req.on('data', () => undefined);
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      });
+    });
+
+    try {
+      const lookup = vi.fn().mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+      // Non-ASCII on purpose: `Buffer.byteLength`, not `.length`, must be
+      // used, or a multi-byte password gets truncated by an under-counted
+      // Content-Length.
+      const body = JSON.stringify({ Username: 'owner', Pw: 'sëcret-pässwörd-ü' });
+
+      await safeProbeJson<{ ok: boolean }>(
+        `http://content-length-test.invalid:${port}/Users/AuthenticateByName`,
+        { service: 'test', timeoutMs: 3000, method: 'POST', body },
+        { lookup }
+      );
+
+      expect(receivedTransferEncoding).toBeUndefined();
+      expect(receivedContentLength).toBe(String(Buffer.byteLength(body)));
+    } finally {
+      await close();
+    }
+  });
+
+  it('NEW-02: clamps a probe response body, rejecting UNREACHABLE rather than buffering an unbounded stream', async () => {
+    const { port, close } = await withLocalServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      // Streams just over the module's 1 MiB clamp. The target here plays
+      // the role of a hostile/misbehaving server on this pre-auth,
+      // client-supplied-URL path - proving the clamp is enforced regardless
+      // of what the server claims or how much it sends.
+      const chunk = Buffer.alloc(64 * 1024, 'a');
+      const targetBytes = 1024 * 1024 + 4096;
+      let written = 0;
+      const pump = () => {
+        if (written >= targetBytes) {
+          res.end();
+          return;
+        }
+        written += chunk.length;
+        const canContinue = res.write(chunk);
+        if (canContinue) setImmediate(pump);
+        else res.once('drain', pump);
+      };
+      pump();
+    });
+
+    try {
+      const lookup = vi.fn().mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+
+      const error = await safeProbeJson(
+        `http://body-clamp-test.invalid:${port}/`,
+        { service: 'test', timeoutMs: 5000 },
+        { lookup }
+      ).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ProbeFailedError);
+      expect((error as ProbeFailedError).code).toBe('UNREACHABLE');
+    } finally {
+      await close();
+    }
+  }, 10000);
+
+  it('NR-3: falls back to the next validated address on a connection-level failure (dual-stack, first address unreachable)', async () => {
+    const { port, close } = await withLocalServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+
+    try {
+      // 127.0.0.2 is still loopback (the whole 127.0.0.0/8 block is), but
+      // nothing listens there - refused at connect, a genuine
+      // connection-level failure. 127.0.0.1 is the real local server. Both
+      // share the port from the URL (address pinning never touches the
+      // port), simulating a dual-stack host whose first-sorted address is
+      // dead while a later one works.
+      const lookup = vi.fn().mockResolvedValue([
+        { address: '127.0.0.2', family: 4 },
+        { address: '127.0.0.1', family: 4 },
+      ]);
+
+      const result = await safeProbeJson<{ ok: boolean }>(
+        `http://fallback-address-test.invalid:${port}/`,
+        { service: 'test', timeoutMs: 5000 },
+        { lookup }
+      );
+
+      expect(result).toEqual({ ok: true });
+    } finally {
+      await close();
+    }
+  }, 10000);
 });

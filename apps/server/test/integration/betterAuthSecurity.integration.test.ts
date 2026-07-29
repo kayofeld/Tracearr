@@ -193,7 +193,7 @@ describe('better auth security (integration)', () => {
     expect(tokenA).not.toBe(tokenB);
   });
 
-  it('username sign-in and sign-up ignore member rows sharing the username', async () => {
+  it('username sign-in ignores member rows sharing the username', async () => {
     // Synced member rows live in the same users table and can carry any
     // username, including one equal to a login username. They must never
     // shadow the login-capable account: the owner always wins the sign-in

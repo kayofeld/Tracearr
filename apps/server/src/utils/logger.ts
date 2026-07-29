@@ -13,6 +13,13 @@
  * logging a raw driver error naively puts a secret in the log. Fixing that
  * the naive way (just `logger.error(message, { err })`) would do exactly
  * that; this redaction has to land first.
+ *
+ * NEW-01 fix: the Error-shape branch above rebuilds a safe message from the
+ * query alone, but that protection is bypassed if a call site logs the raw
+ * STRING message instead of the error object (e.g. `{ cause: err.message }`).
+ * `redactValue` now strips the same `params: [...]` tail from every string
+ * value it sees, not only from inside an `Error` instance, so this class of
+ * leak cannot be reintroduced by a future call site either.
  */
 
 /** Key names (case-insensitive) whose VALUE is replaced with a fixed marker, wherever found. */
@@ -46,8 +53,29 @@ const DROPPED_KEYS = new Set([
 const REDACTED = '[REDACTED]';
 const MAX_DEPTH = 8;
 
+// NEW-01: `DrizzleQueryError`'s message text is built as `Failed query:
+// <sql>\nparams: <params>` (drizzle-orm/errors.js: `` `params: ${params}` ``,
+// which stringifies the bound params array as a plain comma-joined list, NOT
+// bracketed JSON - so the tail has no reliable closing delimiter to anchor
+// on; everything from `params:` to the end of the string is the bound-value
+// dump and is dropped). The Error-branch below already rebuilds the message
+// from the query alone (see the `isDrizzleQueryErrorShape` handling), but a
+// caller can still hand a BARE STRING containing that same tail to a log
+// context (e.g. `{ cause: err.message }` instead of `{ err }`) and bypass the
+// Error-shape rebuild entirely, since a plain string used to pass through
+// this function untouched. Stripping the tail here, for every string value
+// regardless of key or nesting, closes that off at the source rather than
+// relying on every call site remembering to pass the error object.
+const PARAMS_TAIL_PATTERN = /\r?\n?params:\s*[\s\S]*$/i;
+
+function stripParamsTail(value: string): string {
+  return value.replace(PARAMS_TAIL_PATTERN, '');
+}
+
 function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unknown {
-  if (value === null || typeof value !== 'object') return value;
+  if (value === null) return value;
+  if (typeof value === 'string') return stripParamsTail(value);
+  if (typeof value !== 'object') return value;
   if (depth > MAX_DEPTH) return '[MAX_DEPTH]';
   if (seen.has(value)) return '[CIRCULAR]';
   seen.add(value);

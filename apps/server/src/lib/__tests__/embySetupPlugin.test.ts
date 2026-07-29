@@ -374,30 +374,29 @@ describe('runEmbySetup', () => {
       expect(ports.deleteServer).not.toHaveBeenCalled();
     });
 
-    it('CR-9/IMP-06: logs the ORIGINAL cause (message + requestId + claimState), never the raw error object', async () => {
+    it('CR-9/IMP-06: logs the ORIGINAL cause (requestId + claimState + the error object itself)', async () => {
+      const originalError = new Error('db write failed: connection reset');
       const ports = makePorts({
-        insertServer: vi.fn().mockRejectedValue(new Error('db write failed: connection reset')),
+        insertServer: vi.fn().mockRejectedValue(originalError),
       });
 
       await runEmbySetup(BASE_INPUT, ports).catch((e: unknown) => e);
 
+      // NEW-01: the error OBJECT is passed through (not a pre-extracted
+      // `.message` string) so the logger's redaction (logger.ts,
+      // `redactValue`'s Error-shape branch) can rebuild a `DrizzleQueryError`
+      // message safely instead of the call site handing over a raw string
+      // that bypasses that rebuild entirely. Redaction itself is
+      // logger.ts's job (see logger.test.ts); this test only pins that the
+      // real error reaches the logging boundary, not a hand-extracted string.
       expect(ports.logError).toHaveBeenCalledWith(
         expect.stringContaining('Emby setup failed'),
         expect.objectContaining({
           requestId: expect.any(String),
           claimState: 'unclaimed',
-          cause: 'db write failed: connection reset',
+          err: originalError,
         })
       );
-      // Never the raw Error object itself under any key.
-      const calls = (ports.logError as ReturnType<typeof vi.fn>).mock.calls;
-      const matchingCall = calls.find(
-        (call) => typeof call[0] === 'string' && call[0].includes('Emby setup failed')
-      );
-      const loggedContext = matchingCall?.[1] as Record<string, unknown> | undefined;
-      for (const value of Object.values(loggedContext ?? {})) {
-        expect(value).not.toBeInstanceOf(Error);
-      }
     });
 
     it('deletes both the inserted server and the user, in reverse order, when linking the Emby account fails', async () => {

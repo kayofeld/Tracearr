@@ -15,7 +15,7 @@
  *   set-email <username> <new-email>          Change a user's email
  *   list-users                                List users and their login methods
  *   enable-local-login                        Re-enable local username/password login
- *   promote-owner <username>                  Promote a user to owner (ownerless-with-data recovery)
+ *   promote-owner <username> [--confirm]      Promote a user to owner (ownerless-with-data recovery)
  *   list-servers                              List configured servers (ownerless-with-data recovery)
  *   delete-server <id>                        Delete a server row (ownerless-with-data recovery)
  */
@@ -42,7 +42,7 @@ Usage:
   cli set-email <username> <new-email>
   cli list-users
   cli enable-local-login
-  cli promote-owner <username>
+  cli promote-owner <username> [--confirm]
   cli list-servers
   cli delete-server <id>
 `;
@@ -113,12 +113,16 @@ async function runEnableLocalLogin(): Promise<void> {
 }
 
 async function runPromoteOwner(args: string[]): Promise<void> {
-  const [username] = args;
+  const confirm = args.includes('--confirm');
+  const username = args.find((arg) => arg !== '--confirm');
   if (!username) {
-    throw new Error('Usage: cli promote-owner <username>');
+    throw new Error('Usage: cli promote-owner <username> [--confirm]');
   }
-  await promoteOwnerCommand({ username });
-  console.log(`\n${username} has been promoted to owner.`);
+  const result = await promoteOwnerCommand({ username, confirm });
+  console.log(
+    `\n${username} has been promoted to owner (was: role '${result.role}', login ` +
+      `methods: ${result.loginMethods.length > 0 ? result.loginMethods.join(', ') : 'none'}).`
+  );
   console.log(
     `Set a local password with:\n  pnpm --filter @tracearr/server cli reset-password ${username}\n`
   );

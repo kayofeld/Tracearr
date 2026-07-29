@@ -79,8 +79,23 @@
 import dns from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import { HttpClientError, type HttpRequestOptions } from './http.js';
 import { assertSafeProbeUrl, isDeniedProbeAddress, SsrfBlockedError } from './ssrf.js';
+
+/**
+ * NEW-02: hard cap on a probed response body. This module accumulates the
+ * whole response in memory before handing it to the caller (`response.text`/
+ * `.json()`), bounded only by the per-call timeout - on this pre-auth path
+ * (the server the request lands on is client-supplied) an attacker who
+ * controls the answering server can simply keep the connection open and
+ * stream indefinitely for up to `timeoutMs`. 1 MiB is generous for the four
+ * Emby endpoints this module actually probes (System/Info/Public, Users/Me,
+ * Users/AuthenticateByName, the Plex equivalent) - all small JSON documents.
+ * Clamped against THIS constant only, never against a `Content-Length` the
+ * upstream reports (an attacker controls that header too).
+ */
+const MAX_PROBE_RESPONSE_BODY_BYTES = 1024 * 1024;
 
 /** Thrown by the pre-flight checks (steps 1-2): the URL or its resolved address(es) are denied. */
 export class ProbeBlockedError extends Error {
@@ -154,6 +169,38 @@ function combineSignals(...signals: (AbortSignal | undefined)[]): AbortSignal {
 }
 
 /**
+ * NR-2: races `promise` against `signal` and rejects generically the moment
+ * the signal aborts, without waiting for `promise` itself to settle. Used to
+ * bound `dns.lookup` (which accepts no signal of its own) by the same
+ * per-probe timeout + shared budget the rest of the probe already honors.
+ * Rejecting here does NOT cancel the underlying work - only the AWAIT - so a
+ * background `dns.lookup` thread-pool call can still resolve after this
+ * function has already thrown; the caller only cares that its own await
+ * unblocks and the concurrency slot is released.
+ */
+function raceAgainstAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(new ProbeFailedError('UNREACHABLE', 'Could not reach the server.'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new ProbeFailedError('UNREACHABLE', 'Could not reach the server.'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    );
+  });
+}
+
+/**
  * Resolve `hostname` and validate every returned address. Throws
  * `ProbeBlockedError` if resolution fails, returns nothing, or any address
  * fails `isDeniedProbeAddress`.
@@ -198,6 +245,25 @@ async function resolveAndValidate(
  * redirects themselves, so any 3xx status is simply read directly off
  * `res.statusCode` here and reported the same way.
  */
+
+/**
+ * NR-3: tagged on a rejection's error object when the failure happened
+ * BEFORE any response was received (a genuine connection-level failure -
+ * refused/reset/timed-out/aborted at connect). Only a connection-level
+ * failure is eligible for the caller's next-validated-address fallback; a
+ * failure once a response has started arriving (a body read error, or
+ * NEW-02's size clamp) is never retried.
+ */
+type ConnectionLevelError = Error & { isConnectionLevel?: boolean };
+
+function isConnectionLevelError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { isConnectionLevel?: unknown }).isConnectionLevel === true
+  );
+}
+
 function pinnedNodeRequest(
   targetUrl: URL,
   pinnedAddress: { address: string; family: number },
@@ -210,23 +276,54 @@ function pinnedNodeRequest(
     const transport = isHttps ? https : http;
     const port = targetUrl.port ? Number(targetUrl.port) : isHttps ? 443 : 80;
 
+    const headers: Record<string, string> = { ...(init.headers ?? {}), Host: originalHost };
+    // NEW-03: without an explicit Content-Length, Node sends the body as
+    // `Transfer-Encoding: chunked`. `/Users/AuthenticateByName` behind a
+    // reverse proxy is the call that decides whether setup works at all, and
+    // this repo's local Node test server accepts chunked transparently, so
+    // nothing caught this locally. `Buffer.byteLength` (not `.length`) so a
+    // non-ASCII password is not truncated.
+    if (init.body !== undefined) {
+      headers['Content-Length'] = String(Buffer.byteLength(init.body));
+    }
+
+    let responseStarted = false;
+
     const req = transport.request(
       {
         hostname: pinnedAddress.address,
         port,
         path: `${targetUrl.pathname}${targetUrl.search}`,
         method: init.method,
-        headers: { ...(init.headers ?? {}), Host: originalHost },
-        // https only: TLS SNI independent of the connection address, so
-        // certificate validation checks against the ORIGINAL hostname, not
-        // the bare pinned IP (which a normal server certificate would never
-        // cover).
-        ...(isHttps ? { servername: originalHostname } : {}),
+        headers,
+        // https only, and only when the original host is a real DNS name
+        // (NEW-04): handing an IP literal to TLS SNI is forbidden by RFC 6066
+        // - Node warns and may ignore it. Certificate validation is
+        // unaffected either way: `checkServerIdentity` still matches the
+        // connection against `originalHostname` via the request's `host`
+        // fallback (or the certificate's IP subjectAltName when the target
+        // itself is an IP-literal URL), independent of whether `servername`
+        // was explicitly set here.
+        ...(isHttps && !net.isIP(originalHostname) ? { servername: originalHostname } : {}),
       },
       (res) => {
+        responseStarted = true;
         const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        let totalBytes = 0;
+        let overflowed = false;
+        res.on('data', (chunk: Buffer) => {
+          if (overflowed) return;
+          totalBytes += chunk.length;
+          if (totalBytes > MAX_PROBE_RESPONSE_BODY_BYTES) {
+            overflowed = true;
+            req.destroy();
+            rejectPromise(new ProbeFailedError('UNREACHABLE', 'Could not reach the server.'));
+            return;
+          }
+          chunks.push(chunk);
+        });
         res.on('end', () => {
+          if (overflowed) return;
           const status = res.statusCode ?? 0;
           const bodyText = Buffer.concat(chunks).toString('utf8');
           resolvePromise({
@@ -242,7 +339,12 @@ function pinnedNodeRequest(
       }
     );
 
-    req.on('error', rejectPromise);
+    req.on('error', (err: Error) => {
+      if (!responseStarted) {
+        (err as ConnectionLevelError).isConnectionLevel = true;
+      }
+      rejectPromise(err);
+    });
 
     const onAbort = () => {
       req.destroy(init.signal.reason instanceof Error ? init.signal.reason : new Error('Aborted'));
@@ -281,25 +383,41 @@ export async function safeProbeJson<T>(
   const parsed = new URL(url);
   const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
 
-  // Step 2: resolve + validate every address the hostname maps to.
-  const lookupImpl =
-    deps.lookup ?? (async (host: string) => dns.promises.lookup(host, { all: true }));
-  const validatedAddresses = await resolveAndValidate(hostname, lookupImpl);
-
+  // NR-2: build the combined per-probe + shared-budget signal BEFORE
+  // resolving the hostname, and race resolution against it. Previously this
+  // signal was built only AFTER `resolveAndValidate` returned, so a hanging
+  // `dns.lookup` (an attacker-controlled resolver on this pre-auth path)
+  // observed NEITHER bound and could hold one of only two concurrency slots
+  // for a whole OS resolver retry cycle.
   const timeoutSignal = AbortSignal.timeout(opts.timeoutMs);
   const signal = combineSignals(timeoutSignal, opts.signal);
 
+  // Step 2: resolve + validate every address the hostname maps to, bounded by
+  // `signal` above. Racing (rather than passing the signal INTO `lookup`,
+  // which `dns.promises.lookup` does not accept) rejects the AWAIT the
+  // moment the bound fires - releasing the caller's concurrency slot - even
+  // though the underlying `dns.lookup` thread-pool work itself keeps running
+  // in the background and cannot be truly cancelled.
+  const lookupImpl =
+    deps.lookup ?? (async (host: string) => dns.promises.lookup(host, { all: true }));
+  const validatedAddresses = await raceAgainstAbort(
+    resolveAndValidate(hostname, lookupImpl),
+    signal
+  );
+
   const fetchImpl = deps.fetchImpl;
 
-  // Step 3 (spec §8.2/§8.3, IMP-02 fix): pin the connection to the address
+  // Step 3 (spec §8.2/§8.3, IMP-02 fix): pin the connection to an address
   // already validated above - no second DNS query at connect time, so there
   // is no TOCTOU gap between the check and the connection actually made. See
   // the file header for why this uses `pinnedNodeRequest` (real `node:http`/
   // `node:https`) rather than the standard `fetch()` API when no test
   // `fetchImpl` is injected.
-  let response: MinimalResponse;
-  try {
-    if (fetchImpl) {
+  let response: MinimalResponse | undefined;
+  let lastErr: unknown;
+
+  if (fetchImpl) {
+    try {
       response = await fetchImpl(url, {
         method: opts.method ?? 'GET',
         headers: opts.headers,
@@ -309,16 +427,38 @@ export async function safeProbeJson<T>(
         redirect: 'manual',
         signal,
       });
-    } else {
-      response = await pinnedNodeRequest(parsed, validatedAddresses[0]!, parsed.host, hostname, {
-        method: opts.method ?? 'GET',
-        headers: opts.headers,
-        body: opts.body,
-        signal,
-      });
+    } catch (err) {
+      lastErr = err;
     }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unable to reach server';
+  } else {
+    // NR-3: a CONNECTION-LEVEL failure (refused/reset/timed-out before any
+    // response arrived) on one validated address falls back to trying the
+    // next one - `resolveAndValidate` pins to `validatedAddresses[0]` only,
+    // so a dual-stack host whose first-sorted address happens to be
+    // unreachable would otherwise report a false SERVER_UNREACHABLE even
+    // though `/emby/login`'s plain, unpinned `fetch` (which lets the OS pick)
+    // would have succeeded. A failure AFTER a response was already received
+    // (a bad body, NEW-02's size clamp) is never retried - only the connect
+    // step itself is considered unreliable enough to route around.
+    for (let i = 0; i < validatedAddresses.length; i++) {
+      try {
+        response = await pinnedNodeRequest(parsed, validatedAddresses[i]!, parsed.host, hostname, {
+          method: opts.method ?? 'GET',
+          headers: opts.headers,
+          body: opts.body,
+          signal,
+        });
+        break;
+      } catch (err) {
+        lastErr = err;
+        const hasMoreAddresses = i < validatedAddresses.length - 1;
+        if (!isConnectionLevelError(err) || !hasMoreAddresses) break;
+      }
+    }
+  }
+
+  if (!response) {
+    const message = lastErr instanceof Error ? lastErr.message : 'Unable to reach server';
     opts.onUpstreamError?.({ statusText: message });
     throw new ProbeFailedError('UNREACHABLE', 'Could not reach the server.');
   }

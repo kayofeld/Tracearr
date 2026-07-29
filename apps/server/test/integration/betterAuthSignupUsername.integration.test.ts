@@ -169,6 +169,7 @@ describe('better auth email-optional sign-up (integration)', () => {
       payload: { name: 'Coexist Owner', username: 'coexistowner', password: 'CoexistOwner!123' },
     });
     expect(signUp.statusCode).toBe(200);
+    const ownerId = signUp.json().user.id as string;
 
     // A second email-less identity, inserted the way a media-server sync
     // would (userService.createUser/syncUserFromMediaServer) - a distinct
@@ -188,5 +189,18 @@ describe('better auth email-optional sign-up (integration)', () => {
     // accidentally treat "no email" as the literal value ''.
     const emptyStringMatches = await db.select().from(users).where(eq(users.email, ''));
     expect(emptyStringMatches).toHaveLength(0);
+
+    // NEW-06/NR-6: with the email-less MEMBER row now present, the owner
+    // must still be able to sign in by username - two NULL-email rows
+    // coexisting must never confuse the sign-in lookup into ambiguity or a
+    // false rejection.
+    const signIn = await app.inject({
+      method: 'POST',
+      url: `${API_BASE_PATH}/auth/sign-in/username`,
+      headers: { 'content-type': 'application/json' },
+      payload: { username: 'coexistowner', password: 'CoexistOwner!123' },
+    });
+    expect(signIn.statusCode).toBe(200);
+    expect(signIn.json().user.id).toBe(ownerId);
   });
 });

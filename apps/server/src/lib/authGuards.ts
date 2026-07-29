@@ -32,7 +32,7 @@ export const OWNERLESS_INSTANCE_RECOVERY_MESSAGE =
   'This instance holds existing data but has no owner. Setup is disabled. ' +
   'Recover from the server console: if a non-owner user row still exists, run ' +
   '`pnpm --filter @tracearr/server cli promote-owner <username>` and then `pnpm reset-password`; ' +
-  'if no user row exists at all (only a leftover server row - CR-5), run ' +
+  'if no user row exists at all (only a leftover server row), run ' +
   '`pnpm --filter @tracearr/server cli list-servers` and `cli delete-server <id>` to return the ' +
   'instance to unclaimed. Run `cli list-users` first to see which case applies.';
 

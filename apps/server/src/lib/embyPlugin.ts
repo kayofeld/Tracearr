@@ -112,9 +112,12 @@ export class AmbiguousEmbyServerError extends Error {
  * authentication authorities and, combined with an ownerless instance, is
  * exactly the bypass the NOTE above exists to prevent - so ambiguity must
  * fail closed, never silently resolve to whichever row Postgres happens to
- * return first. Exported (not just the URL-only wrapper below) because
- * embySetupPlugin.ts's ownerless-with-data recovery branch needs the row id
- * too, to adopt/update it rather than insert a second row.
+ * return first. Exported (not just the URL-only wrapper below) so the
+ * ambiguity-detection behavior itself is directly unit-testable
+ * (embyPlugin.test.ts) without going through /emby/login. There is no
+ * network path that adopts/updates this row - an `ownerless-with-data`
+ * instance refuses every claim attempt unconditionally (CR-3/IMP-01,
+ * embySetupPlugin.ts) and recovers only via the console CLI.
  */
 export async function resolveConfiguredEmbyServerRow(): Promise<{
   id: string;

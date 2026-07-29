@@ -364,14 +364,24 @@ export async function runEmbySetup(
     // was visible only if compensation ALSO failed (the "INSTANCE REQUIRES
     // MANUAL RECOVERY" logs further down cover only THAT failure) - the
     // common case of a clean compensation left no trace of why setup failed
-    // in the first place. Message + requestId + claim state only - never the
-    // raw error object (IMP-12's logger redaction protects context values
-    // generally, but there is no reason to hand the whole object over here
-    // when the message is all that is needed for diagnosis).
+    // in the first place.
+    //
+    // NEW-01: this used to log `err.message` as a plain string. For a
+    // `DrizzleQueryError` (drizzle-orm/errors.js), the message text itself is
+    // `Failed query: <sql>\nparams: <params>` - the bound query parameters
+    // (insertServer binds the operator's Emby admin API key, linkEmbyAccount
+    // binds the Emby access token) live INSIDE that string, not only on the
+    // separate `.params` property. Passing a bare string bypassed the
+    // logger's Error-shape rebuild entirely (`redactValue` only rebuilt the
+    // message when handed the Error object), so the raw secret-bearing text
+    // reached stdout on any driver-level failure here. Passing the error
+    // object itself lets `redactValue` do the rebuild (and now also strips
+    // the same tail from any plain string, closing the gap for good - see
+    // logger.ts).
     ports.logError('Emby setup failed - compensating', {
       requestId,
       claimState: state,
-      cause: err instanceof Error ? err.message : String(err),
+      err,
     });
 
     // Compensation (design §7.3): reverse order. Compensation failures never

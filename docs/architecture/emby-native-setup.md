@@ -15,16 +15,16 @@ survived (separate endpoint, refined invariant, two credentials, compensation ov
 transaction, SR-02 closed at the database). Four stated controls did not actually hold. This
 revision resolves them and corrects four factual errors.
 
-| Finding                                                    | Resolution                                                                                                                                        | Section     |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| SEC-01 the gate is "no owner row", not "fresh instance"    | Three-state instance model; setup allowed only when _unclaimed_; a recovery state that refuses the client URL and demands a claim code            | 3, 6        |
-| SEC-02 a second `emby` row makes login nondeterministic    | Deterministic, fail-closed resolution in `/emby/login`; setup never inserts a second row; two designs depending on owner decision 3               | 4           |
-| SEC-03 SSRF control does not survive a deliberate attacker | New `safeProbe` module: manual redirects, hostname resolution, connect-time re-validation, widened deny list, no upstream status in client errors | 8           |
-| SEC-04 the SR-02 index may silently never exist            | Moved to a drizzle migration (aborts startup on failure), `(role)` form, plus a post-migration existence assertion                                | 7.1         |
-| SEC-05 the `user.create` hook is not the funnel            | Sentence corrected (the funnel is the database); violation mapped to 403 at both Plex sites; `/plex/connect` reordered                            | 7.2         |
-| SEC-06 duplicate-URL 409 can make setup un-retryable       | Resolved by construction: a leftover server row puts the instance in the recovery state, which adopts the row                                     | 6.3, 7.3    |
-| SEC-07 rate limiting enabled but unbounded here            | Mandatory `customRules` entry plus a concurrency cap and a total outbound budget, all constants                                                   | 9           |
-| SEC-09/10/11                                               | URL canonicalization and userinfo rejection; logger redaction plus a test; T7 wording corrected                                                   | 8.4, 10, 11 |
+| Finding                                                    | Resolution                                                                                                                                                                        | Section     |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| SEC-01 the gate is "no owner row", not "fresh instance"    | Three-state instance model; setup allowed only when _unclaimed_; a recovery state that refuses the client URL and demands a claim code                                            | 3, 6        |
+| SEC-02 a second `emby` row makes login nondeterministic    | Deterministic, fail-closed resolution in `/emby/login`; setup never inserts a second row; two designs depending on owner decision 3                                               | 4           |
+| SEC-03 SSRF control does not survive a deliberate attacker | New `safeProbe` module: manual redirects, hostname resolution, connect-time re-validation, widened deny list, no upstream status in client errors                                 | 8           |
+| SEC-04 the SR-02 index may silently never exist            | Moved to a drizzle migration (aborts startup on failure), `(role)` form, plus a post-migration existence assertion                                                                | 7.1         |
+| SEC-05 the `user.create` hook is not the funnel            | Sentence corrected (the funnel is the database); violation mapped to 403 at both Plex sites; `/plex/connect` reordered                                                            | 7.2         |
+| SEC-06 duplicate-URL 409 can make setup un-retryable       | The 409 is gone. A leftover server row puts the instance in the recovery state, which is refused on the network and recovered from the console (`list-servers` + `delete-server`) | 6.3, 7.3    |
+| SEC-07 rate limiting enabled but unbounded here            | Mandatory `customRules` entry plus a concurrency cap and a total outbound budget, all constants                                                                                   | 9           |
+| SEC-09/10/11                                               | URL canonicalization and userinfo rejection; logger redaction plus a test; T7 wording corrected                                                                                   | 8.4, 10, 11 |
 
 Corrections to statements revision 1 made as fact are in section 12.
 
@@ -89,9 +89,9 @@ So the refined invariant now names the state precisely, and the state has three 
 
 > A client-supplied Emby URL is accepted by exactly one endpoint (`/emby/setup`), and only while the
 > instance is **unclaimed**, meaning it holds no `users`, no `auth_accounts` and no `servers` rows at
-> all. On an instance that is ownerless but holds data, `/emby/setup` ignores the client URL entirely
-> and resolves it server-side exactly as `/emby/login` does, and requires the claim code
-> unconditionally. Every authentication that can grant a session for an existing owner
+> all. On an instance that is ownerless but holds data, `/emby/setup` refuses outright, before any
+> outbound request: that state is recoverable only from the console, never from the network. Every
+> authentication that can grant a session for an existing owner
 > (`/emby/login`) resolves the URL server-side, never from the client, and fails closed when that
 > resolution is ambiguous. Once an owner exists, `/emby/setup` returns 403 before reading the URL,
 > before any outbound request, permanently.
@@ -137,14 +137,13 @@ user-removal surface (the plugin is registered with `adminRoles: ['owner']`, `au
 partial restore; a support intervention; or a compensation failure in this very flow (section 7.3).
 In this state:
 
-1. The claim code is **required unconditionally**, whatever the default. If no claim code is
-   configured at all, the endpoint refuses with an operator-facing message and logs at error level.
-   The instance cannot be claimed from the network until the operator sets `CLAIM_CODE` and restarts,
-   or recovers through the CLI.
-2. The client-supplied `serverUrl` is **ignored**. The URL is resolved server-side through the same
-   deterministic resolver `/emby/login` uses (section 4). If no `emby` server row exists, or if
-   resolution is ambiguous, the endpoint refuses with the operator-facing message and performs no
-   outbound request.
+1. The endpoint **refuses unconditionally**, whatever the claim code default, with an operator-facing
+   message naming the console remedy, and logs `OWNERLESS_INSTANCE_WITH_DATA` at error level. There is
+   no claim-code-gated network path into this state: the earlier design had one, and it could never
+   have succeeded (see the correction note at the top of this document).
+2. The client-supplied `serverUrl` is **never read** in this state. The refusal happens before URL
+   canonicalisation, before DNS resolution, and before any outbound request - so no credential the
+   caller submitted is relayed anywhere.
 3. The supplied `apiKey` may update the existing row's token, but only after it verifies as admin
    against the resolved URL. It never changes the row's URL.
 
@@ -188,7 +187,8 @@ never silently picks. This is the one behavioral change to `embyPlugin.ts` in th
 file's NOTE and its no-owner branch are otherwise unchanged.
 
 **4.2 Setup never creates a second `emby` row.** In `unclaimed` there are no server rows by
-definition, so the insert is unambiguous. In `ownerless-with-data` the existing row is adopted, never
+definition, so the insert is unambiguous. In `ownerless-with-data` no row is created or updated at all -
+the request is refused before any write; the operator clears the leftover row from the console, never
 duplicated (section 3). There is no code path in this design that inserts an `emby` row when one
 already exists.
 
@@ -206,7 +206,7 @@ whichever the owner picks:
   authority becomes explicit: add `servers.is_auth_authority boolean not null default false` with
   `CREATE UNIQUE INDEX servers_single_auth_authority ON servers (is_auth_authority) WHERE
 is_auth_authority;`. `/emby/login` resolves the authority row and fails closed when none is set.
-  Setup sets the flag on the row it creates or adopts. `POST /servers` gains a way to move the flag,
+  Setup sets the flag on the row it creates (it never adopts one - see 6.3). `POST /servers` gains a way to move the flag,
   which is an owner-authenticated operation. This is more surface, and it is only worth building if
   the answer to decision 3 is yes.
 
@@ -300,9 +300,9 @@ copy. No server-side error string ever contains an upstream status, status text,
    forced `role: 'owner'`, and the username plugin's normalization and uniqueness. No `email`
    (column nullable) and no `passwordHash`, which is the point of the feature.
    b. Insert the `servers` row: `{ name: serverName ?? 'Emby', type: 'emby', url: canonicalUrl,
-   token: apiKey, color: pickServerColor(...) }`, the same shape `POST /servers` uses.
+token: apiKey, color: pickServerColor(...) }`, the same shape `POST /servers` uses.
    c. Insert the `auth_accounts` link `{ providerId: 'emby', accountId: authResult.id, userId,
-   accessToken: authResult.token }`, the same insert `embyPlugin.ts` performs on first bind.
+accessToken: authResult.token }`, the same insert `embyPlugin.ts` performs on first bind.
    d. `internalAdapter.createSession` plus `setSessionCookie`, through the same helper shape as
    `createEmbySession`.
 8. **Response.** `{ authorized: true, user: { id, username, role: 'owner' }, server: { id, name, url } }`
@@ -460,7 +460,7 @@ So: compensation, ordered so the contended step is first.
 1. `createUser` first, because it is the race gate. If it loses, nothing else exists yet.
 2. Then the `servers` write, the `auth_accounts` link and the session, each wrapped so that on any
    failure the handler deletes in reverse order whatever it created: the `servers` row if it was
-   _inserted_ by this attempt (never a row it adopted), then the user through
+   _inserted_ by this attempt, then the user through
    `internalAdapter.deleteUser`, which cascades sessions and `auth_accounts` per the `signupPlugin.ts`
    precedent. Then rethrow as 500 `SETUP_FAILED`. Compensation failures never mask the original error.
 
@@ -475,7 +475,7 @@ section 7.4), `pnpm reset-password` (`apps/server/scripts/reset-password.ts`).
 
 **Retryability.** Revision 1 guarded duplicate URLs with a 409, and the review showed that a leftover
 server row then blocks every retry permanently. Under the state model that cannot happen: a leftover
-`servers` row puts the instance in `ownerless-with-data`, whose branch adopts the existing row
+`servers` row puts the instance in `ownerless-with-data`, which is refused on every network path
 (section 6.3). The 409 is gone. The cost is that retry in that state requires a claim code, so an
 instance with no `CLAIM_CODE` configured needs the operator to set one and restart. That coupling is
 a direct argument for owner decision 1, and it is stated rather than hidden.
@@ -831,7 +831,8 @@ Grouped by the finding each case exists to prove. Cases marked (new) come from t
 
 - With two `emby` rows, `/emby/login` fails closed rather than picking one (new). Under design A, the
   second insert is rejected by `servers_single_emby` instead.
-- Setup on an ownerless-with-data instance adopts the existing `emby` row and never creates a second.
+- Setup on an ownerless-with-data instance refuses with `INSTANCE_RECOVERY` before any outbound request,
+  and creates or updates nothing.
 
 **Outbound probes (SEC-03)**
 
@@ -868,7 +869,8 @@ Grouped by the finding each case exists to prove. Cases marked (new) come from t
 - Fault injection at the server insert, the link insert and the session create: the instance is
   unclaimed or in the recovery state as appropriate, and a retry succeeds.
 - A compensation failure that leaves a `servers` row logs `INSTANCE REQUIRES MANUAL RECOVERY`, and a
-  retry with the claim code adopts that row rather than returning a conflict (new).
+  retry is refused on the network; the operator clears the leftover row with `delete-server` and
+  retries setup normally (new).
 
 **Bounds (SEC-07)**
 

@@ -306,8 +306,22 @@ export async function enableLocalLoginCommand(): Promise<void> {
  * the users_single_owner partial unique index at the update itself, so a
  * race against a concurrent claim (e.g. a browser claim landing between the
  * check and this write) cannot produce two owners either.
+ *
+ * Promote-owner safety (review finding): this command matches on username
+ * only, so on a real `ownerless-with-data` instance it would silently
+ * promote whatever row that username happens to belong to - including a
+ * synced library member row (`role: 'member'`) that a media-server sync
+ * created for someone who is not the operator running this CLI. Callers now
+ * get the target's current role and login methods printed BEFORE the write,
+ * and must pass `confirm: true` when the role is anything other than
+ * `'owner'`/`'admin'` (i.e. `'member'` or `'pending'`) - the two roles this
+ * command actually exists to fix. `EACCES`-style silent success on the wrong
+ * account is exactly the failure this guards against.
  */
-export async function promoteOwnerCommand(opts: { username: string }): Promise<void> {
+export async function promoteOwnerCommand(opts: {
+  username: string;
+  confirm?: boolean;
+}): Promise<{ role: string; loginMethods: string[] }> {
   const [existingOwner] = await db
     .select({ id: users.id })
     .from(users)
@@ -335,6 +349,23 @@ export async function promoteOwnerCommand(opts: { username: string }): Promise<v
     throw new Error(`No user named ${opts.username}`);
   }
 
+  const loginMethods = (
+    await db
+      .select({ providerId: authAccounts.providerId })
+      .from(authAccounts)
+      .where(eq(authAccounts.userId, user.id))
+  ).map((a: { providerId: string }) => a.providerId);
+
+  if (user.role !== 'owner' && user.role !== 'admin' && !opts.confirm) {
+    throw new Error(
+      `${opts.username} currently has role '${user.role}' (login methods: ` +
+        `${loginMethods.length > 0 ? loginMethods.join(', ') : 'none'}). This looks like a synced ` +
+        'library member, not a returning operator - promoting the wrong account hands owner access ' +
+        'to whoever controls that media-server identity. If this IS the operator recovering their ' +
+        'own instance, re-run with confirm: true (`cli promote-owner <username> --confirm`) to proceed.'
+    );
+  }
+
   try {
     await db
       .update(users)
@@ -348,6 +379,8 @@ export async function promoteOwnerCommand(opts: { username: string }): Promise<v
     }
     throw error;
   }
+
+  return { role: user.role, loginMethods };
 }
 
 export interface ServerSummary {
