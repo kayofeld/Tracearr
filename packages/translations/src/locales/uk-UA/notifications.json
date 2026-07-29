@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Не вдалося оновити налаштування",
       "streamTerminateFailed": "Не вдалося завершити потік",
       "trustScoresResetFailed": "Не вдалося скинути рейтинг довіри",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Тест Webhook не вдався"
@@ -270,6 +272,12 @@
         "message_one": "Користувача {{count}} скинуто до 100",
         "message_other": "Змінено на 100 користувачів {{count}}",
         "title": "Довіряти кільця скинуті"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

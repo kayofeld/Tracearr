@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Impossibile aggiornare le impostazioni",
       "streamTerminateFailed": "Terminazione dello stream non riuscita",
       "trustScoresResetFailed": "Impossibile ripristinare i punteggi di fiducia",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Test Webhook fallito"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} utente resettato a 100",
         "message_other": "{{count}} utenti reimpostati a 100",
         "title": "Resetta Punteggi Di Fiducia"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

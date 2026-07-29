@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Aktualizace nastavení se nezdařila",
       "streamTerminateFailed": "Ukončení vysílání se nezdařilo",
       "trustScoresResetFailed": "Obnovení důvěryhodnosti se nezdařilo",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Test Webhooku se nezdařil"
@@ -270,6 +272,12 @@
         "message_one": "Uživatel {{count}} byl resetován na 100",
         "message_other": "{{count}} uživatelé resetovali na 100",
         "title": "Resetování důvěryhodných skóre"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

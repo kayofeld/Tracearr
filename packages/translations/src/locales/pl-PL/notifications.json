@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Nie udało się zaktualizować ustawień",
       "streamTerminateFailed": "Nie udało się zakończyć streamu",
       "trustScoresResetFailed": "Nie udało się zresetować punktów zaufania",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Test webhooka nie powiódł się"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} użytkownik zresetowany do 100",
         "message_other": "{{count}} użytkownicy zresetowani do 100",
         "title": "Zresetuj wyniki zaufania"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Instellingen bijwerken mislukt",
       "streamTerminateFailed": "Stream afbreken mislukt",
       "trustScoresResetFailed": "Vertrouwensscores herstellen mislukt",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Webhook-test mislukt"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} gebruiker hersteld naar 100",
         "message_other": "{{count}} gebruikers hersteld naar 100",
         "title": "Vertrouwensscores hersteld"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",
