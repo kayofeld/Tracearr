@@ -17,6 +17,7 @@ export const {
   authAccounts,
   authSessions,
   plexAccounts,
+  servers,
   hashPassword,
   setSetting,
   getSetting,
@@ -282,4 +283,143 @@ export async function listUsersCommand(): Promise<UserSummary[]> {
 /** Re-enables local username/password login - recovery when an OIDC misconfig locks the UI. */
 export async function enableLocalLoginCommand(): Promise<void> {
   await setSetting('localLoginEnabled', true);
+}
+
+/**
+ * Promotes an existing user row to owner. This is the CLI-only recovery path
+ * for an `ownerless-with-data` instance
+ * (docs/architecture/emby-native-setup.md §3, §7.4): /emby/setup,
+ * /sign-up/username and OIDC first-signup all deliberately refuse to let
+ * anyone claim such an instance from the network (a deleted owner, a partial
+ * restore, or a compensation failure can leave one), so without this command
+ * that refusal is a permanent brick rather than a recovery path.
+ *
+ * CR-5: `ownerless-with-data` covers a wider set of surviving artifacts than
+ * "a user row with no owner role" - a setup compensation that deletes the
+ * created user but fails to delete the inserted server row leaves ZERO user
+ * rows and one orphaned `servers` row. This command cannot recover that case
+ * (there is no username to promote); the error message below names the
+ * actual remedy (`list-servers` / `delete-server <id>`) rather than repeating
+ * "No user named" with no next step.
+ *
+ * Refuses if an owner already exists - checked up front, and re-checked by
+ * the users_single_owner partial unique index at the update itself, so a
+ * race against a concurrent claim (e.g. a browser claim landing between the
+ * check and this write) cannot produce two owners either.
+ *
+ * Promote-owner safety (review finding): this command matches on username
+ * only, so on a real `ownerless-with-data` instance it would silently
+ * promote whatever row that username happens to belong to - including a
+ * synced library member row (`role: 'member'`) that a media-server sync
+ * created for someone who is not the operator running this CLI. Callers now
+ * get the target's current role and login methods printed BEFORE the write,
+ * and must pass `confirm: true` when the role is anything other than
+ * `'owner'`/`'admin'` (i.e. `'member'` or `'pending'`) - the two roles this
+ * command actually exists to fix. `EACCES`-style silent success on the wrong
+ * account is exactly the failure this guards against.
+ */
+export async function promoteOwnerCommand(opts: {
+  username: string;
+  confirm?: boolean;
+}): Promise<{ role: string; loginMethods: string[] }> {
+  const [existingOwner] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.role, 'owner'))
+    .limit(1);
+  if (existingOwner) {
+    throw new Error(
+      'This Tracearr instance already has an owner. Refusing to promote another user.'
+    );
+  }
+
+  const user = await findUserByUsername(opts.username);
+  if (!user) {
+    const [anyUser] = await db.select({ id: users.id }).from(users).limit(1);
+    if (!anyUser) {
+      throw new Error(
+        `No user named ${opts.username}, and no user rows exist at all on this instance ` +
+          '(a previous setup attempt likely deleted the owner user during compensation while an ' +
+          'orphaned server row survived). There is no user to promote - run ' +
+          '`pnpm --filter @tracearr/server cli list-servers` to see the surviving server(s), then ' +
+          '`cli delete-server <id>` on each to return the instance to `unclaimed` so it can be set ' +
+          'up again normally.'
+      );
+    }
+    throw new Error(`No user named ${opts.username}`);
+  }
+
+  const loginMethods = (
+    await db
+      .select({ providerId: authAccounts.providerId })
+      .from(authAccounts)
+      .where(eq(authAccounts.userId, user.id))
+  ).map((a: { providerId: string }) => a.providerId);
+
+  if (user.role !== 'owner' && user.role !== 'admin' && !opts.confirm) {
+    throw new Error(
+      `${opts.username} currently has role '${user.role}' (login methods: ` +
+        `${loginMethods.length > 0 ? loginMethods.join(', ') : 'none'}). This looks like a synced ` +
+        'library member, not a returning operator - promoting the wrong account hands owner access ' +
+        'to whoever controls that media-server identity. If this IS the operator recovering their ' +
+        'own instance, re-run with confirm: true (`cli promote-owner <username> --confirm`) to proceed.'
+    );
+  }
+
+  try {
+    await db
+      .update(users)
+      .set({ role: 'owner', updatedAt: new Date() })
+      .where(eq(users.id, user.id));
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new Error(
+        'Another request already created an owner while this command was running. Refusing to promote.'
+      );
+    }
+    throw error;
+  }
+
+  return { role: user.role, loginMethods };
+}
+
+export interface ServerSummary {
+  id: string;
+  name: string;
+  type: string;
+  url: string;
+}
+
+/**
+ * Lists every configured server row - the counterpart recovery step to
+ * `promote-owner` (CR-5): when a failed Emby setup's compensation deletes the
+ * created user but fails to delete the inserted server, the surviving
+ * artifact is a `servers` row, not a user, and `delete-server <id>` below is
+ * the actual remedy.
+ */
+export async function listServersCommand(): Promise<ServerSummary[]> {
+  return db
+    .select({ id: servers.id, name: servers.name, type: servers.type, url: servers.url })
+    .from(servers)
+    .orderBy(asc(servers.createdAt));
+}
+
+/**
+ * Deletes a server row by id (console-only recovery, CR-5). Mirrors
+ * `DELETE /servers/:id` (routes/servers.ts): a plain delete, related rows
+ * cascade at the database. Deleting the last surviving `servers`/`users`/
+ * `auth_accounts` row on an `ownerless-with-data` instance returns it to
+ * `unclaimed` (authGuards.ts's `getInstanceClaimState`), so it can go through
+ * /emby/setup or /sign-up/username again normally - the one case
+ * `promote-owner` cannot recover because no user row exists to promote.
+ */
+export async function deleteServerCommand(opts: { id: string }): Promise<void> {
+  const [server] = await db
+    .select({ id: servers.id })
+    .from(servers)
+    .where(eq(servers.id, opts.id))
+    .limit(1);
+  if (!server) throw new Error(`No server found with id ${opts.id}`);
+
+  await db.delete(servers).where(eq(servers.id, opts.id));
 }

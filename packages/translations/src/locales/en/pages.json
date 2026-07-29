@@ -46,7 +46,29 @@
     "claimCodeLabel": "Claim Code",
     "claimCodeHint": "The claim code is printed in the server logs when the container starts",
     "validateClaimCode": "Validate Claim Code",
-    "claimCodeSecurityNote": "This security measure ensures only authorized users can complete first-time setup"
+    "claimCodeSecurityNote": "This security measure ensures only authorized users can complete first-time setup",
+    "embySetupTab": "Set up with Emby",
+    "localSetupTab": "Create local account",
+    "embySetupTitle": "Set up with your Emby account",
+    "embySetupDescription": "Connect your Emby server and sign in as its admin to become the Tracearr owner.",
+    "embySetupServerNameOptionalLabel": "Server name (optional)",
+    "completeEmbySetup": "Complete Emby setup",
+    "embySetupWarningTitle": "Emby becomes your only way to sign in",
+    "embySetupWarningBody": "This account has no separate password. If Emby ever becomes unreachable, an administrator has to run `pnpm reset-password` from the server console to regain access - there's no in-app way to set one later.",
+    "embySetupNote": "Your Emby server is connected. You can add more servers from Settings.",
+    "embySetupError": {
+      "claimCode": "The claim code is missing or incorrect.",
+      "instanceOwned": "This instance already has an owner. Refresh the page and sign in instead.",
+      "instanceRecovery": "This instance holds existing data but has no owner. Setup from the browser is disabled - ask an administrator to recover it from the server console.",
+      "urlRejected": "That server address isn't allowed. Enter your Emby server's direct URL with no path, credentials, or query string.",
+      "serverUnreachable": "Tracearr couldn't reach that Emby server. Check the URL and make sure Emby is running.",
+      "keyRejected": "Emby rejected that API key. Double-check it and try again.",
+      "keyNotAdmin": "That API key doesn't belong to an Emby administrator.",
+      "badCredentials": "Incorrect Emby username or password.",
+      "notEmbyAdmin": "This Emby account isn't an administrator, so it can't become the Tracearr owner.",
+      "busy": "Tracearr is already processing another setup attempt. Wait a moment and try again.",
+      "setupFailed": "Setup couldn't be completed. Please try again."
+    }
   },
   "dashboard": {
     "alerts": "Alerts",

@@ -333,6 +333,18 @@ export const API_BASE_PATH = `/api/${API_VERSION}`;
 //   - Login.tsx posts directly to this path via authClient.$fetch.
 export const SIGN_UP_USERNAME_PATH = '/sign-up/username';
 
+// Emby-native first-run setup endpoint (server: embySetupPlugin.ts, registered
+// as a sibling to embyPlugin() and signupPlugin()). Single source of truth for
+// every side of this path so it can never drift out of sync:
+//   - auth.ts's claim-code hook matches on `ctx.path === EMBY_SETUP_PATH` - a
+//     renamed copy there fails the claim-code gate OPEN (silently stops
+//     enforcing it on this endpoint), not loud, so it must never be a second
+//     hand-typed literal.
+//   - auth.ts's rateLimit.customRules is keyed on this same constant.
+//   - embySetupPlugin.ts's createAuthEndpoint(EMBY_SETUP_PATH, ...).
+//   - Login.tsx posts directly to this path via authClient.$fetch.
+export const EMBY_SETUP_PATH = '/emby/setup';
+
 // Better Auth Emby credential-login endpoint (server: embyPlugin.ts).
 // Single source of truth for every consumer of this path, so it can never
 // drift out of sync (security review F4 - a renamed copy at any one site

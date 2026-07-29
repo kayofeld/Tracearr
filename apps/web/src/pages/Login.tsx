@@ -14,9 +14,11 @@ import {
 import { MediaServerIcon } from '@/components/icons/MediaServerIcon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
@@ -28,8 +30,54 @@ import {
   EMBY_LOGIN_FAILURE_REASONS,
   type SetupStatus,
 } from '@tracearr/shared';
+// EMBY_SETUP_PATH / EmbySetupErrorCode are re-exported from '@tracearr/shared' by this module,
+// which also carries web-only presentation helpers (error-code -> field-group mapping) that are
+// not part of the frozen contract itself. See apps/web/src/lib/embySetupContract.ts.
+import {
+  EMBY_SETUP_PATH,
+  EMBY_SETUP_ERROR_GROUP,
+  toEmbySetupErrorCode,
+  type EmbySetupErrorCode,
+} from '@/lib/embySetupContract';
 import { LogoIcon } from '@/components/brand/Logo';
 import { cn } from '@/lib/utils';
+
+// A narrowed callable shape for `t()` - the real TFunction's generic overloads make it awkward
+// to pass around as a parameter type (mirrors the same narrowing used in OmbiSettings.tsx,
+// NeverWatched.tsx, and SeerrSettings.tsx).
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * One message per `EmbySetupErrorCode` member, exhaustively. Adding a member to the union without
+ * adding a case here is a compile error rather than a silently blank error box (design doc section
+ * 14, item 3, mirror 2). Copy is fixed client-side per code - never the server's prose (SEC-03c).
+ */
+function embySetupErrorMessage(t: Translate, code: EmbySetupErrorCode): string {
+  switch (code) {
+    case 'CLAIM_CODE':
+      return t('pages:login.embySetupError.claimCode');
+    case 'INSTANCE_OWNED':
+      return t('pages:login.embySetupError.instanceOwned');
+    case 'INSTANCE_RECOVERY':
+      return t('pages:login.embySetupError.instanceRecovery');
+    case 'URL_REJECTED':
+      return t('pages:login.embySetupError.urlRejected');
+    case 'SERVER_UNREACHABLE':
+      return t('pages:login.embySetupError.serverUnreachable');
+    case 'KEY_REJECTED':
+      return t('pages:login.embySetupError.keyRejected');
+    case 'KEY_NOT_ADMIN':
+      return t('pages:login.embySetupError.keyNotAdmin');
+    case 'BAD_CREDENTIALS':
+      return t('pages:login.embySetupError.badCredentials');
+    case 'NOT_EMBY_ADMIN':
+      return t('pages:login.embySetupError.notEmbyAdmin');
+    case 'BUSY':
+      return t('pages:login.embySetupError.busy');
+    case 'SETUP_FAILED':
+      return t('pages:login.embySetupError.setupFailed');
+  }
+}
 
 const DEFAULT_AUTH_METHODS: SetupStatus['authMethods'] = {
   local: true,
@@ -38,11 +86,6 @@ const DEFAULT_AUTH_METHODS: SetupStatus['authMethods'] = {
   oidc: false,
   oidcProviderName: null,
 };
-
-// A narrowed callable shape for `t()` - the real TFunction's generic overloads
-// make it awkward to pass around as a parameter type (mirrors the same
-// narrowing used in OmbiSettings.tsx / NeverWatched.tsx / SeerrSettings.tsx).
-type Translate = (key: string) => string;
 
 // Our own copy per POST /emby/login failure `code` (EmbyLoginFailureReason,
 // @tracearr/shared) - never string-match the server's prose. `INVALID_CREDENTIALS`
@@ -93,9 +136,9 @@ export function Login() {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { t } = useTranslation(['pages', 'common', 'settings', 'notifications']);
-  // Narrowed shape used by the module-level resolveEmbyLoginErrorMessage - the
-  // real TFunction's overloaded generics don't structurally reduce to
-  // `Translate` cleanly (mirrors OmbiSettings.tsx / NeverWatched.tsx / SeerrSettings.tsx).
+  // Narrowed shape used by resolveEmbyLoginErrorMessage/embySetupErrorMessage - the real
+  // TFunction's overloaded generics don't structurally reduce to `Translate` cleanly (mirrors
+  // OmbiSettings.tsx / NeverWatched.tsx / SeerrSettings.tsx).
   const translate = t as unknown as Translate;
   const { isAuthenticated, isLoading: authLoading } = useAuth();
 
@@ -129,6 +172,22 @@ export function Login() {
   const [embyPassword, setEmbyPassword] = useState('');
   const [embyPending, setEmbyPending] = useState(false);
   const [embyFormError, setEmbyFormError] = useState<string | null>(null);
+
+  // First-run mode toggle: Emby-native setup vs local account creation. Emby is offered
+  // first when available (design doc section 6.5).
+  const [signupMode, setSignupMode] = useState<'emby' | 'local'>('emby');
+
+  // Emby-native first-run setup state (creates the owner account from Emby credentials,
+  // no separate local password - design doc section 6).
+  const [embySetupServerUrl, setEmbySetupServerUrl] = useState('');
+  const [embySetupServerName, setEmbySetupServerName] = useState('');
+  const [embySetupApiKey, setEmbySetupApiKey] = useState('');
+  const [embySetupUsername, setEmbySetupUsername] = useState('');
+  const [embySetupPassword, setEmbySetupPassword] = useState('');
+  const [embySetupPending, setEmbySetupPending] = useState(false);
+  const [embySetupServerError, setEmbySetupServerError] = useState<string | null>(null);
+  const [embySetupCredentialError, setEmbySetupCredentialError] = useState<string | null>(null);
+  const [embySetupFormError, setEmbySetupFormError] = useState<string | null>(null);
 
   // OIDC state
   const [oidcPending, setOidcPending] = useState(false);
@@ -311,6 +370,52 @@ export function Login() {
     }
   };
 
+  // Handle Emby-native first-run setup: creates the owner account from the operator's own
+  // Emby server, admin API key, and Emby credentials. No local password is ever set (design
+  // doc section 6.2). Never logs or echoes apiKey/password; they only ever go in this POST body.
+  const handleEmbySetup = async (e: React.SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setEmbySetupServerError(null);
+    setEmbySetupCredentialError(null);
+    setEmbySetupFormError(null);
+    setEmbySetupPending(true);
+
+    try {
+      const trimmedServerName = embySetupServerName.trim();
+      const { error } = await authClient.$fetch(EMBY_SETUP_PATH, {
+        method: 'POST',
+        body: {
+          serverUrl: embySetupServerUrl.trim(),
+          ...(trimmedServerName && { serverName: trimmedServerName }),
+          apiKey: embySetupApiKey,
+          username: embySetupUsername.trim(),
+          password: embySetupPassword,
+          ...(requiresClaimCode && { claimCode: claimCode.trim() }),
+        },
+      });
+
+      if (error) {
+        const code = toEmbySetupErrorCode((error as { code?: unknown }).code);
+        const message = code
+          ? embySetupErrorMessage(translate, code)
+          : (error.message ?? t('pages:login.embySetupError.setupFailed'));
+        const group = code ? EMBY_SETUP_ERROR_GROUP[code] : 'form';
+        if (group === 'server') setEmbySetupServerError(message);
+        else if (group === 'credentials') setEmbySetupCredentialError(message);
+        else setEmbySetupFormError(message);
+        return;
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
+      toast.success(t('notifications:toast.success.loggedIn.title'), {
+        description: t('pages:login.accountCreated'),
+      });
+      void navigate('/');
+    } finally {
+      setEmbySetupPending(false);
+    }
+  };
+
   // Handle OIDC sign-in - redirects the browser to the provider on success
   const handleOidcLogin = async () => {
     setOidcPending(true);
@@ -397,7 +502,7 @@ export function Login() {
   }
 
   // Emby credential login is offered for returning sign-in (an owner + Emby
-  // server already exist). First-run setup stays on local account creation.
+  // server already exist).
   const showEmbyLogin = authMethods.emby && !needsSetup;
   // Once the owner has linked their Emby account, lead with Emby only and
   // move every other enabled method behind a collapsed disclosure - kept
@@ -406,6 +511,211 @@ export function Login() {
   const focusedEmbyMode = showEmbyLogin && ownerEmbyLinked;
   const otherMethodsAvailable = authMethods.oidc || authMethods.local;
   const hasPrimaryMethods = showEmbyLogin || authMethods.oidc;
+
+  // First-run setup offers Emby-native setup and/or local account creation, whichever the
+  // instance's auth methods allow (design doc section 6.5). Emby is listed first when both
+  // are available.
+  const showEmbySetup = needsSetup && authMethods.emby;
+  const showLocalSetup = needsSetup && authMethods.local;
+  const showSetupModeToggle = showEmbySetup && showLocalSetup;
+
+  const embySetupForm = (
+    <form
+      onSubmit={handleEmbySetup}
+      className="space-y-4"
+      aria-label={t('pages:login.embySetupTab')}
+    >
+      <Alert variant="warning">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>{t('pages:login.embySetupWarningTitle')}</AlertTitle>
+        <AlertDescription>{t('pages:login.embySetupWarningBody')}</AlertDescription>
+      </Alert>
+
+      <div className="space-y-2">
+        <Label htmlFor="emby-setup-server-url">{t('settings:servers.serverUrl')}</Label>
+        <Input
+          id="emby-setup-server-url"
+          type="text"
+          inputMode="url"
+          autoComplete="url"
+          placeholder={t('settings:servers.serverUrlPlaceholder')}
+          value={embySetupServerUrl}
+          onChange={(e) => setEmbySetupServerUrl(e.target.value)}
+          required
+          disabled={embySetupPending}
+          aria-invalid={!!embySetupServerError}
+          aria-describedby="emby-setup-server-url-hint"
+        />
+        <p id="emby-setup-server-url-hint" className="text-muted-foreground text-xs">
+          {t('settings:servers.serverUrlHelpEmby')}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="emby-setup-server-name">
+          {t('pages:login.embySetupServerNameOptionalLabel')}
+        </Label>
+        <Input
+          id="emby-setup-server-name"
+          type="text"
+          autoComplete="off"
+          placeholder={t('settings:servers.serverNamePlaceholder')}
+          value={embySetupServerName}
+          onChange={(e) => setEmbySetupServerName(e.target.value)}
+          disabled={embySetupPending}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="emby-setup-api-key">{t('common:labels.apiKey')}</Label>
+        <PasswordInput
+          id="emby-setup-api-key"
+          autoComplete="off"
+          placeholder={t('settings:servers.apiKeyPlaceholder')}
+          value={embySetupApiKey}
+          onChange={(e) => setEmbySetupApiKey(e.target.value)}
+          required
+          disabled={embySetupPending}
+          aria-invalid={!!embySetupServerError}
+          aria-describedby="emby-setup-api-key-hint"
+        />
+        <p id="emby-setup-api-key-hint" className="text-muted-foreground text-xs">
+          {t('settings:servers.apiKeyHelpEmby')}
+        </p>
+      </div>
+
+      {embySetupServerError && (
+        <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {embySetupServerError}
+        </p>
+      )}
+
+      <div className="space-y-2">
+        <Label htmlFor="emby-setup-username">{t('pages:login.embyUsername')}</Label>
+        <Input
+          id="emby-setup-username"
+          type="text"
+          autoComplete="username"
+          value={embySetupUsername}
+          onChange={(e) => setEmbySetupUsername(e.target.value)}
+          required
+          disabled={embySetupPending}
+          aria-invalid={!!embySetupCredentialError}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="emby-setup-password">{t('settings:account.password')}</Label>
+        <PasswordInput
+          id="emby-setup-password"
+          autoComplete="current-password"
+          value={embySetupPassword}
+          onChange={(e) => setEmbySetupPassword(e.target.value)}
+          required
+          disabled={embySetupPending}
+          aria-invalid={!!embySetupCredentialError}
+        />
+      </div>
+
+      {embySetupCredentialError && (
+        <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {embySetupCredentialError}
+        </p>
+      )}
+
+      {embySetupFormError && (
+        <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {embySetupFormError}
+        </p>
+      )}
+
+      <Button type="submit" className="w-full" disabled={embySetupPending}>
+        {embySetupPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <MediaServerIcon type="emby" className="mr-2 h-4 w-4" />
+        )}
+        {t('pages:login.completeEmbySetup')}
+      </Button>
+    </form>
+  );
+
+  const localSignupForm = (
+    <form onSubmit={handleSignUp} className="space-y-4" aria-label={t('pages:login.localSetupTab')}>
+      <div className="space-y-2">
+        <Label htmlFor="name">{t('settings:account.displayName')}</Label>
+        <Input
+          id="name"
+          type="text"
+          autoComplete="name"
+          placeholder={t('pages:login.displayNamePlaceholder')}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+          disabled={localPending}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="username">{t('pages:login.username')}</Label>
+        <Input
+          id="username"
+          type="text"
+          autoComplete="username"
+          placeholder={t('pages:login.usernamePlaceholder')}
+          value={signupUsername}
+          onChange={(e) => setSignupUsername(e.target.value)}
+          required
+          minLength={3}
+          maxLength={30}
+          disabled={localPending}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="email">{t('pages:login.emailOptionalLabel')}</Label>
+        <Input
+          id="email"
+          type="email"
+          autoComplete="email"
+          placeholder={t('pages:login.emailPlaceholder')}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={localPending}
+        />
+        <p className="text-muted-foreground text-xs">{t('pages:login.emailOptionalHint')}</p>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="password">{t('settings:account.password')}</Label>
+        <Input
+          id="password"
+          type="password"
+          autoComplete="new-password"
+          placeholder={t('pages:login.passwordPlaceholder')}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          minLength={8}
+          disabled={localPending}
+        />
+      </div>
+      {formError && (
+        <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {formError}
+        </p>
+      )}
+      <Button type="submit" className="w-full" disabled={localPending}>
+        {localPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <User className="mr-2 h-4 w-4" />
+        )}
+        {t('settings:account.createAccount')}
+      </Button>
+    </form>
+  );
 
   const embyForm = showEmbyLogin && (
     <form onSubmit={handleEmbyLogin} className="space-y-4">
@@ -616,11 +926,17 @@ export function Login() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>
-            {needsSetup ? t('settings:account.createAccount') : t('common:actions.signIn')}
+            {needsSetup
+              ? showEmbySetup && (!showSetupModeToggle || signupMode === 'emby')
+                ? t('pages:login.embySetupTitle')
+                : t('settings:account.createAccount')
+              : t('common:actions.signIn')}
           </CardTitle>
           <CardDescription>
             {needsSetup
-              ? t('pages:login.createAccountDescription')
+              ? showEmbySetup && (!showSetupModeToggle || signupMode === 'emby')
+                ? t('pages:login.embySetupDescription')
+                : t('pages:login.createAccountDescription')
               : t('pages:login.signInDescription')}
           </CardDescription>
         </CardHeader>
@@ -632,7 +948,38 @@ export function Login() {
             </Alert>
           )}
 
-          {focusedEmbyMode ? (
+          {needsSetup ? (
+            <>
+              {oidcButton}
+              {hasPrimaryMethods && methodsDivider}
+              {showSetupModeToggle ? (
+                <Tabs
+                  value={signupMode}
+                  onValueChange={(value) => setSignupMode(value === 'local' ? 'local' : 'emby')}
+                  className="w-full"
+                >
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="emby">{t('pages:login.embySetupTab')}</TabsTrigger>
+                    <TabsTrigger value="local">{t('pages:login.localSetupTab')}</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="emby" className="pt-4">
+                    {embySetupForm}
+                  </TabsContent>
+                  <TabsContent value="local" className="pt-4">
+                    {localSignupForm}
+                  </TabsContent>
+                </Tabs>
+              ) : showEmbySetup ? (
+                embySetupForm
+              ) : authMethods.local ? (
+                localSignupForm
+              ) : (
+                <p className="text-muted-foreground text-center text-sm">
+                  {t('pages:login.localDisabledHint')}
+                </p>
+              )}
+            </>
+          ) : focusedEmbyMode ? (
             <>
               {embyForm}
               {otherMethodsAvailable ? (
@@ -673,7 +1020,11 @@ export function Login() {
       </Card>
 
       <p className="text-muted-foreground mt-6 text-center text-xs">
-        {needsSetup ? t('pages:login.setupNote') : t('pages:login.tagline')}
+        {needsSetup
+          ? showEmbySetup && (!showSetupModeToggle || signupMode === 'emby')
+            ? t('pages:login.embySetupNote')
+            : t('pages:login.setupNote')
+          : t('pages:login.tagline')}
       </p>
     </div>
   );

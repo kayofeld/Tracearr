@@ -20,7 +20,7 @@ import type { BetterAuthPlugin } from 'better-auth';
 import { createAuthEndpoint, APIError } from 'better-auth/api';
 import { setSessionCookie } from 'better-auth/cookies';
 import { z } from 'zod';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, asc } from 'drizzle-orm';
 import {
   EMBY_LOGIN_FAILURE_REASONS,
   EMBY_LOGIN_PATH,
@@ -128,18 +128,60 @@ export function decideEmbyOwnerLogin(input: {
   return { allow: true, needsLink: true };
 }
 
-/** The owner's configured Emby server — the only server we trust to auth against. */
-async function resolveConfiguredEmbyServer(): Promise<{
+/**
+ * Thrown by resolveConfiguredEmbyServerUrl() when more than one `emby` row
+ * exists, so the caller can distinguish "ambiguous" from "not configured"
+ * (SEC-02 fix, design §4.1). The `servers_single_emby` partial unique index
+ * (migration 0070) makes a second row impossible to insert, so this is
+ * defense in depth for an instance that already held two rows before the
+ * index existed, not the primary control.
+ */
+export class AmbiguousEmbyServerError extends Error {
+  constructor() {
+    super('More than one Emby server is configured; Emby login is unavailable until resolved.');
+    this.name = 'AmbiguousEmbyServerError';
+  }
+}
+
+/**
+ * The owner's configured Emby server row — the only server we trust to auth
+ * against. Deterministic: orders by (createdAt, id) and inspects up to 2 rows
+ * so it can distinguish "none" from "ambiguous" rather than picking an
+ * arbitrary one of several rows (SEC-02 fix, design §4.1). Two rows means two
+ * authentication authorities and, combined with an ownerless instance, is
+ * exactly the bypass the NOTE above exists to prevent - so ambiguity must
+ * fail closed, never silently resolve to whichever row Postgres happens to
+ * return first. Exported (not just the URL-only wrapper below) so the
+ * ambiguity-detection behavior itself is directly unit-testable
+ * (embyPlugin.test.ts) without going through /emby/login. There is no
+ * network path that adopts/updates this row - an `ownerless-with-data`
+ * instance refuses every claim attempt unconditionally (CR-3/IMP-01,
+ * embySetupPlugin.ts) and recovers only via the console CLI.
+ */
+export async function resolveConfiguredEmbyServerRow(): Promise<{
   id: string;
+  name: string;
   url: string;
   token: string;
 } | null> {
-  const [server] = await db
-    .select({ id: servers.id, url: servers.url, token: servers.token })
+  const rows = await db
+    .select({ id: servers.id, name: servers.name, url: servers.url, token: servers.token })
     .from(servers)
     .where(eq(servers.type, 'emby'))
-    .limit(1);
-  return server ? { id: server.id, url: server.url.replace(/\/$/, ''), token: server.token } : null;
+    .orderBy(asc(servers.createdAt), asc(servers.id))
+    .limit(2);
+
+  if (rows.length > 1) {
+    throw new AmbiguousEmbyServerError();
+  }
+  const server = rows[0];
+  return server ? { ...server, url: server.url.replace(/\/$/, '') } : null;
+}
+
+/** URL-only convenience wrapper over resolveConfiguredEmbyServerRow(), used by /emby/login. */
+export async function resolveConfiguredEmbyServerUrl(): Promise<string | null> {
+  const row = await resolveConfiguredEmbyServerRow();
+  return row ? row.url : null;
 }
 
 /**
@@ -243,7 +285,26 @@ export const embyPlugin = () =>
         async (ctx) => {
           const { username, password } = ctx.body;
 
-          const server = await resolveConfiguredEmbyServer();
+          // resolveConfiguredEmbyServerRow throws when more than one `emby`
+          // row exists (SEC-02): two rows are two authentication authorities,
+          // and silently picking whichever Postgres returned first is the
+          // bypass the NOTE at the top of this file exists to prevent. Fail
+          // closed with a distinct status rather than letting it escape as a
+          // 500.
+          let server: Awaited<ReturnType<typeof resolveConfiguredEmbyServerRow>>;
+          try {
+            server = await resolveConfiguredEmbyServerRow();
+          } catch (err) {
+            if (err instanceof AmbiguousEmbyServerError) {
+              ctx.context.logger.error(
+                'Emby login is unavailable: more than one Emby server is configured'
+              );
+              throw new APIError('SERVICE_UNAVAILABLE', {
+                message: 'Emby login is unavailable: more than one Emby server is configured.',
+              });
+            }
+            throw err;
+          }
           if (!server) {
             throw new APIError('BAD_REQUEST', {
               message: 'No Emby server is configured. Connect an Emby server first.',

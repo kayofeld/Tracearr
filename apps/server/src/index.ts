@@ -166,7 +166,7 @@ import {
   updateTimescaleExtensions,
   runAggregateBackfill,
 } from './db/timescale.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { servers } from './db/schema.js';
 import { initializeClaimCode } from './utils/claimCode.js';
 import { registerService, unregisterService } from './services/serviceTracker.js';
@@ -618,6 +618,66 @@ async function initializeServices(app: FastifyInstance) {
   } catch (err) {
     app.log.error({ err }, 'Failed to run database migrations');
     throw err;
+  }
+
+  // Assert the auth-integrity indexes actually exist (emby-native-setup.md 7.1).
+  // Migration 0070 creates them and a migration failure already aborts startup,
+  // so this is belt and braces - but these two indexes are what stop a second
+  // owner or a second Emby server from existing, and a security constraint that
+  // can go missing silently is the failure mode the review objected to. Cheap
+  // query, runs once, and it names the remedy rather than just complaining.
+  try {
+    // CR-12 fix: `pg_indexes` is unqualified across every schema visible to
+    // the connection, not just the one Tracearr actually operates in - an
+    // identically-named index sitting in an unrelated schema (a different
+    // tenant/app sharing this database, a leftover from a schema migration)
+    // would satisfy this check while the schema Tracearr's queries actually
+    // run against has neither index, silently defeating the very belt-and-
+    // braces assertion this block exists for.
+    const present = await db.execute(sql`
+      SELECT indexname FROM pg_indexes
+      WHERE indexname IN ('users_single_owner', 'servers_single_emby')
+        AND schemaname = current_schema()
+    `);
+    const found = new Set(
+      (present.rows as Array<{ indexname: string }>).map((row) => row.indexname)
+    );
+    const missing = ['users_single_owner', 'servers_single_emby'].filter((i) => !found.has(i));
+    if (missing.length > 0) {
+      app.log.error(
+        { missing },
+        'MISSING_SECURITY_INDEX: auth-integrity index(es) absent. Concurrent signups could ' +
+          'create a second owner, or a second Emby server could make login authority ' +
+          'nondeterministic. Re-run migrations; if creation fails, an existing duplicate is ' +
+          'blocking it - resolve the duplicate, then restart.'
+      );
+    }
+  } catch (err) {
+    app.log.warn({ err }, 'Could not verify auth-integrity indexes');
+  }
+
+  // CR-8/IMP-09: surface OWNERLESS_INSTANCE_WITH_DATA at STARTUP, not only on
+  // a refusal. Before this, an operator whose instance ended up
+  // `ownerless-with-data` (a deleted owner, a partial restore, a failed
+  // setup compensation) got no signal at all unless someone actually tried
+  // to sign up or run /emby/setup and hit the refusal - an instance can sit
+  // silently unrecoverable-from-the-browser for an arbitrary time with
+  // nothing in the logs pointing at why. One log line at boot, once, makes
+  // the state visible immediately on every restart.
+  try {
+    const { getInstanceClaimState, OWNERLESS_INSTANCE_LOG_MARKER } =
+      await import('./lib/authGuards.js');
+    const claimState = await getInstanceClaimState();
+    if (claimState === 'ownerless-with-data') {
+      app.log.error(
+        `${OWNERLESS_INSTANCE_LOG_MARKER}: this instance holds existing data but has no owner. ` +
+          'Local/OIDC signup and /emby/setup will refuse until recovered from the console with ' +
+          '`pnpm --filter @tracearr/server cli promote-owner <username>` (or `cli list-servers` / ' +
+          '`cli delete-server <id>` if no user row survives) and then `pnpm reset-password`.'
+      );
+    }
+  } catch (err) {
+    app.log.warn({ err }, 'Could not check instance claim state at startup');
   }
 
   // Build prepared statements now that the db pool is ready

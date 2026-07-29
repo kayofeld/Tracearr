@@ -70,6 +70,11 @@ vi.mock('../../db/client.js', () => ({
       const chain = {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
+        // resolveConfiguredEmbyServerRow (SEC-02) orders by (createdAt, id)
+        // before limiting - the chain must expose orderBy() or the real
+        // handler throws a real TypeError instead of the intended "no
+        // server configured" fail-fast this test relies on.
+        orderBy: vi.fn().mockReturnThis(),
         limit: vi.fn().mockResolvedValue([]), // "no Emby server configured" - fails fast, no real connection
       };
       return chain;

@@ -193,15 +193,23 @@ describe('better auth security (integration)', () => {
     expect(tokenA).not.toBe(tokenB);
   });
 
-  it('username sign-in and sign-up ignore member rows sharing the username', async () => {
+  it('username sign-in ignores member rows sharing the username', async () => {
     // Synced member rows live in the same users table and can carry any
     // username, including one equal to a login username. They must never
-    // shadow the login-capable account: the owner can still claim the
-    // username at sign-up and always wins the sign-in lookup.
+    // shadow the login-capable account: the owner always wins the sign-in
+    // lookup.
+    //
+    // The member row is now seeded AFTER sign-up, not before. The claim gate
+    // (assertSignupAllowed) treats ANY users row on an ownerless instance as
+    // `ownerless-with-data` and refuses every network claim path, so seeding a
+    // member first makes sign-up a deliberate 403. That ordering is not
+    // reachable in production anyway - member rows only exist once a server
+    // has been configured, which itself requires an owner - so the property
+    // worth guarding is the sign-in lookup, which this still exercises.
     const username = `shadow${randomUUID().replace(/-/g, '').slice(0, 10)}`;
-    await db.insert(users).values({ username, role: 'member' });
 
     const { password, userId } = await signUpOwner(app, { username });
+    await db.insert(users).values({ username, role: 'member' });
 
     const res = await app.inject({
       method: 'POST',

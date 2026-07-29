@@ -17,6 +17,8 @@ export type {
   UserRole,
   AuthUser,
   SetupStatus,
+  EmbySetupResult,
+  EmbySetupErrorCode,
   EmbyLoginFailureReason,
   UserLocation,
   UserDevice,
@@ -494,6 +496,7 @@ export {
   API_VERSION,
   API_BASE_PATH,
   SIGN_UP_USERNAME_PATH,
+  EMBY_SETUP_PATH,
   EMBY_LOGIN_PATH,
   JWT_CONFIG,
   POLLING_INTERVALS,
@@ -543,7 +546,7 @@ export { ROLE_PERMISSIONS, LOGIN_ROLES, canLogin, hasMinRole, isOwner, isActive 
 export { EMBY_LOGIN_FAILURE_REASONS } from './types.js';
 
 // Session constants
-export { MEDIA_TYPES, DEFAULT_STREAM_DETAILS } from './types.js';
+export { MEDIA_TYPES, DEFAULT_STREAM_DETAILS, EMBY_SETUP_ERROR_CODES } from './types.js';
 
 // Backup constants
 export { RESTORE_PHASES } from './types.js';

@@ -17,7 +17,9 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { EMBY_SETUP_PATH } from '@tracearr/shared';
 import { getAuth, closeAuth } from '../auth.js';
+import { SETUP_RATE_LIMIT } from '../embySetupPlugin.js';
 
 describe('getAuth construction', () => {
   afterEach(async () => {
@@ -31,7 +33,7 @@ describe('getAuth construction', () => {
   it('registers the expected plugins', () => {
     const auth = getAuth();
     const pluginIds = auth.options.plugins?.map((p) => p.id);
-    expect(pluginIds).toEqual(['username', 'admin', 'bearer', 'emby', 'signup']);
+    expect(pluginIds).toEqual(['username', 'admin', 'bearer', 'emby', 'emby-setup', 'signup']);
   });
 
   it('resolves the client ip only from the shim-stamped header', () => {
@@ -54,6 +56,16 @@ describe('getAuth construction', () => {
     expect(storage?.getAndDelete).toBeTypeOf('function');
   });
 
+  it('wires the /emby/setup rate-limit override (SEC-07 fix, design §9)', () => {
+    // Verified directly against the installed better-auth@1.6.23's
+    // rate-limiter (api/rate-limiter/index.mjs's resolveRateLimitConfig):
+    // `rateLimit.customRules` is keyed on the post-basePath path (exact
+    // match or wildcard), the same shape ctx.path uses in the claim-code
+    // hook - not merely assumed from the type declaration.
+    const rateLimit = getAuth().options.rateLimit;
+    expect(rateLimit?.customRules?.[EMBY_SETUP_PATH]).toEqual(SETUP_RATE_LIMIT);
+  });
+
   it('constructs the real auth instance with OIDC configured, alongside the default plugins', async () => {
     process.env.OIDC_ISSUER_URL = 'https://auth.example.com';
     process.env.OIDC_CLIENT_ID = 'test-client';
@@ -68,7 +80,15 @@ describe('getAuth construction', () => {
       const auth = getOidcAuth();
       const plugins = auth.options.plugins ?? [];
       const pluginIds = plugins.map((p) => p.id);
-      expect(pluginIds).toEqual(['username', 'admin', 'bearer', 'emby', 'signup', 'generic-oauth']);
+      expect(pluginIds).toEqual([
+        'username',
+        'admin',
+        'bearer',
+        'emby',
+        'emby-setup',
+        'signup',
+        'generic-oauth',
+      ]);
       // Forbidden plugins must never appear, regardless of OIDC config.
       for (const forbidden of ['api-key', 'sso', 'oidc-provider', 'scim']) {
         expect(pluginIds).not.toContain(forbidden);

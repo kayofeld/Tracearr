@@ -1,19 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EMBY_LOGIN_FAILURE_REASONS, EMBY_LOGIN_PATH } from '@tracearr/shared';
 
-vi.mock('../../db/client.js', () => ({
-  db: { select: vi.fn() },
-}));
+vi.mock('../../db/client.js', () => ({ db: { select: vi.fn() } }));
 
 vi.mock('../../services/mediaServer/index.js', () => ({
   EmbyClient: { getLinkedEmbyAccount: vi.fn() },
 }));
 
+import {
+  decideEmbyOwnerLogin,
+  resolveConfiguredEmbyServerUrl,
+  resolveConfiguredEmbyServerRow,
+  AmbiguousEmbyServerError,
+  diagnoseEmbyLoginFailure,
+  embyPlugin,
+} from '../embyPlugin.js';
 import { db } from '../../db/client.js';
 import { EmbyClient } from '../../services/mediaServer/index.js';
-import { decideEmbyOwnerLogin, diagnoseEmbyLoginFailure, embyPlugin } from '../embyPlugin.js';
 
 const mockGetLinkedEmbyAccount = vi.mocked(EmbyClient.getLinkedEmbyAccount);
+
+function mockEmbyServerRows(rows: { id: string; name: string; url: string; token?: string }[]) {
+  const chain = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(rows),
+  };
+  vi.mocked(db.select).mockReturnValue(chain as never);
+  return chain;
+}
 
 const OWNER = 'owner-1';
 const EMBY = 'emby-user-9';
@@ -74,6 +90,56 @@ describe('decideEmbyOwnerLogin', () => {
       ownerHasEmbyLink: true,
     });
     expect(d).toMatchObject({ allow: false });
+  });
+});
+
+// SEC-02 fix: deterministic resolution must distinguish "no server
+// configured" from "ambiguous" rather than picking an arbitrary row - see
+// docs/architecture/emby-native-setup.md §4.1.
+describe('resolveConfiguredEmbyServerUrl', () => {
+  it('returns null when no emby server row exists', async () => {
+    mockEmbyServerRows([]);
+    await expect(resolveConfiguredEmbyServerUrl()).resolves.toBeNull();
+  });
+
+  it('returns the trimmed URL when exactly one row exists', async () => {
+    mockEmbyServerRows([{ id: 's1', name: 'Emby', url: 'http://emby.local:8096/' }]);
+    await expect(resolveConfiguredEmbyServerUrl()).resolves.toBe('http://emby.local:8096');
+  });
+
+  it('throws AmbiguousEmbyServerError when two rows exist - never silently picks one', async () => {
+    mockEmbyServerRows([
+      { id: 's1', name: 'Emby A', url: 'http://a.local' },
+      { id: 's2', name: 'Emby B', url: 'http://b.local' },
+    ]);
+    await expect(resolveConfiguredEmbyServerUrl()).rejects.toBeInstanceOf(AmbiguousEmbyServerError);
+  });
+});
+
+describe('resolveConfiguredEmbyServerRow', () => {
+  it('returns the row id/name/url when exactly one row exists', async () => {
+    mockEmbyServerRows([{ id: 's1', name: 'My Emby', url: 'http://emby.local:8096/' }]);
+    await expect(resolveConfiguredEmbyServerRow()).resolves.toEqual({
+      id: 's1',
+      name: 'My Emby',
+      url: 'http://emby.local:8096',
+    });
+  });
+
+  // Merge-added: the row's token must reach the caller unchanged, since
+  // diagnoseEmbyLoginFailure's outbound admin-API lookup depends on it - a
+  // silently dropped token would make every diagnosis attempt fail closed
+  // (generic message) even for the legitimate case, masking a real bug.
+  it('includes the row token unchanged, so the login-failure diagnosis path gets a real admin key', async () => {
+    mockEmbyServerRows([
+      { id: 's1', name: 'My Emby', url: 'http://emby.local:8096/', token: 'admin-key-abc' },
+    ]);
+    await expect(resolveConfiguredEmbyServerRow()).resolves.toEqual({
+      id: 's1',
+      name: 'My Emby',
+      url: 'http://emby.local:8096',
+      token: 'admin-key-abc',
+    });
   });
 });
 

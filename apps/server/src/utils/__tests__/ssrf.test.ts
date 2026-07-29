@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assertSafeProbeUrl, SsrfBlockedError } from '../ssrf.js';
+import { assertSafeProbeUrl, isDeniedProbeAddress, SsrfBlockedError } from '../ssrf.js';
 
 describe('assertSafeProbeUrl', () => {
   describe('blocks disallowed schemes', () => {
@@ -103,5 +103,97 @@ describe('assertSafeProbeUrl', () => {
     it('allows https://plex.example.com:32400', () => {
       expect(() => assertSafeProbeUrl('https://plex.example.com:32400')).not.toThrow();
     });
+  });
+
+  // Widened deny list (SEC-03 fix, emby-native-setup.md §8.3): '0.0.0.0/8',
+  // multicast, broadcast, and the Oracle/AWS cloud metadata literals, applied
+  // to literals here and, via isDeniedProbeAddress, to resolved addresses in
+  // safeProbe.ts.
+  describe('blocks 0.0.0.0/8 ("this network" / unspecified)', () => {
+    it('rejects http://0.0.0.0', () => {
+      expect(() => assertSafeProbeUrl('http://0.0.0.0')).toThrow(SsrfBlockedError);
+    });
+
+    it('rejects http://0.1.2.3', () => {
+      expect(() => assertSafeProbeUrl('http://0.1.2.3')).toThrow(SsrfBlockedError);
+    });
+
+    it('rejects the IPv6 unspecified address ::', () => {
+      expect(() => assertSafeProbeUrl('http://[::]:8096')).toThrow(SsrfBlockedError);
+    });
+  });
+
+  describe('blocks multicast', () => {
+    it('rejects http://224.0.0.1 (IPv4 multicast)', () => {
+      expect(() => assertSafeProbeUrl('http://224.0.0.1')).toThrow(SsrfBlockedError);
+    });
+
+    it('rejects http://239.255.255.255 (upper edge of 224.0.0.0/4)', () => {
+      expect(() => assertSafeProbeUrl('http://239.255.255.255')).toThrow(SsrfBlockedError);
+    });
+
+    it('rejects http://[ff02::1] (IPv6 multicast)', () => {
+      expect(() => assertSafeProbeUrl('http://[ff02::1]')).toThrow(SsrfBlockedError);
+    });
+  });
+
+  describe('blocks the broadcast address', () => {
+    it('rejects http://255.255.255.255', () => {
+      expect(() => assertSafeProbeUrl('http://255.255.255.255')).toThrow(SsrfBlockedError);
+    });
+  });
+
+  describe('blocks cloud metadata literals outside the link-local range', () => {
+    it('rejects http://192.0.0.192 (Oracle Cloud metadata)', () => {
+      expect(() => assertSafeProbeUrl('http://192.0.0.192')).toThrow(SsrfBlockedError);
+    });
+
+    it('rejects http://[fd00:ec2::254] (AWS IPv6 metadata)', () => {
+      expect(() => assertSafeProbeUrl('http://[fd00:ec2::254]')).toThrow(SsrfBlockedError);
+    });
+  });
+
+  describe('still allows CGNAT/Tailscale including the Alibaba metadata carve-out', () => {
+    // Documented residual (design §8.3): 100.100.100.200 sits inside
+    // 100.64.0.0/10, so it stays reachable - denying it would break the
+    // Tailscale range the tests above explicitly allow.
+    it('allows 100.100.100.200', () => {
+      expect(() => assertSafeProbeUrl('http://100.100.100.200:8096')).not.toThrow();
+    });
+  });
+
+  describe("userinfo (SEC-09) is out of this function's scope", () => {
+    it('does not itself reject http://user:pass@host:8096 - that is address/scheme-only here', () => {
+      // Userinfo/query/fragment rejection is enforced by the setup plugin's
+      // canonicalization step (canonicalizeSetupUrl in embySetupPlugin.ts)
+      // BEFORE this function ever runs. Documented here so the two controls
+      // are not confused with one another.
+      expect(() => assertSafeProbeUrl('http://user:pass@192.168.1.10:8096')).not.toThrow();
+    });
+  });
+});
+
+describe('isDeniedProbeAddress', () => {
+  it('allows loopback, RFC1918 and CGNAT addresses', () => {
+    expect(isDeniedProbeAddress('127.0.0.1')).toBeNull();
+    expect(isDeniedProbeAddress('192.168.1.10')).toBeNull();
+    expect(isDeniedProbeAddress('10.0.0.5')).toBeNull();
+    expect(isDeniedProbeAddress('172.16.1.1')).toBeNull();
+    expect(isDeniedProbeAddress('100.64.0.1')).toBeNull();
+    expect(isDeniedProbeAddress('::1')).toBeNull();
+  });
+
+  it('denies link-local, this-network, multicast, broadcast and metadata addresses', () => {
+    expect(isDeniedProbeAddress('169.254.169.254')).not.toBeNull();
+    expect(isDeniedProbeAddress('0.0.0.0')).not.toBeNull();
+    expect(isDeniedProbeAddress('224.0.0.1')).not.toBeNull();
+    expect(isDeniedProbeAddress('255.255.255.255')).not.toBeNull();
+    expect(isDeniedProbeAddress('192.0.0.192')).not.toBeNull();
+    expect(isDeniedProbeAddress('fe80::1')).not.toBeNull();
+    expect(isDeniedProbeAddress('fd00:ec2::254')).not.toBeNull();
+  });
+
+  it('returns null for a non-IP hostname (defers to DNS resolution elsewhere)', () => {
+    expect(isDeniedProbeAddress('emby.example.com')).toBeNull();
   });
 });

@@ -95,6 +95,13 @@ export const servers = pgTable(
   (table) => [
     index('servers_plex_account_idx').on(table.plexAccountId),
     index('servers_display_order_idx').on(table.displayOrder),
+    // At most one Emby server can exist (owner decision 3, design A - single
+    // Emby is the product rule). Established by migration 0070, not here at
+    // startup, because /emby/login's deterministic resolution depends on it
+    // being impossible to violate (docs/architecture/emby-native-setup.md §4.3).
+    uniqueIndex('servers_single_emby')
+      .on(table.type)
+      .where(sql`type = 'emby'`),
   ]
 );
 
@@ -158,6 +165,15 @@ export const users = pgTable(
     uniqueIndex('users_email_unique').on(table.email),
     index('users_plex_account_id_idx').on(table.plexAccountId),
     index('users_role_idx').on(table.role),
+    // At most one owner row instance-wide (SR-02 / SEC-04 fix). Established
+    // by migration 0070, not by createPartialIndexes() at startup - that
+    // path's failure is swallowed by a try/catch that only warns
+    // (docs/architecture/emby-native-setup.md §7.1). All rows selected by
+    // this predicate share the identical indexed value, so the (role) form
+    // is equivalent to and replaces the earlier unverified ((true)) form.
+    uniqueIndex('users_single_owner')
+      .on(table.role)
+      .where(sql`role = 'owner'`),
   ]
 );
 

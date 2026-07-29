@@ -84,6 +84,7 @@ export async function loadRuntime() {
     authAccounts: schema.authAccounts,
     authSessions: schema.authSessions,
     plexAccounts: schema.plexAccounts,
+    servers: schema.servers,
     hashPassword: passwordModule.hashPassword,
     setSetting: settingsModule.setSetting,
     getSetting: settingsModule.getSetting,

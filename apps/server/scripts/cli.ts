@@ -15,6 +15,9 @@
  *   set-email <username> <new-email>          Change a user's email
  *   list-users                                List users and their login methods
  *   enable-local-login                        Re-enable local username/password login
+ *   promote-owner <username> [--confirm]      Promote a user to owner (ownerless-with-data recovery)
+ *   list-servers                              List configured servers (ownerless-with-data recovery)
+ *   delete-server <id>                        Delete a server row (ownerless-with-data recovery)
  */
 
 import { randomBytes } from 'node:crypto';
@@ -25,6 +28,9 @@ import {
   setEmailCommand,
   listUsersCommand,
   enableLocalLoginCommand,
+  promoteOwnerCommand,
+  listServersCommand,
+  deleteServerCommand,
   shutdown,
 } from './lib/commands.ts';
 
@@ -36,6 +42,9 @@ Usage:
   cli set-email <username> <new-email>
   cli list-users
   cli enable-local-login
+  cli promote-owner <username> [--confirm]
+  cli list-servers
+  cli delete-server <id>
 `;
 
 function promptPassword(): Promise<string> {
@@ -103,6 +112,45 @@ async function runEnableLocalLogin(): Promise<void> {
   console.log('\nLocal username/password login is now enabled.\n');
 }
 
+async function runPromoteOwner(args: string[]): Promise<void> {
+  const confirm = args.includes('--confirm');
+  const username = args.find((arg) => arg !== '--confirm');
+  if (!username) {
+    throw new Error('Usage: cli promote-owner <username> [--confirm]');
+  }
+  const result = await promoteOwnerCommand({ username, confirm });
+  console.log(
+    `\n${username} has been promoted to owner (was: role '${result.role}', login ` +
+      `methods: ${result.loginMethods.length > 0 ? result.loginMethods.join(', ') : 'none'}).`
+  );
+  console.log(
+    `Set a local password with:\n  pnpm --filter @tracearr/server cli reset-password ${username}\n`
+  );
+}
+
+async function runListServers(): Promise<void> {
+  const rows = await listServersCommand();
+  if (rows.length === 0) {
+    console.log('\nNo servers configured.\n');
+    return;
+  }
+  console.log('\nid                                    name                 type      url');
+  console.log('-'.repeat(90));
+  for (const row of rows) {
+    console.log(`${row.id.padEnd(38)}${row.name.padEnd(21)}${row.type.padEnd(10)}${row.url}`);
+  }
+  console.log();
+}
+
+async function runDeleteServer(args: string[]): Promise<void> {
+  const [id] = args;
+  if (!id) {
+    throw new Error('Usage: cli delete-server <id>');
+  }
+  await deleteServerCommand({ id });
+  console.log(`\nServer ${id} deleted.\n`);
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
 
@@ -122,6 +170,15 @@ async function main(): Promise<void> {
         break;
       case 'enable-local-login':
         await runEnableLocalLogin();
+        break;
+      case 'promote-owner':
+        await runPromoteOwner(args);
+        break;
+      case 'list-servers':
+        await runListServers();
+        break;
+      case 'delete-server':
+        await runDeleteServer(args);
         break;
       default:
         console.log(USAGE);

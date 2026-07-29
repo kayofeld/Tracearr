@@ -256,6 +256,50 @@ export interface SetupStatus {
 }
 
 /**
+ * Response body for a successful POST /api/auth/emby/setup (see
+ * EMBY_SETUP_PATH in constants.ts and embySetupPlugin.ts on the server).
+ * `server.url` is the canonical origin actually used - the setup flow only
+ * ever reaches this success shape from the `unclaimed` state (CR-3/IMP-01:
+ * an `ownerless-with-data` instance refuses unconditionally and never
+ * produces this response - recovery is console-only, see
+ * OWNERLESS_INSTANCE_RECOVERY_MESSAGE in authGuards.ts).
+ */
+export interface EmbySetupResult {
+  authorized: true;
+  user: { id: string; username: string; role: 'owner' };
+  server: { id: string; name: string; url: string };
+}
+
+/**
+ * Machine-readable error codes for POST /api/auth/emby/setup. The client
+ * renders its own copy per code (never the server's error string - see
+ * emby-native-setup.md SEC-03c) via an exhaustive switch, so a future member
+ * added here without an accompanying client-side arm is a compile error
+ * rather than a blank error box.
+ *
+ * Declared as a const tuple with the type derived from it, following MEDIA_TYPES
+ * below, so the runtime list and the type cannot drift: a client narrowing an
+ * unknown `code` needs the values at runtime, and a hand-kept copy typed as
+ * `readonly EmbySetupErrorCode[]` accepts a SUBSET, so a member added here would
+ * silently fail to narrow and fall through to generic copy.
+ */
+export const EMBY_SETUP_ERROR_CODES = [
+  'CLAIM_CODE',
+  'INSTANCE_OWNED',
+  'INSTANCE_RECOVERY',
+  'URL_REJECTED',
+  'SERVER_UNREACHABLE',
+  'KEY_REJECTED',
+  'KEY_NOT_ADMIN',
+  'BAD_CREDENTIALS',
+  'NOT_EMBY_ADMIN',
+  'BUSY',
+  'SETUP_FAILED',
+] as const;
+
+export type EmbySetupErrorCode = (typeof EMBY_SETUP_ERROR_CODES)[number];
+
+/**
  * Machine-readable reason for a failed POST /emby/login, returned as the
  * `code` field alongside `message` in the error body so the frontend can
  * render its own copy without string-matching the human-readable message.

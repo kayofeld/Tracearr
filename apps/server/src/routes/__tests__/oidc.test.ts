@@ -127,18 +127,45 @@ describe('oidc gating', () => {
   });
 
   describe('OIDC signup claim-code gate (auth.ts hooks.before -> assertOAuthSignupClaimCode)', () => {
+    // assertOAuthSignupClaimCode now derives getInstanceClaimState() instead
+    // of a single getOwnerUser() call: four `db.select(...).limit(1)` queries
+    // issued synchronously (owner row, any users row, any auth_accounts row,
+    // any servers row), in exactly that order, before the Promise.all they
+    // share ever resolves (docs/architecture/emby-native-setup.md §3, owner
+    // decision 6 - the unclaimed gate now applies to OIDC too).
     async function loadGuard() {
-      vi.doMock('../../services/userService.js', () => ({ getOwnerUser: vi.fn() }));
+      vi.doMock('../../db/client.js', () => ({ db: { select: vi.fn() } }));
       vi.doMock('../../utils/claimCode.js', () => ({
         isClaimCodeEnabled: vi.fn(),
         validateClaimCode: vi.fn(),
       }));
-      const { getOwnerUser } = await import('../../services/userService.js');
+      const { db } = await import('../../db/client.js');
       const { isClaimCodeEnabled, validateClaimCode } = await import('../../utils/claimCode.js');
       const { assertOAuthSignupClaimCode } = await import('../../lib/authGuards.js');
+
+      function pushClaimState(
+        state: {
+          owner?: unknown[];
+          anyUser?: unknown[];
+          anyAccount?: unknown[];
+          anyServer?: unknown[];
+        } = {}
+      ) {
+        const chain = (result: unknown[]) => ({
+          from: vi.fn().mockReturnThis(),
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockResolvedValue(result),
+        });
+        vi.mocked(db.select)
+          .mockReturnValueOnce(chain(state.owner ?? []) as never)
+          .mockReturnValueOnce(chain(state.anyUser ?? []) as never)
+          .mockReturnValueOnce(chain(state.anyAccount ?? []) as never)
+          .mockReturnValueOnce(chain(state.anyServer ?? []) as never);
+      }
+
       return {
         assertOAuthSignupClaimCode,
-        getOwnerUser: vi.mocked(getOwnerUser),
+        pushClaimState,
         isClaimCodeEnabled: vi.mocked(isClaimCodeEnabled),
         validateClaimCode: vi.mocked(validateClaimCode),
       };
@@ -146,7 +173,7 @@ describe('oidc gating', () => {
 
     it('rejects OIDC-initiated signup with no claim code on an ownerless instance with CLAIM_CODE set', async () => {
       const guard = await loadGuard();
-      guard.getOwnerUser.mockResolvedValue(null);
+      guard.pushClaimState(); // unclaimed
       guard.isClaimCodeEnabled.mockReturnValue(true);
 
       await expect(guard.assertOAuthSignupClaimCode(undefined)).rejects.toMatchObject({
@@ -156,7 +183,7 @@ describe('oidc gating', () => {
 
     it('rejects OIDC-initiated signup with a wrong claim code on an ownerless instance', async () => {
       const guard = await loadGuard();
-      guard.getOwnerUser.mockResolvedValue(null);
+      guard.pushClaimState(); // unclaimed
       guard.isClaimCodeEnabled.mockReturnValue(true);
       guard.validateClaimCode.mockReturnValue(false);
 
@@ -167,9 +194,19 @@ describe('oidc gating', () => {
 
     it('allows OIDC sign-in on an already-owned instance without a claim code', async () => {
       const guard = await loadGuard();
-      guard.getOwnerUser.mockResolvedValue({ id: 'owner-id', role: 'owner' } as never);
+      guard.pushClaimState({ owner: [{ id: 'owner-id', role: 'owner' }] }); // owned
 
       await expect(guard.assertOAuthSignupClaimCode(undefined)).resolves.toBeUndefined();
+      expect(guard.isClaimCodeEnabled).not.toHaveBeenCalled();
+    });
+
+    it('rejects OIDC-initiated signup outright on an ownerless-with-data instance, never reaching the claim-code check', async () => {
+      const guard = await loadGuard();
+      guard.pushClaimState({ anyServer: [{ id: 'server-1' }] }); // ownerless-with-data
+
+      await expect(guard.assertOAuthSignupClaimCode('any-code')).rejects.toMatchObject({
+        status: 'FORBIDDEN',
+      });
       expect(guard.isClaimCodeEnabled).not.toHaveBeenCalled();
     });
   });
