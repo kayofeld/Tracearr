@@ -84,6 +84,11 @@ export function NotificationAgentsManager() {
       } else if (removingAgent === 'pushover') {
         clearData.pushoverUserKey = null;
         clearData.pushoverApiToken = null;
+      } else if (removingAgent === 'telegram') {
+        // Telegram doesn't use customWebhookUrl - clear its own secret + chat id
+        // so removing the agent doesn't leave the bot token lingering in settings.
+        clearData.telegramBotToken = null;
+        clearData.telegramChatId = null;
       }
     }
 

@@ -1581,6 +1581,32 @@ export interface NotificationChannelRouting {
   updatedAt: Date;
 }
 
+// =============================================================================
+// Telegram interactive pairing (POST/GET/DELETE /notifications/telegram/pairing)
+// =============================================================================
+
+/** Lifecycle state of a Telegram bot-token/chat-id pairing session. */
+export type TelegramPairingState = 'pending' | 'paired' | 'expired';
+
+/** Response from starting a Telegram pairing (POST /notifications/telegram/pairing). */
+export interface TelegramPairingStart {
+  pairingId: string;
+  /** Single-use code the owner sends to the bot (embedded in botLink's /start param). */
+  code: string;
+  /** Bot's @username, resolved from Telegram's getMe. */
+  botUsername: string;
+  /** Deep link (t.me/<botUsername>?start=<code>) that pre-fills the code. */
+  botLink: string;
+  expiresAt: Date;
+}
+
+/** Response from polling a Telegram pairing (GET /notifications/telegram/pairing/:pairingId). */
+export interface TelegramPairingStatus {
+  state: TelegramPairingState;
+  /** Only set once state is 'paired'. */
+  chatId: string | null;
+}
+
 // Encrypted push payload (AES-256-GCM with separate authTag per security best practices)
 export interface EncryptedPushPayload {
   v: 1; // Version for future-proofing

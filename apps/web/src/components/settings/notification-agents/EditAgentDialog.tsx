@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Settings } from '@tracearr/shared';
-import { Loader2 } from 'lucide-react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import type { NotificationAgentType } from './types';
 import { validateField } from './types';
 import { AGENT_CONFIGS } from './agent-config';
+import { TelegramPairingWizard } from './TelegramPairingWizard';
 
 interface EditAgentDialogProps {
   open: boolean;
@@ -33,12 +34,24 @@ export function EditAgentDialog({ open, onOpenChange, agentType, settings }: Edi
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | null>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  // Telegram never re-populates its bot token into the form (it's a secret we
+  // never render back) - re-pairing opens the wizard fresh instead.
+  const [showTelegramWizard, setShowTelegramWizard] = useState(false);
 
   const config = AGENT_CONFIGS[agentType];
 
   // Initialize form with current settings values when dialog opens
   useEffect(() => {
     if (open && settings && config) {
+      setShowTelegramWizard(false);
+
+      if (config.type === 'telegram') {
+        setFormData({});
+        setFieldErrors({});
+        setTouched({});
+        return;
+      }
+
       const initialData: Record<string, string> = {};
 
       config.fields.forEach((field) => {
@@ -127,7 +140,29 @@ export function EditAgentDialog({ open, onOpenChange, agentType, settings }: Edi
     }
   };
 
+  // Re-pairing replaces the bot token + chat id entirely - never re-displays
+  // the existing secret. Propagates errors up to the wizard's own inline
+  // retry rather than a toast, mirroring AddAgentDialog.
+  const handleTelegramRepaired = async ({
+    botToken,
+    chatId,
+  }: {
+    botToken: string;
+    chatId: string;
+  }) => {
+    await updateSettings.mutateAsync({
+      telegramBotToken: botToken,
+      telegramChatId: chatId,
+      webhookFormat: 'telegram',
+    });
+    toast.success(t('toast.success.agentUpdated.title'), {
+      description: t('toast.success.agentUpdated.message'),
+    });
+    onOpenChange(false);
+  };
+
   const Icon = config.icon;
+  const isTelegram = config.type === 'telegram';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -151,7 +186,26 @@ export function EditAgentDialog({ open, onOpenChange, agentType, settings }: Edi
         </DialogHeader>
 
         <div className="flex flex-col gap-4 py-2">
-          {config.fields.length === 0 ? (
+          {isTelegram ? (
+            showTelegramWizard ? (
+              <TelegramPairingWizard onPaired={handleTelegramRepaired} />
+            ) : (
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-500">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>{t('pages:settings.notifications.telegramWizard.editConnectedTitle')}</span>
+                </div>
+                <p className="text-muted-foreground text-sm">
+                  {t('pages:settings.notifications.telegramWizard.editConnectedDesc', {
+                    chatId: settings?.telegramChatId ?? '',
+                  })}
+                </p>
+                <Button variant="outline" onClick={() => setShowTelegramWizard(true)}>
+                  {t('pages:settings.notifications.telegramWizard.editRepairButton')}
+                </Button>
+              </div>
+            )
+          ) : config.fields.length === 0 ? (
             <p className="text-muted-foreground text-sm">
               {t('pages:settings.notifications.noConfigNeeded')}
             </p>
@@ -194,16 +248,18 @@ export function EditAgentDialog({ open, onOpenChange, agentType, settings }: Edi
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t('common:actions.cancel')}
           </Button>
-          <Button onClick={handleSave} disabled={!canSave() || updateSettings.isPending}>
-            {updateSettings.isPending ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {t('common:states.saving')}
-              </>
-            ) : (
-              t('common:actions.save')
-            )}
-          </Button>
+          {!isTelegram && (
+            <Button onClick={handleSave} disabled={!canSave() || updateSettings.isPending}>
+              {updateSettings.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {t('common:states.saving')}
+                </>
+              ) : (
+                t('common:actions.save')
+              )}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

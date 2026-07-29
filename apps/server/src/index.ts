@@ -65,6 +65,7 @@ import { stopImageCacheCleanup } from './services/imageProxy.js';
 import { debugRoutes } from './routes/debug.js';
 import { mobileRoutes } from './routes/mobile.js';
 import { notificationPreferencesRoutes } from './routes/notificationPreferences.js';
+import { telegramPairingRoutes } from './routes/telegramPairing.js';
 import { channelRoutingRoutes } from './routes/channelRouting.js';
 import { versionRoutes } from './routes/version.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
@@ -445,6 +446,7 @@ async function buildApp(options: { trustProxy?: boolean | number | string[] } = 
   await app.register(debugRoutes, { prefix: `${API_BASE_PATH}/debug` });
   await app.register(mobileRoutes, { prefix: `${API_BASE_PATH}/mobile` });
   await app.register(notificationPreferencesRoutes, { prefix: `${API_BASE_PATH}/notifications` });
+  await app.register(telegramPairingRoutes, { prefix: `${API_BASE_PATH}/notifications` });
   await app.register(versionRoutes, { prefix: `${API_BASE_PATH}/version` });
   await app.register(maintenanceRoutes, { prefix: `${API_BASE_PATH}/maintenance` });
   await app.register(tailscaleRoutes, { prefix: `${API_BASE_PATH}/tailscale` });

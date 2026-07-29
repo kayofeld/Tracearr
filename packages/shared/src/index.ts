@@ -161,6 +161,10 @@ export type {
   NotificationChannelRouting,
   EncryptedPushPayload,
   PushNotificationPayload,
+  // Telegram interactive pairing
+  TelegramPairingState,
+  TelegramPairingStart,
+  TelegramPairingStatus,
   // SSE (Server-Sent Events)
   SSEConnectionState,
   PlexSSENotification,
@@ -370,6 +374,8 @@ export {
   // Tailscale
   tailscaleEnableSchema,
   tailscaleExitNodeSchema,
+  // Telegram interactive pairing
+  telegramPairingStartSchema,
   // Tautulli import
   tautulliImportSchema,
   // Jellystat import
