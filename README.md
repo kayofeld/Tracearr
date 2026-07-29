@@ -248,16 +248,29 @@ This fork's headline convenience: **update from the interface** on bare-metal/sy
   2. Add the scoped sudoers rule (see the unit file's header for the exact line — it must match the invoked argv, including `--no-block`).
   3. Set `TRACEARR_SELF_UPDATE=true` in `.env` and restart.
 
-- **Manual update** (always available):
+- **Manual update** (always available). Prefer `scripts/update.sh`, which does the fetch → checkout
+  latest tag → install → build → **stamp `APP_VERSION`** → restart for you (this is what the Update
+  button runs):
 
   ```bash
-  git pull
+  sudo -u tracearr scripts/update.sh
+  ```
+
+  If you update by hand instead, stamp the version too — the app reports the value of `APP_VERSION`
+  in `.env`, not the tag its checkout is on, so skipping this leaves the UI showing an update that is
+  already installed:
+
+  ```bash
+  git fetch --tags && git checkout v1.9.0     # or the tag you want
   pnpm install --frozen-lockfile
   pnpm build
+  sed -i 's/^APP_VERSION=.*/APP_VERSION=1.9.0/' .env   # keep this in step with the tag
   sudo systemctl restart tracearr
   ```
 
-  Or run `scripts/update.sh`, which does the fetch → checkout latest tag → install → build → restart for you (this is what the Update button runs).
+  If the two do drift apart, the Update button repairs it: the updater now reconciles a stale
+  `APP_VERSION` against the checked-out tag and restarts, instead of reporting "already up to date"
+  and leaving the banner up.
 
 Migrations run automatically on the next start.
 
