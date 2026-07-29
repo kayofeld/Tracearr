@@ -101,6 +101,12 @@ import type {
   SeerrMappingsResponse,
   SeerrMappingUpsertRequest,
 } from '@tracearr/shared';
+// Telegram pairing types re-exported from @tracearr/shared via one isolated
+// module - see telegramPairingContract.ts.
+import type {
+  TelegramPairingStart,
+  TelegramPairingStatus,
+} from '@/components/settings/notification-agents/telegramPairingContract';
 
 // Re-export shared types needed by frontend components
 export type {
@@ -1530,6 +1536,25 @@ class ApiClient {
           method: 'DELETE',
         }),
     },
+  };
+
+  // Telegram bot pairing - interactive setup wizard.
+  // Contract: apps/server/src/routes/telegramPairing.ts (types re-exported via
+  // ./components/settings/notification-agents/telegramPairingContract.ts).
+  telegramPairing = {
+    start: (botToken: string) =>
+      this.request<TelegramPairingStart>('/notifications/telegram/pairing', {
+        method: 'POST',
+        body: JSON.stringify({ botToken }),
+      }),
+    status: (pairingId: string) =>
+      this.request<TelegramPairingStatus>(
+        `/notifications/telegram/pairing/${encodeURIComponent(pairingId)}`
+      ),
+    cancel: (pairingId: string) =>
+      this.request<void>(`/notifications/telegram/pairing/${encodeURIComponent(pairingId)}`, {
+        method: 'DELETE',
+      }),
   };
 
   // Channel Routing

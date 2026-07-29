@@ -21,6 +21,7 @@ import type { NotificationAgentType } from './types';
 import { validateField } from './types';
 import type { AddableAgentInfo } from './useActiveAgents';
 import { AGENT_CONFIGS } from './agent-config';
+import { TelegramPairingWizard } from './TelegramPairingWizard';
 
 interface AgentOptionButtonProps {
   agentInfo: AddableAgentInfo;
@@ -193,6 +194,27 @@ export function AddAgentDialog({
     return requiredFilled && allValid;
   };
 
+  // Telegram replaces the generic field form with the pairing wizard - the
+  // wizard resolves both the bot token (step 1) and the chat id (step 2/3),
+  // then this saves through the same settings path the generic form uses.
+  const handleTelegramPaired = async ({
+    botToken,
+    chatId,
+  }: {
+    botToken: string;
+    chatId: string;
+  }) => {
+    await updateSettings.mutateAsync({
+      telegramBotToken: botToken,
+      telegramChatId: chatId,
+      webhookFormat: 'telegram',
+    });
+    toast.success(t('toast.success.agentAdded.title'), {
+      description: t('toast.success.agentAdded.message'),
+    });
+    onOpenChange(false);
+  };
+
   const handleSave = async () => {
     if (!selectedConfig) return;
 
@@ -321,7 +343,9 @@ export function AddAgentDialog({
                 </div>
               </div>
 
-              {selectedConfig.fields.length === 0 ? (
+              {selectedConfig.type === 'telegram' ? (
+                <TelegramPairingWizard onPaired={handleTelegramPaired} />
+              ) : selectedConfig.fields.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
                   {t('pages:settings.notifications.noConfigNeeded')}
                 </p>
@@ -366,7 +390,7 @@ export function AddAgentDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t('common:actions.cancel')}
           </Button>
-          {selectedType && (
+          {selectedType && selectedConfig?.type !== 'telegram' && (
             <Button onClick={handleSave} disabled={!canSave() || updateSettings.isPending}>
               {updateSettings.isPending ? (
                 <>

@@ -842,6 +842,21 @@ export const tailscaleEnableSchema = z.object({
     .optional(),
 });
 
+// ============================================================================
+// Telegram Interactive Pairing Schemas
+// ============================================================================
+
+export const telegramPairingStartSchema = z.object({
+  // Shape from @BotFather: "<numeric id>:<35-char token>". Loose bound here -
+  // the real validity check is the getMe call the route makes with it.
+  botToken: z
+    .string()
+    .trim()
+    .min(1, 'Bot token is required')
+    .max(200)
+    .regex(/^\d+:[A-Za-z0-9_-]+$/, 'Not a valid Telegram bot token'),
+});
+
 export const tailscaleExitNodeSchema = z.object({
   id: z.string().nullable().optional(),
 });

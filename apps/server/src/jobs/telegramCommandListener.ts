@@ -7,6 +7,14 @@
  * configured; the token is read fresh each cycle, so adding/changing it later
  * takes effect without a restart.
  *
+ * Also watches every update for an active interactive-pairing code (see
+ * services/telegramPairing.ts) - Telegram allows exactly one getUpdates
+ * consumer per bot, so the pairing flow cannot run its own poller and instead
+ * piggybacks on this one. While a pairing is in flight (no agent saved yet,
+ * or the owner is replacing the configured bot), resolvePollingToken() makes
+ * this loop poll the pairing's bot token instead of - or in addition to
+ * falling back to - the saved config token.
+ *
  * Single loop at a time: each start()/stop() bumps a generation counter and
  * aborts the in-flight fetch/sleep, so the previous loop exits promptly and a
  * stop->start (e.g. maintenance recovery) can never leave two loops polling the
@@ -14,6 +22,8 @@
  */
 
 import { getSettings } from '../services/settings.js';
+import { matchPairingCode, resolvePollingToken } from '../services/telegramPairing.js';
+import { redactTelegramToken } from '../services/telegramApi.js';
 
 const API = 'https://api.telegram.org';
 const LONG_POLL_SECONDS = 30;
@@ -125,7 +135,7 @@ async function tgFetch<T>(
     if (err instanceof Error && err.name === 'AbortError') return null; // stop() or timeout
     // Redact the token: a fetch error can embed the request URL (which contains
     // the bot token) in its message/cause, which would leak it into the logs.
-    const detail = String(err instanceof Error ? err.message : err).replaceAll(token, '<token>');
+    const detail = redactTelegramToken(token, String(err instanceof Error ? err.message : err));
     console.warn(`[TelegramListener] ${method} failed: ${detail}`);
     return null;
   } finally {
@@ -136,10 +146,17 @@ async function tgFetch<T>(
 
 async function runLoop(myGen: number): Promise<void> {
   let offset: number | undefined;
+  // Tracks which bot token the *previous* iteration polled, so a switch
+  // between the saved config token and an in-flight pairing's token (or vice
+  // versa) resets the offset: getUpdates offsets are only meaningful within
+  // one bot's own update stream, so carrying a stale offset across a token
+  // switch could skip or misinterpret updates for the new bot.
+  let currentToken: string | null = null;
+
   while (myGen === generation) {
-    let token: string | null;
+    let configToken: string | null;
     try {
-      ({ telegramBotToken: token } = await getSettings(['telegramBotToken']));
+      ({ telegramBotToken: configToken } = await getSettings(['telegramBotToken']));
     } catch (err) {
       // A DB blip must not kill the loop; back off and retry.
       console.warn(
@@ -149,9 +166,18 @@ async function runLoop(myGen: number): Promise<void> {
       await sleep(IDLE_MS);
       continue;
     }
+
+    // An active interactive pairing (services/telegramPairing.ts) overrides
+    // the config token - see that module's resolvePollingToken() for why.
+    const token = resolvePollingToken(configToken);
     if (!token) {
+      currentToken = null;
       await sleep(IDLE_MS);
       continue;
+    }
+    if (token !== currentToken) {
+      currentToken = token;
+      offset = undefined;
     }
 
     // On the first poll with a token, skip the backlog so a restart doesn't
@@ -186,6 +212,24 @@ async function runLoop(myGen: number): Promise<void> {
     }
     for (const update of updates) {
       offset = update.update_id + 1;
+
+      // Pairing codes take priority and are NOT subject to the per-chat
+      // reply cooldown below: the code is single-use (matchPairingCode
+      // consumes it on match), so it is already self-limiting, and gating it
+      // on allowReply could silently drop the pairing confirmation if the
+      // same chat happened to get an unrelated reply (e.g. /chatid) in the
+      // last REPLY_COOLDOWN_MS.
+      const pairingMatch = matchPairingCode(update);
+      if (pairingMatch) {
+        await tgFetch(
+          token,
+          'sendMessage',
+          { chat_id: pairingMatch.chatId, text: pairingMatch.text },
+          10_000
+        );
+        continue;
+      }
+
       const reply = chatIdReplyFor(update);
       if (reply && allowReply(reply.chatId)) {
         await tgFetch(token, 'sendMessage', { chat_id: reply.chatId, text: reply.text }, 10_000);
