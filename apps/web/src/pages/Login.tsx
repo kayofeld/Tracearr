@@ -2,19 +2,34 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
-import { Loader2, User, KeyRound, LogIn, AlertCircle, AlertTriangle } from 'lucide-react';
+import {
+  Loader2,
+  User,
+  KeyRound,
+  LogIn,
+  AlertCircle,
+  AlertTriangle,
+  ChevronDown,
+} from 'lucide-react';
 import { MediaServerIcon } from '@/components/icons/MediaServerIcon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { authClient } from '@/lib/authClient';
 import { api, BASE_URL } from '@/lib/api';
-import { SIGN_UP_USERNAME_PATH, type SetupStatus } from '@tracearr/shared';
+import {
+  SIGN_UP_USERNAME_PATH,
+  EMBY_LOGIN_FAILURE_REASONS,
+  type SetupStatus,
+  type EmbyLoginFailureReason,
+} from '@tracearr/shared';
 import { LogoIcon } from '@/components/brand/Logo';
+import { cn } from '@/lib/utils';
 
 const DEFAULT_AUTH_METHODS: SetupStatus['authMethods'] = {
   local: true,
@@ -24,6 +39,38 @@ const DEFAULT_AUTH_METHODS: SetupStatus['authMethods'] = {
   oidcProviderName: null,
 };
 
+// A narrowed callable shape for `t()` - the real TFunction's generic overloads
+// make it awkward to pass around as a parameter type (mirrors the same
+// narrowing used in OmbiSettings.tsx / NeverWatched.tsx / SeerrSettings.tsx).
+type Translate = (key: string) => string;
+
+// Our own copy per POST /emby/login failure `code` (EmbyLoginFailureReason,
+// @tracearr/shared) - never string-match the server's prose. `INVALID_CREDENTIALS`
+// is the server's own undifferentiated fallback (diagnosis unavailable/inconclusive);
+// it maps to the same generic message an unrecognized/missing code falls back to.
+const EMBY_ERROR_MESSAGE_KEYS: Record<EmbyLoginFailureReason, string> = {
+  [EMBY_LOGIN_FAILURE_REASONS.USER_NOT_FOUND]: 'pages:login.embyErrorUserNotFound',
+  [EMBY_LOGIN_FAILURE_REASONS.WRONG_PASSWORD]: 'pages:login.embyErrorInvalidPassword',
+  [EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_DISABLED]: 'pages:login.embyErrorAccountDisabled',
+  [EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_LOCKED_OUT]: 'pages:login.embyErrorAccountLocked',
+  [EMBY_LOGIN_FAILURE_REASONS.INVALID_CREDENTIALS]: 'pages:login.embyLoginFailed',
+};
+
+function isEmbyLoginFailureReason(code: unknown): code is EmbyLoginFailureReason {
+  return typeof code === 'string' && code in EMBY_ERROR_MESSAGE_KEYS;
+}
+
+/** Render our own copy per failure code - never string-match the server's prose. */
+function resolveEmbyLoginErrorMessage(
+  error: { code?: unknown; message?: string } | null | undefined,
+  t: Translate
+): string {
+  if (isEmbyLoginFailureReason(error?.code)) {
+    return t(EMBY_ERROR_MESSAGE_KEYS[error.code]);
+  }
+  return error?.message || t('pages:login.embyLoginFailed');
+}
+
 type AuthStep = 'claim-code-gate' | 'initial';
 
 export function Login() {
@@ -31,6 +78,10 @@ export function Login() {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { t } = useTranslation(['pages', 'common', 'settings', 'notifications']);
+  // Narrowed shape used by the module-level resolveEmbyLoginErrorMessage - the
+  // real TFunction's overloaded generics don't structurally reduce to
+  // `Translate` cleanly (mirrors OmbiSettings.tsx / NeverWatched.tsx / SeerrSettings.tsx).
+  const translate = t as unknown as Translate;
   const { isAuthenticated, isLoading: authLoading } = useAuth();
 
   // Setup status - default to false (Sign In mode) since most users are returning
@@ -38,6 +89,12 @@ export function Login() {
   const [needsSetup, setNeedsSetup] = useState(false);
   const [requiresClaimCode, setRequiresClaimCode] = useState(false);
   const [authMethods, setAuthMethods] = useState<SetupStatus['authMethods']>(DEFAULT_AUTH_METHODS);
+  // Whether the owner already has a bound Emby identity (SetupStatus.embyAccountLinked).
+  // Defaults to false (today's unchanged behavior) until the status fetch resolves.
+  const [ownerEmbyLinked, setOwnerEmbyLinked] = useState(false);
+  // "Other sign-in options" disclosure - collapsed by default when the owner
+  // has a linked Emby account (the escape hatch stays reachable, not removed).
+  const [otherOptionsOpen, setOtherOptionsOpen] = useState(false);
 
   // Auth flow state
   const [authStep, setAuthStep] = useState<AuthStep>('initial');
@@ -56,6 +113,7 @@ export function Login() {
   const [embyUsername, setEmbyUsername] = useState('');
   const [embyPassword, setEmbyPassword] = useState('');
   const [embyPending, setEmbyPending] = useState(false);
+  const [embyFormError, setEmbyFormError] = useState<string | null>(null);
 
   // OIDC state
   const [oidcPending, setOidcPending] = useState(false);
@@ -80,6 +138,7 @@ export function Login() {
           setNeedsSetup(status.needsSetup);
           setRequiresClaimCode(status.requiresClaimCode);
           setAuthMethods(status.authMethods);
+          setOwnerEmbyLinked(status.embyAccountLinked);
 
           // Set initial auth step based on setup requirements
           if (status.needsSetup && status.requiresClaimCode) {
@@ -210,7 +269,7 @@ export function Login() {
   // Handle Emby credential sign-in (owner logs in with their Emby admin account).
   const handleEmbyLogin = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setFormError(null);
+    setEmbyFormError(null);
     setEmbyPending(true);
 
     try {
@@ -224,7 +283,7 @@ export function Login() {
       });
 
       if (error) {
-        setFormError(error.message ?? t('pages:login.embyLoginFailed'));
+        setEmbyFormError(resolveEmbyLoginErrorMessage(error, translate));
         return;
       }
 
@@ -326,7 +385,209 @@ export function Login() {
   // Emby credential login is offered for returning sign-in (an owner + Emby
   // server already exist). First-run setup stays on local account creation.
   const showEmbyLogin = authMethods.emby && !needsSetup;
+  // Once the owner has linked their Emby account, lead with Emby only and
+  // move every other enabled method behind a collapsed disclosure - kept
+  // reachable, not removed, since Emby login is a live passthrough and local
+  // sign-in is the only way in when the Emby server itself is unreachable.
+  const focusedEmbyMode = showEmbyLogin && ownerEmbyLinked;
+  const otherMethodsAvailable = authMethods.oidc || authMethods.local;
   const hasPrimaryMethods = showEmbyLogin || authMethods.oidc;
+
+  const embyForm = showEmbyLogin && (
+    <form onSubmit={handleEmbyLogin} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="emby-username">{t('pages:login.embyUsername')}</Label>
+        <Input
+          id="emby-username"
+          name="emby-username"
+          type="text"
+          autoComplete="username"
+          value={embyUsername}
+          onChange={(e) => setEmbyUsername(e.target.value)}
+          required
+          disabled={embyPending}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="emby-password">{t('settings:account.password')}</Label>
+        <Input
+          id="emby-password"
+          name="emby-password"
+          type="password"
+          autoComplete="current-password"
+          value={embyPassword}
+          onChange={(e) => setEmbyPassword(e.target.value)}
+          required
+          disabled={embyPending}
+        />
+      </div>
+      {embyFormError && (
+        <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {embyFormError}
+        </p>
+      )}
+      <Button type="submit" className="w-full" disabled={embyPending}>
+        {embyPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <MediaServerIcon type="emby" className="mr-2 h-4 w-4" />
+        )}
+        {t('pages:login.signInWithEmby')}
+      </Button>
+    </form>
+  );
+
+  const oidcButton = authMethods.oidc && (
+    <Button
+      type="button"
+      variant="outline"
+      className="w-full"
+      disabled={oidcPending}
+      onClick={handleOidcLogin}
+    >
+      {oidcPending ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : (
+        <LogIn className="mr-2 h-4 w-4" />
+      )}
+      {t('pages:login.continueWith', { provider: authMethods.oidcProviderName })}
+    </Button>
+  );
+
+  const methodsDivider = (
+    <div className="relative">
+      <div className="absolute inset-0 flex items-center">
+        <span className="w-full border-t" />
+      </div>
+      <div className="relative flex justify-center text-xs uppercase">
+        <span className="bg-card text-muted-foreground px-2">{t('common:or')}</span>
+      </div>
+    </div>
+  );
+
+  const localBlock = authMethods.local ? (
+    needsSetup ? (
+      <form onSubmit={handleSignUp} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="name">{t('settings:account.displayName')}</Label>
+          <Input
+            id="name"
+            type="text"
+            autoComplete="name"
+            placeholder={t('pages:login.displayNamePlaceholder')}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            disabled={localPending}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="username">{t('pages:login.username')}</Label>
+          <Input
+            id="username"
+            type="text"
+            autoComplete="username"
+            placeholder={t('pages:login.usernamePlaceholder')}
+            value={signupUsername}
+            onChange={(e) => setSignupUsername(e.target.value)}
+            required
+            minLength={3}
+            maxLength={30}
+            disabled={localPending}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="email">{t('pages:login.emailOptionalLabel')}</Label>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            placeholder={t('pages:login.emailPlaceholder')}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={localPending}
+          />
+          <p className="text-muted-foreground text-xs">{t('pages:login.emailOptionalHint')}</p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">{t('settings:account.password')}</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="new-password"
+            placeholder={t('pages:login.passwordPlaceholder')}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={8}
+            disabled={localPending}
+          />
+        </div>
+        {formError && (
+          <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {formError}
+          </p>
+        )}
+        <Button type="submit" className="w-full" disabled={localPending}>
+          {localPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <User className="mr-2 h-4 w-4" />
+          )}
+          {t('settings:account.createAccount')}
+        </Button>
+      </form>
+    ) : (
+      <form onSubmit={handleSignIn} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="identifier">{t('pages:login.usernameOrEmail')}</Label>
+          <Input
+            id="identifier"
+            type="text"
+            autoComplete="username"
+            placeholder={t('pages:login.identifierPlaceholder')}
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
+            required
+            disabled={localPending}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">{t('settings:account.password')}</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            placeholder={t('pages:login.yourPasswordPlaceholder')}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            disabled={localPending}
+          />
+        </div>
+        {formError && (
+          <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {formError}
+          </p>
+        )}
+        <Button type="submit" className="w-full" disabled={localPending}>
+          {localPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <KeyRound className="mr-2 h-4 w-4" />
+          )}
+          {t('common:actions.signIn')}
+        </Button>
+      </form>
+    )
+  ) : (
+    <p className="text-muted-foreground text-center text-sm">
+      {t('pages:login.localDisabledHint')}
+    </p>
+  );
 
   return (
     <div className="bg-background flex min-h-screen flex-col items-center justify-center p-4">
@@ -357,197 +618,36 @@ export function Login() {
             </Alert>
           )}
 
-          <>
-            {showEmbyLogin && (
-              <form onSubmit={handleEmbyLogin} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="emby-username">{t('pages:login.embyUsername')}</Label>
-                  <Input
-                    id="emby-username"
-                    type="text"
-                    autoComplete="username"
-                    value={embyUsername}
-                    onChange={(e) => setEmbyUsername(e.target.value)}
-                    required
-                    disabled={embyPending}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="emby-password">{t('settings:account.password')}</Label>
-                  <Input
-                    id="emby-password"
-                    type="password"
-                    autoComplete="current-password"
-                    value={embyPassword}
-                    onChange={(e) => setEmbyPassword(e.target.value)}
-                    required
-                    disabled={embyPending}
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={embyPending}>
-                  {embyPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <MediaServerIcon type="emby" className="mr-2 h-4 w-4" />
-                  )}
-                  {t('pages:login.signInWithEmby')}
-                </Button>
-              </form>
-            )}
-
-            {authMethods.oidc && (
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                disabled={oidcPending}
-                onClick={handleOidcLogin}
-              >
-                {oidcPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <LogIn className="mr-2 h-4 w-4" />
-                )}
-                {t('pages:login.continueWith', { provider: authMethods.oidcProviderName })}
-              </Button>
-            )}
-
-            {hasPrimaryMethods && (
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card text-muted-foreground px-2">{t('common:or')}</span>
-                </div>
-              </div>
-            )}
-
-            {authMethods.local ? (
-              needsSetup ? (
-                <form onSubmit={handleSignUp} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">{t('settings:account.displayName')}</Label>
-                    <Input
-                      id="name"
-                      type="text"
-                      autoComplete="name"
-                      placeholder={t('pages:login.displayNamePlaceholder')}
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      required
-                      disabled={localPending}
+          {focusedEmbyMode ? (
+            <>
+              {embyForm}
+              {otherMethodsAvailable && (
+                <Collapsible open={otherOptionsOpen} onOpenChange={setOtherOptionsOpen}>
+                  <CollapsibleTrigger className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-[3px]">
+                    {t('pages:login.otherSignInOptions')}
+                    <ChevronDown
+                      className={cn(
+                        'h-3.5 w-3.5 transition-transform',
+                        otherOptionsOpen && 'rotate-180'
+                      )}
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="username">{t('pages:login.username')}</Label>
-                    <Input
-                      id="username"
-                      type="text"
-                      autoComplete="username"
-                      placeholder={t('pages:login.usernamePlaceholder')}
-                      value={signupUsername}
-                      onChange={(e) => setSignupUsername(e.target.value)}
-                      required
-                      minLength={3}
-                      maxLength={30}
-                      disabled={localPending}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="email">{t('pages:login.emailOptionalLabel')}</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      autoComplete="email"
-                      placeholder={t('pages:login.emailPlaceholder')}
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      disabled={localPending}
-                    />
-                    <p className="text-muted-foreground text-xs">
-                      {t('pages:login.emailOptionalHint')}
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="password">{t('settings:account.password')}</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      autoComplete="new-password"
-                      placeholder={t('pages:login.passwordPlaceholder')}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      minLength={8}
-                      disabled={localPending}
-                    />
-                  </div>
-                  {formError && (
-                    <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
-                      <AlertCircle className="h-4 w-4 shrink-0" />
-                      {formError}
-                    </p>
-                  )}
-                  <Button type="submit" className="w-full" disabled={localPending}>
-                    {localPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <User className="mr-2 h-4 w-4" />
-                    )}
-                    {t('settings:account.createAccount')}
-                  </Button>
-                </form>
-              ) : (
-                <form onSubmit={handleSignIn} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="identifier">{t('pages:login.usernameOrEmail')}</Label>
-                    <Input
-                      id="identifier"
-                      type="text"
-                      autoComplete="username"
-                      placeholder={t('pages:login.identifierPlaceholder')}
-                      value={identifier}
-                      onChange={(e) => setIdentifier(e.target.value)}
-                      required
-                      disabled={localPending}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="password">{t('settings:account.password')}</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      autoComplete="current-password"
-                      placeholder={t('pages:login.yourPasswordPlaceholder')}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      disabled={localPending}
-                    />
-                  </div>
-                  {formError && (
-                    <p className="text-destructive flex items-center gap-1.5 text-sm" role="alert">
-                      <AlertCircle className="h-4 w-4 shrink-0" />
-                      {formError}
-                    </p>
-                  )}
-                  <Button type="submit" className="w-full" disabled={localPending}>
-                    {localPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <KeyRound className="mr-2 h-4 w-4" />
-                    )}
-                    {t('common:actions.signIn')}
-                  </Button>
-                </form>
-              )
-            ) : (
-              <p className="text-muted-foreground text-center text-sm">
-                {t('pages:login.localDisabledHint')}
-              </p>
-            )}
-          </>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-4 pt-4">
+                    {oidcButton}
+                    {authMethods.oidc && authMethods.local && methodsDivider}
+                    {localBlock}
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+            </>
+          ) : (
+            <>
+              {embyForm}
+              {oidcButton}
+              {hasPrimaryMethods && methodsDivider}
+              {localBlock}
+            </>
+          )}
         </CardContent>
       </Card>
 

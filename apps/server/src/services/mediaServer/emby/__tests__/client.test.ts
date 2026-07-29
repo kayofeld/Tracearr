@@ -195,3 +195,119 @@ describe('EmbyClient.verifyServerAdmin', () => {
     });
   });
 });
+
+describe('EmbyClient.diagnoseLoginFailure', () => {
+  const ADMIN_KEY = 'admin-key';
+  const TIMEOUT_MS = 3000;
+
+  beforeEach(() => {
+    mockFetchJson.mockReset();
+  });
+
+  it('uses the admin key (X-Emby-Authorization) and the given timeout, never the submitted password', async () => {
+    mockFetchJson.mockResolvedValue([{ Name: 'demo', Policy: { IsDisabled: false } }]);
+
+    await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+
+    const call = mockFetchJson.mock.calls[0];
+    expect(call?.[0]).toBe(`${URL}/Users`);
+    const options = call?.[1] as { headers?: Record<string, string>; timeout?: number };
+    expect(options?.headers?.['X-Emby-Authorization']).toContain(ADMIN_KEY);
+    expect(options?.timeout).toBe(TIMEOUT_MS);
+  });
+
+  it('matches the username case-insensitively', async () => {
+    mockFetchJson.mockResolvedValue([{ Name: 'Demo', Policy: {} }]);
+
+    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'DEMO', TIMEOUT_MS);
+
+    expect(result).toBe('wrong_password');
+  });
+
+  it('returns user_not_found when no user with that name exists', async () => {
+    mockFetchJson.mockResolvedValue([{ Name: 'someone-else', Policy: {} }]);
+
+    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+
+    expect(result).toBe('user_not_found');
+  });
+
+  it('returns account_disabled when Policy.IsDisabled is true', async () => {
+    mockFetchJson.mockResolvedValue([{ Name: 'demo', Policy: { IsDisabled: true } }]);
+
+    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+
+    expect(result).toBe('account_disabled');
+  });
+
+  it('returns account_locked_out when invalid attempts meet a positive lockout threshold', async () => {
+    mockFetchJson.mockResolvedValue([
+      {
+        Name: 'demo',
+        Policy: { IsDisabled: false, LoginAttemptsBeforeLockout: 3, InvalidLoginAttemptCount: 3 },
+      },
+    ]);
+
+    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+
+    expect(result).toBe('account_locked_out');
+  });
+
+  it('does NOT claim a lockout when LoginAttemptsBeforeLockout is missing (not reliably observable)', async () => {
+    // Some Emby versions/configs never populate this field. Absent a
+    // verifiable threshold, this must fall back to wrong_password rather
+    // than fabricate a lockout state.
+    mockFetchJson.mockResolvedValue([
+      { Name: 'demo', Policy: { IsDisabled: false, InvalidLoginAttemptCount: 10 } },
+    ]);
+
+    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+
+    expect(result).toBe('wrong_password');
+  });
+
+  it('does NOT claim a lockout when LoginAttemptsBeforeLockout is 0/disabled', async () => {
+    mockFetchJson.mockResolvedValue([
+      {
+        Name: 'demo',
+        Policy: { IsDisabled: false, LoginAttemptsBeforeLockout: 0, InvalidLoginAttemptCount: 50 },
+      },
+    ]);
+
+    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+
+    expect(result).toBe('wrong_password');
+  });
+
+  it('returns wrong_password when the account exists, is not disabled, and is not locked out', async () => {
+    mockFetchJson.mockResolvedValue([{ Name: 'demo', Policy: { IsDisabled: false } }]);
+
+    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+
+    expect(result).toBe('wrong_password');
+  });
+
+  it('throws when the admin key is rejected (caller must fall back)', async () => {
+    mockFetchJson.mockRejectedValue(httpError(401));
+
+    await expect(
+      EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS)
+    ).rejects.toThrow();
+  });
+
+  it('throws when the /Users response is not an array (cannot determine)', async () => {
+    mockFetchJson.mockResolvedValue({ unexpected: 'shape' });
+
+    await expect(
+      EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS)
+    ).rejects.toThrow();
+  });
+
+  it('throws on a network error/timeout (caller must fall back)', async () => {
+    mockFetchJson.mockRejectedValue(new Error('ETIMEDOUT'));
+
+    await expect(
+      EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS)
+    ).rejects.toThrow();
+  });
+});
