@@ -29,15 +29,35 @@ setup('authenticate', async ({ page }) => {
     await claimCodeInput.fill(claimCode);
     await page.getByRole('button', { name: 'Validate Claim Code' }).click();
 
-    // Wait for the gate to dismiss and the signup form to appear
-    await page.waitForSelector('#email', { timeout: 10_000 });
+    // Wait for the gate to dismiss. Wait on the form itself, not on a field:
+    // first-run setup now opens on the Emby tab, which has no #email, so
+    // waiting for that field here times out before the tab switch below.
+    await page.waitForSelector('form', { timeout: 10_000 });
+  }
+
+  // First-run setup now offers two paths and opens on the Emby one, which is
+  // listed first because it is the recommended way to claim an instance. These
+  // tests set up a local owner, so switch to that tab when it is present. The
+  // tab only exists during first-run setup, so this is a no-op for a returning
+  // user hitting the sign-in screen.
+  const localTab = page.getByRole('tab', { name: 'Create local account' });
+  const isFirstRunSetup = await localTab.isVisible({ timeout: 2_000 }).catch(() => false);
+  if (isFirstRunSetup) {
+    await localTab.click();
+    // Wait for the panel's submit button, not just a field: the short
+    // visibility probe below would otherwise race the tab switch, decide this
+    // was a returning user, and hang waiting for the sign-in form.
+    await page.getByRole('button', { name: 'Create Account' }).waitFor({ state: 'visible' });
   }
 
   // Determine if this is first-time setup (signup) or returning user (login)
   const createAccountButton = page.getByRole('button', { name: 'Create Account' });
   const signInButton = page.getByRole('button', { name: 'Sign In', exact: true });
 
-  if (await createAccountButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  if (
+    isFirstRunSetup ||
+    (await createAccountButton.isVisible({ timeout: 2_000 }).catch(() => false))
+  ) {
     // First-time setup — sign up as the first owner
     await page.locator('#name').fill(E2E_USER.name);
     await page.locator('#username').fill(E2E_USER.username);

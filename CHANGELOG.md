@@ -4,6 +4,14 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v1.12.1 — fix the first-run end-to-end test
+
+- No user-facing change. The end-to-end suite's setup helper still expected the old single-form
+  first-run screen, so it broke when v1.12.0 gave that screen two tabs. It now selects the local
+  account tab, and decides "is this a fresh instance" from whether that tab exists rather than racing
+  a two-second probe against the tab switch, which made the step intermittently take the sign-in path
+  and hang.
+
 ## v1.12.0 — set Tracearr up with your Emby account
 
 - **First-run setup can now use Emby directly.** On a fresh instance you give it your Emby server
