@@ -283,3 +283,47 @@ export async function listUsersCommand(): Promise<UserSummary[]> {
 export async function enableLocalLoginCommand(): Promise<void> {
   await setSetting('localLoginEnabled', true);
 }
+
+/**
+ * Promotes an existing user row to owner. This is the CLI-only recovery path
+ * for an `ownerless-with-data` instance
+ * (docs/architecture/emby-native-setup.md §3, §7.4): /emby/setup,
+ * /sign-up/username and OIDC first-signup all deliberately refuse to let
+ * anyone claim such an instance from the network (a deleted owner, a partial
+ * restore, or a compensation failure can leave one), so without this command
+ * that refusal is a permanent brick rather than a recovery path.
+ *
+ * Refuses if an owner already exists - checked up front, and re-checked by
+ * the users_single_owner partial unique index at the update itself, so a
+ * race against a concurrent claim (e.g. a browser claim landing between the
+ * check and this write) cannot produce two owners either.
+ */
+export async function promoteOwnerCommand(opts: { username: string }): Promise<void> {
+  const [existingOwner] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.role, 'owner'))
+    .limit(1);
+  if (existingOwner) {
+    throw new Error(
+      'This Tracearr instance already has an owner. Refusing to promote another user.'
+    );
+  }
+
+  const user = await findUserByUsername(opts.username);
+  if (!user) throw new Error(`No user named ${opts.username}`);
+
+  try {
+    await db
+      .update(users)
+      .set({ role: 'owner', updatedAt: new Date() })
+      .where(eq(users.id, user.id));
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new Error(
+        'Another request already created an owner while this command was running. Refusing to promote.'
+      );
+    }
+    throw error;
+  }
+}

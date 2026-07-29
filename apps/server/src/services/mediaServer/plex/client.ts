@@ -5,7 +5,7 @@
  * Provides a unified interface for session tracking, user management, and library access.
  */
 
-import { fetchJson, fetchText, plexHeaders } from '../../../utils/http.js';
+import { fetchJson, fetchText, plexHeaders, type HttpRequestOptions } from '../../../utils/http.js';
 import { assertSafeProbeUrl, SsrfBlockedError } from '../../../utils/ssrf.js';
 import type {
   IMediaServerClient,
@@ -616,12 +616,21 @@ export class PlexClient implements IMediaServerClient, IMediaServerClientWithHis
   /**
    * Verify if token has admin access to a Plex server.
    *
+   * @param fetchImpl JSON fetcher, defaults to the plain `fetchJson` (today's
+   *   behavior, unchanged for the existing add/update-server routes). Owner
+   *   decision 5 (docs/architecture/emby-native-setup.md T10): `/plex/connect`
+   *   passes a `safeProbeJson`-wrapped fetcher instead, so its pre-auth,
+   *   client-supplied-URL probe gets the same hardening (resolved-address
+   *   validation, manual-redirect-as-failure, no upstream detail in errors)
+   *   as /emby/setup, rather than only this function's own literal-only
+   *   `assertSafeProbeUrl` pre-flight below.
    * @throws Error with code 'CONNECTION_FAILED' if server is unreachable
    * @throws Error with code 'NOT_ADMIN' if user doesn't have admin access
    */
   static async verifyServerAdmin(
     token: string,
-    serverUrl: string
+    serverUrl: string,
+    fetchImpl: <T>(url: string, options?: HttpRequestOptions) => Promise<T> = fetchJson
   ): Promise<{ success: true } | { success: false; code: string; message: string }> {
     const url = serverUrl.replace(/\/$/, '');
 
@@ -640,7 +649,7 @@ export class PlexClient implements IMediaServerClient, IMediaServerClientWithHis
 
     // First verify basic server connectivity
     try {
-      await fetchJson<unknown>(`${url}/`, {
+      await fetchImpl<unknown>(`${url}/`, {
         headers,
         service: 'plex',
         timeout: 10000,
@@ -658,7 +667,7 @@ export class PlexClient implements IMediaServerClient, IMediaServerClientWithHis
 
     // Then verify admin access by fetching accounts (admin-only endpoint)
     try {
-      await fetchJson<unknown>(`${url}/accounts`, {
+      await fetchImpl<unknown>(`${url}/accounts`, {
         headers,
         service: 'plex',
         timeout: 10000,

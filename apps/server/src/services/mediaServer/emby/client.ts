@@ -7,7 +7,7 @@
  * Based on Emby OpenAPI specification v4.1.1.0
  */
 
-import { fetchJson, HttpClientError } from '../../../utils/http.js';
+import { fetchJson, HttpClientError, type HttpRequestOptions } from '../../../utils/http.js';
 import {
   BaseMediaServerClient,
   type JellyfinEmbyActivityEntry,
@@ -31,6 +31,16 @@ import {
 export type EmbyActivityEntry = JellyfinEmbyActivityEntry;
 export type EmbyAuthResult = JellyfinEmbyAuthResult;
 export type EmbyItemResult = JellyfinEmbyItemResult;
+
+/**
+ * The shape `authenticate`/`verifyServerAdmin` call fetchJson through.
+ * Defaults to the plain `fetchJson` (today's behavior, unchanged for
+ * /emby/login and POST /servers - design §8.1). The setup plugin
+ * (embySetupPlugin.ts) passes `safeProbeJson` wrapped to this shape instead,
+ * for the hardened pre-auth path where the URL comes from the client
+ * (SEC-03, docs/architecture/emby-native-setup.md §8).
+ */
+export type EmbyJsonFetcher = <T>(url: string, options?: HttpRequestOptions) => Promise<T>;
 
 /**
  * Emby Media Server client implementation
@@ -94,13 +104,14 @@ export class EmbyClient extends BaseMediaServerClient {
   static async authenticate(
     serverUrl: string,
     username: string,
-    password: string
+    password: string,
+    fetchImpl: EmbyJsonFetcher = fetchJson
   ): Promise<EmbyAuthResult | null> {
     const url = serverUrl.replace(/\/$/, '');
     const authHeader = BaseMediaServerClient.buildStaticAuthHeader();
 
     try {
-      const data = await fetchJson<Record<string, unknown>>(`${url}/Users/AuthenticateByName`, {
+      const data = await fetchImpl<Record<string, unknown>>(`${url}/Users/AuthenticateByName`, {
         method: 'POST',
         headers: {
           'X-Emby-Authorization': authHeader,
@@ -145,7 +156,8 @@ export class EmbyClient extends BaseMediaServerClient {
    */
   static async verifyServerAdmin(
     apiKey: string,
-    serverUrl: string
+    serverUrl: string,
+    fetchImpl: EmbyJsonFetcher = fetchJson
   ): Promise<{ success: true } | { success: false; code: string; message: string }> {
     const url = serverUrl.replace(/\/$/, '');
 
@@ -156,7 +168,7 @@ export class EmbyClient extends BaseMediaServerClient {
 
     // Verify basic (unauthenticated) connectivity so a network problem is distinct from auth.
     try {
-      await fetchJson<unknown>(`${url}/System/Info/Public`, {
+      await fetchImpl<unknown>(`${url}/System/Info/Public`, {
         headers: { Accept: 'application/json' },
         service: 'emby',
         timeout: 10000,
@@ -172,7 +184,7 @@ export class EmbyClient extends BaseMediaServerClient {
 
     // Try /Users/Me first (works for user tokens from AuthenticateByName).
     try {
-      const data = await fetchJson<Record<string, unknown>>(`${url}/Users/Me`, {
+      const data = await fetchImpl<Record<string, unknown>>(`${url}/Users/Me`, {
         headers,
         service: 'emby',
         timeout: 10000,
@@ -202,7 +214,7 @@ export class EmbyClient extends BaseMediaServerClient {
 
     // Try /Auth/Keys, which only admin-level API keys can read.
     try {
-      await fetchJson<unknown>(`${url}/Auth/Keys`, {
+      await fetchImpl<unknown>(`${url}/Auth/Keys`, {
         headers,
         service: 'emby',
         timeout: 10000,

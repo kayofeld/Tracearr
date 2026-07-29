@@ -55,7 +55,6 @@ vi.mock('../../lib/redisShared.js', () => ({
 vi.mock('../../services/userService.js', () => ({
   getUserById: vi.fn(),
   getUserByPlexAccountId: vi.fn(),
-  getOwnerUser: vi.fn(),
 }));
 
 vi.mock('../../utils/claimCode.js', () => ({
@@ -81,7 +80,7 @@ vi.mock('better-auth/cookies', () => ({
 
 import { db } from '../../db/client.js';
 import { PlexClient } from '../../services/mediaServer/index.js';
-import { getUserById, getUserByPlexAccountId, getOwnerUser } from '../../services/userService.js';
+import { getUserById, getUserByPlexAccountId } from '../../services/userService.js';
 import { isClaimCodeEnabled, validateClaimCode } from '../../utils/claimCode.js';
 import { plexPlugin } from '../../lib/plexPlugin.js';
 
@@ -97,6 +96,43 @@ function makeChain(result: unknown = []) {
   }
   chain.then = (resolve: (v: unknown) => unknown) => resolve(result);
   return chain;
+}
+
+/** Same shape as makeChain, but awaiting the chain rejects instead of resolving. */
+function makeRejectingChain(err: Error) {
+  const chain: Record<string, unknown> = {};
+  for (const m of ['from', 'where', 'limit', 'set', 'values', 'returning', 'onConflictDoUpdate']) {
+    chain[m] = vi.fn(() => chain);
+  }
+  chain.then = (_resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+    reject ? reject(err) : Promise.reject(err);
+  return chain;
+}
+
+/**
+ * assertSignupAllowed() (authGuards.ts) now derives getInstanceClaimState()
+ * instead of a single getOwnerUser() call: four `db.select(...).limit(1)`
+ * queries issued synchronously (owner row, any users row, any auth_accounts
+ * row, any servers row), in exactly that order, before the Promise.all they
+ * share ever resolves. Every plexPlugin.ts call site that reaches
+ * assertSignupAllowed (both plexCheckPin's first-run branch and plexConnect's
+ * connect-time re-check) needs exactly these four queued in order - queue
+ * them right where the OLD single getOwnerUser() mock used to be the only
+ * thing standing in for this check.
+ */
+function pushClaimStateSelects(
+  state: {
+    owner?: unknown[];
+    anyUser?: unknown[];
+    anyAccount?: unknown[];
+    anyServer?: unknown[];
+  } = {}
+) {
+  vi.mocked(db.select)
+    .mockReturnValueOnce(makeChain(state.owner ?? []) as never)
+    .mockReturnValueOnce(makeChain(state.anyUser ?? []) as never)
+    .mockReturnValueOnce(makeChain(state.anyAccount ?? []) as never)
+    .mockReturnValueOnce(makeChain(state.anyServer ?? []) as never);
 }
 
 function makeCtx() {
@@ -204,7 +240,7 @@ describe('plex better auth plugin', () => {
       .mockReturnValueOnce(makeChain([]) as never)
       .mockReturnValueOnce(makeChain([]) as never);
     vi.mocked(getUserByPlexAccountId).mockResolvedValue(null);
-    vi.mocked(getOwnerUser).mockResolvedValue(null);
+    pushClaimStateSelects(); // unclaimed: assertSignupAllowed() must not throw
     vi.mocked(PlexClient.getServers).mockResolvedValue([
       {
         name: 'My Plex',
@@ -242,7 +278,7 @@ describe('plex better auth plugin', () => {
       .mockReturnValueOnce(makeChain([]) as never)
       .mockReturnValueOnce(makeChain([]) as never);
     vi.mocked(getUserByPlexAccountId).mockResolvedValue(null);
-    vi.mocked(getOwnerUser).mockResolvedValue({ id: 'owner-x', role: 'owner' } as never);
+    pushClaimStateSelects({ owner: [{ id: 'owner-x', role: 'owner' }] }); // owned
 
     await expect(callEndpoint('plexCheckPin', { pinId: 'pin-1' })).rejects.toMatchObject({
       statusCode: 403,
@@ -285,7 +321,7 @@ describe('plex better auth plugin', () => {
         .mockReturnValueOnce(makeChain([]) as never)
         .mockReturnValueOnce(makeChain([]) as never);
       vi.mocked(getUserByPlexAccountId).mockResolvedValue(null);
-      vi.mocked(getOwnerUser).mockResolvedValue(null);
+      pushClaimStateSelects(); // unclaimed: assertSignupAllowed() must not throw
       vi.mocked(PlexClient.getServers).mockResolvedValue([]);
     });
 
@@ -329,6 +365,23 @@ describe('plex better auth plugin', () => {
       expect(ctx.createSession).toHaveBeenCalledWith('user-new');
       expect(mockSetSessionCookie).toHaveBeenCalledTimes(1);
     });
+
+    // SEC-05 fix (design §7.2): this raw insert bypasses the better-auth hook
+    // chain entirely, so users_single_owner is the only gate. A race loser
+    // must get a clean 403, not a raw constraint-violation 500.
+    it('maps a users_single_owner race loss to 403, not 500', async () => {
+      vi.mocked(isClaimCodeEnabled).mockReturnValue(true);
+      vi.mocked(validateClaimCode).mockReturnValue(true);
+      vi.mocked(db.insert).mockReturnValueOnce(
+        makeRejectingChain(
+          new Error('duplicate key value violates unique constraint "users_single_owner"')
+        ) as never
+      );
+
+      await expect(
+        callEndpoint('plexCheckPin', { pinId: 'pin-new', claimCode: 'ABCD-EFGH-JKLM' })
+      ).rejects.toMatchObject({ statusCode: 403 });
+    });
   });
 
   describe('plexConnect', () => {
@@ -347,7 +400,7 @@ describe('plex better auth plugin', () => {
 
     it('rejects connect when an owner already exists (re-checked at connect time)', async () => {
       mockRedis.get.mockResolvedValue(JSON.stringify(storedTempData));
-      vi.mocked(getOwnerUser).mockResolvedValue({ id: 'owner-x', role: 'owner' } as never);
+      pushClaimStateSelects({ owner: [{ id: 'owner-x', role: 'owner' }] }); // owned
 
       await expect(callEndpoint('plexConnect', connectPayload)).rejects.toMatchObject({
         statusCode: 403,
@@ -359,7 +412,7 @@ describe('plex better auth plugin', () => {
     it('rejects connect when a claim code is required and missing, before verifyServerAdmin', async () => {
       vi.mocked(isClaimCodeEnabled).mockReturnValue(true);
       mockRedis.get.mockResolvedValue(JSON.stringify(storedTempData));
-      vi.mocked(getOwnerUser).mockResolvedValue(null);
+      pushClaimStateSelects(); // unclaimed
 
       await expect(callEndpoint('plexConnect', connectPayload)).rejects.toMatchObject({
         statusCode: 403,
@@ -372,7 +425,7 @@ describe('plex better auth plugin', () => {
       vi.mocked(isClaimCodeEnabled).mockReturnValue(true);
       vi.mocked(validateClaimCode).mockReturnValue(false);
       mockRedis.get.mockResolvedValue(JSON.stringify(storedTempData));
-      vi.mocked(getOwnerUser).mockResolvedValue(null);
+      pushClaimStateSelects(); // unclaimed
 
       await expect(
         callEndpoint('plexConnect', { ...connectPayload, claimCode: 'WRONG-CODE' })
@@ -384,7 +437,7 @@ describe('plex better auth plugin', () => {
 
     it('does not delete the temp token when verifyServerAdmin fails (allows retry)', async () => {
       mockRedis.get.mockResolvedValue(JSON.stringify(storedTempData));
-      vi.mocked(getOwnerUser).mockResolvedValue(null);
+      pushClaimStateSelects(); // unclaimed
       vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({
         success: false,
         code: PlexClient.AdminVerifyError.CONNECTION_FAILED,
@@ -400,16 +453,19 @@ describe('plex better auth plugin', () => {
     it('creates the user and server, deletes the temp token, and returns a session on success', async () => {
       mockRedis.get.mockResolvedValue(JSON.stringify(storedTempData));
       mockRedis.del.mockResolvedValue(1);
-      vi.mocked(getOwnerUser).mockResolvedValue(null);
+      pushClaimStateSelects(); // unclaimed
       vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({ success: true } as never);
       mockGetUsers.mockResolvedValue([{ id: 'plex-local-1', isAdmin: true }]);
 
+      // Contended user insert now runs BEFORE the server select/insert (SEC-05
+      // fix, design §7.2 reorder), so the insert-return order is user, then
+      // server, then plexAccount - the reverse of the pre-fix order.
       vi.mocked(db.select).mockReturnValueOnce(makeChain([]) as never); // no existing server
       vi.mocked(db.insert)
-        .mockReturnValueOnce(makeChain([{ id: 'server-1' }]) as never)
         .mockReturnValueOnce(
           makeChain([{ id: 'user-1', username: 'newowner', role: 'owner' }]) as never
         )
+        .mockReturnValueOnce(makeChain([{ id: 'server-1' }]) as never)
         .mockReturnValueOnce(makeChain([{ id: 'plexacct-1' }]) as never);
 
       const { result, ctx } = await callEndpoint('plexConnect', connectPayload);
@@ -419,6 +475,35 @@ describe('plex better auth plugin', () => {
       expect(ctx.createSession).toHaveBeenCalledWith('user-1');
       expect(mockSetSessionCookie).toHaveBeenCalledTimes(1);
       expect(mockRedis.del).toHaveBeenCalledWith(expect.stringContaining('temp-abc'));
+    });
+
+    // SEC-05 fix (design §7.2): the contended user insert now runs BEFORE the
+    // server select/insert, so a race loser here never touches the servers
+    // table at all - no orphan row, no overwritten token - and gets a clean
+    // 403 rather than a raw constraint-violation 500.
+    it('maps a users_single_owner race loss to 403 and never touches the servers table', async () => {
+      mockRedis.get.mockResolvedValue(JSON.stringify(storedTempData));
+      pushClaimStateSelects(); // unclaimed
+      vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({ success: true } as never);
+      mockGetUsers.mockResolvedValue([{ id: 'plex-local-1', isAdmin: true }]);
+
+      vi.mocked(db.insert).mockReturnValueOnce(
+        makeRejectingChain(
+          new Error('duplicate key value violates unique constraint "users_single_owner"')
+        ) as never
+      );
+
+      await expect(callEndpoint('plexConnect', connectPayload)).rejects.toMatchObject({
+        statusCode: 403,
+      });
+      // Only the 4 claim-state selects ran - the "existing server" select
+      // (which would run right after the user insert in the new order) never
+      // fires, and only the failed user insert happened: no server
+      // select/insert, no plexAccounts insert, no session, no temp-token
+      // consumption.
+      expect(db.select).toHaveBeenCalledTimes(4);
+      expect(db.insert).toHaveBeenCalledTimes(1);
+      expect(mockRedis.del).not.toHaveBeenCalled();
     });
   });
 });

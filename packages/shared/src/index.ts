@@ -17,6 +17,8 @@ export type {
   UserRole,
   AuthUser,
   SetupStatus,
+  EmbySetupResult,
+  EmbySetupErrorCode,
   UserLocation,
   UserDevice,
   UserMergeResult,
@@ -483,6 +485,7 @@ export {
   API_VERSION,
   API_BASE_PATH,
   SIGN_UP_USERNAME_PATH,
+  EMBY_SETUP_PATH,
   JWT_CONFIG,
   POLLING_INTERVALS,
   POLLER_CONFIG,
@@ -528,7 +531,7 @@ export {
 export { ROLE_PERMISSIONS, LOGIN_ROLES, canLogin, hasMinRole, isOwner, isActive } from './types.js';
 
 // Session constants
-export { MEDIA_TYPES, DEFAULT_STREAM_DETAILS } from './types.js';
+export { MEDIA_TYPES, DEFAULT_STREAM_DETAILS, EMBY_SETUP_ERROR_CODES } from './types.js';
 
 // Backup constants
 export { RESTORE_PHASES } from './types.js';

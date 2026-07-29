@@ -1,24 +1,54 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../services/userService.js', () => ({
-  getOwnerUser: vi.fn(),
-}));
 vi.mock('../../utils/claimCode.js', () => ({
   isClaimCodeEnabled: vi.fn(),
   validateClaimCode: vi.fn(),
 }));
 vi.mock('../../db/client.js', () => ({ db: { select: vi.fn() } }));
 
-import { getOwnerUser } from '../../services/userService.js';
 import { isClaimCodeEnabled, validateClaimCode } from '../../utils/claimCode.js';
 import {
   assertSignupAllowed,
   assertClaimCode,
   assertUserCanLogin,
   assertOAuthSignupClaimCode,
+  getInstanceClaimState,
 } from '../authGuards.js';
 import { db } from '../../db/client.js';
 
+/**
+ * getInstanceClaimState() issues four `db.select(...).from(...).where...limit(1)`
+ * calls in parallel (owner row, any user row, any auth_accounts row, any
+ * servers row - two of those omit `.where`). Each mocked chain call queues
+ * the next configured result in call order, mirroring the four
+ * Promise.all-issued queries in authGuards.ts.
+ */
+function mockClaimStateQueries(results: {
+  owner?: unknown[];
+  anyUser?: unknown[];
+  anyAccount?: unknown[];
+  anyServer?: unknown[];
+}) {
+  const queue = [
+    results.owner ?? [],
+    results.anyUser ?? [],
+    results.anyAccount ?? [],
+    results.anyServer ?? [],
+  ];
+  let call = 0;
+  vi.mocked(db.select).mockImplementation(() => {
+    const result = queue[call] ?? [];
+    call += 1;
+    const chain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue(result),
+    };
+    return chain as never;
+  });
+}
+
+/** Single-chain mock for assertUserCanLogin's one select. */
 function mockDbSelectLimit(result: unknown[]) {
   const chain = {
     from: vi.fn().mockReturnThis(),
@@ -29,15 +59,50 @@ function mockDbSelectLimit(result: unknown[]) {
   return chain;
 }
 
+describe('getInstanceClaimState', () => {
+  it('returns "owned" when an owner row exists, regardless of the other three', async () => {
+    mockClaimStateQueries({ owner: [{ id: 'u1' }], anyUser: [{ id: 'u1' }] });
+    await expect(getInstanceClaimState()).resolves.toBe('owned');
+  });
+
+  it('returns "unclaimed" when there is no owner and no users/accounts/servers at all', async () => {
+    mockClaimStateQueries({});
+    await expect(getInstanceClaimState()).resolves.toBe('unclaimed');
+  });
+
+  it('returns "ownerless-with-data" when only a users row exists (no owner)', async () => {
+    mockClaimStateQueries({ anyUser: [{ id: 'member-1' }] });
+    await expect(getInstanceClaimState()).resolves.toBe('ownerless-with-data');
+  });
+
+  it('returns "ownerless-with-data" when only an auth_accounts row exists', async () => {
+    mockClaimStateQueries({ anyAccount: [{ id: 'acct-1' }] });
+    await expect(getInstanceClaimState()).resolves.toBe('ownerless-with-data');
+  });
+
+  it('returns "ownerless-with-data" when only a servers row exists', async () => {
+    mockClaimStateQueries({ anyServer: [{ id: 'srv-1' }] });
+    await expect(getInstanceClaimState()).resolves.toBe('ownerless-with-data');
+  });
+});
+
 describe('assertSignupAllowed', () => {
-  it('allows signup when no owner exists', async () => {
-    vi.mocked(getOwnerUser).mockResolvedValue(null);
+  it('allows signup when the instance is unclaimed', async () => {
+    mockClaimStateQueries({});
     await expect(assertSignupAllowed()).resolves.toBeUndefined();
   });
 
   it('rejects signup when an owner exists', async () => {
-    vi.mocked(getOwnerUser).mockResolvedValue({ id: 'u1', role: 'owner' } as never);
+    mockClaimStateQueries({ owner: [{ id: 'u1' }] });
     await expect(assertSignupAllowed()).rejects.toMatchObject({ status: 'FORBIDDEN' });
+  });
+
+  it('rejects signup when the instance is ownerless-with-data, with the CLI recovery message', async () => {
+    mockClaimStateQueries({ anyServer: [{ id: 'srv-1' }] });
+    await expect(assertSignupAllowed()).rejects.toMatchObject({
+      status: 'FORBIDDEN',
+      body: { message: expect.stringMatching(/promote-owner/) },
+    });
   });
 });
 
@@ -66,21 +131,21 @@ describe('assertClaimCode', () => {
 
 describe('assertOAuthSignupClaimCode', () => {
   it('is a no-op when an owner already exists, regardless of the code', async () => {
-    vi.mocked(getOwnerUser).mockResolvedValue({ id: 'u1', role: 'owner' } as never);
+    mockClaimStateQueries({ owner: [{ id: 'u1' }] });
     await expect(assertOAuthSignupClaimCode(undefined)).resolves.toBeUndefined();
     expect(isClaimCodeEnabled).not.toHaveBeenCalled();
   });
 
-  it('rejects an ownerless instance with no claim code when claim codes are enabled', async () => {
-    vi.mocked(getOwnerUser).mockResolvedValue(null);
+  it('rejects an unclaimed instance with no claim code when claim codes are enabled', async () => {
+    mockClaimStateQueries({});
     vi.mocked(isClaimCodeEnabled).mockReturnValue(true);
     await expect(assertOAuthSignupClaimCode(undefined)).rejects.toMatchObject({
       status: 'FORBIDDEN',
     });
   });
 
-  it('rejects an ownerless instance with an invalid claim code', async () => {
-    vi.mocked(getOwnerUser).mockResolvedValue(null);
+  it('rejects an unclaimed instance with an invalid claim code', async () => {
+    mockClaimStateQueries({});
     vi.mocked(isClaimCodeEnabled).mockReturnValue(true);
     vi.mocked(validateClaimCode).mockReturnValue(false);
     await expect(assertOAuthSignupClaimCode('wrong')).rejects.toMatchObject({
@@ -88,17 +153,26 @@ describe('assertOAuthSignupClaimCode', () => {
     });
   });
 
-  it('allows an ownerless instance with a valid claim code', async () => {
-    vi.mocked(getOwnerUser).mockResolvedValue(null);
+  it('allows an unclaimed instance with a valid claim code', async () => {
+    mockClaimStateQueries({});
     vi.mocked(isClaimCodeEnabled).mockReturnValue(true);
     vi.mocked(validateClaimCode).mockReturnValue(true);
     await expect(assertOAuthSignupClaimCode('right')).resolves.toBeUndefined();
   });
 
-  it('allows an ownerless instance with no code when claim codes are disabled', async () => {
-    vi.mocked(getOwnerUser).mockResolvedValue(null);
+  it('allows an unclaimed instance with no code when claim codes are disabled', async () => {
+    mockClaimStateQueries({});
     vi.mocked(isClaimCodeEnabled).mockReturnValue(false);
     await expect(assertOAuthSignupClaimCode(undefined)).resolves.toBeUndefined();
+  });
+
+  it('rejects an ownerless-with-data instance outright, never reaching the claim-code check', async () => {
+    mockClaimStateQueries({ anyServer: [{ id: 'srv-1' }] });
+    await expect(assertOAuthSignupClaimCode('any-code')).rejects.toMatchObject({
+      status: 'FORBIDDEN',
+      body: { message: expect.stringMatching(/promote-owner/) },
+    });
+    expect(isClaimCodeEnabled).not.toHaveBeenCalled();
   });
 });
 

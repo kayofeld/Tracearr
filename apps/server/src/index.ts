@@ -164,7 +164,7 @@ import {
   updateTimescaleExtensions,
   runAggregateBackfill,
 } from './db/timescale.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { servers } from './db/schema.js';
 import { initializeClaimCode } from './utils/claimCode.js';
 import { registerService, unregisterService } from './services/serviceTracker.js';
@@ -612,6 +612,34 @@ async function initializeServices(app: FastifyInstance) {
   } catch (err) {
     app.log.error({ err }, 'Failed to run database migrations');
     throw err;
+  }
+
+  // Assert the auth-integrity indexes actually exist (emby-native-setup.md 7.1).
+  // Migration 0070 creates them and a migration failure already aborts startup,
+  // so this is belt and braces - but these two indexes are what stop a second
+  // owner or a second Emby server from existing, and a security constraint that
+  // can go missing silently is the failure mode the review objected to. Cheap
+  // query, runs once, and it names the remedy rather than just complaining.
+  try {
+    const present = await db.execute(sql`
+      SELECT indexname FROM pg_indexes
+      WHERE indexname IN ('users_single_owner', 'servers_single_emby')
+    `);
+    const found = new Set(
+      (present.rows as Array<{ indexname: string }>).map((row) => row.indexname)
+    );
+    const missing = ['users_single_owner', 'servers_single_emby'].filter((i) => !found.has(i));
+    if (missing.length > 0) {
+      app.log.error(
+        { missing },
+        'MISSING_SECURITY_INDEX: auth-integrity index(es) absent. Concurrent signups could ' +
+          'create a second owner, or a second Emby server could make login authority ' +
+          'nondeterministic. Re-run migrations; if creation fails, an existing duplicate is ' +
+          'blocking it - resolve the duplicate, then restart.'
+      );
+    }
+  } catch (err) {
+    app.log.warn({ err }, 'Could not verify auth-integrity indexes');
   }
 
   // Build prepared statements now that the db pool is ready

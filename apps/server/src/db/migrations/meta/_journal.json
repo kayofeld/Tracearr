@@ -484,6 +484,13 @@
       "when": 1785265909003,
       "tag": "0068_generalize_media_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1785326152430,
+      "tag": "0070_auth_integrity_partial_indexes",
+      "breakpoints": true
     }
   ]
 }

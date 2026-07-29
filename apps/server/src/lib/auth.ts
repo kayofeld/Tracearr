@@ -10,7 +10,7 @@ import {
 import { adminAc } from 'better-auth/plugins/admin/access';
 import { createAuthMiddleware, APIError } from 'better-auth/api';
 import type { Redis } from 'ioredis';
-import { LOGIN_ROLES, SIGN_UP_USERNAME_PATH } from '@tracearr/shared';
+import { LOGIN_ROLES, SIGN_UP_USERNAME_PATH, EMBY_SETUP_PATH } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
@@ -24,6 +24,7 @@ import {
 } from './authGuards.js';
 import { getRedis, closeRedis } from './redisShared.js';
 import { embyPlugin } from './embyPlugin.js';
+import { embySetupPlugin, SETUP_RATE_LIMIT } from './embySetupPlugin.js';
 import { signupPlugin } from './signupPlugin.js';
 import { betterAuthBasePath } from './basePath.js';
 
@@ -234,6 +235,16 @@ function buildAuth(redis: Redis, options: BuildAuthOptions = {}) {
       // knob (defaulting to enabled), never an environment-variable gate.
       enabled: rateLimitEnabled,
       storage: 'secondary-storage',
+      // Per-path override for /emby/setup (SEC-07 fix,
+      // emby-native-setup.md §9): the global default (max: 1000/min at the
+      // Fastify layer, see index.ts) is not a meaningful bound for a path
+      // that can hold several sequential outbound waits open. Verified
+      // against the installed better-auth@1.6.23's actual customRules
+      // matching (exact-path or wildcard key on the post-basePath path,
+      // api/rate-limiter/index.mjs) rather than assumed from the type only.
+      customRules: {
+        [EMBY_SETUP_PATH]: SETUP_RATE_LIMIT,
+      },
     },
     databaseHooks: {
       user: {
@@ -260,7 +271,11 @@ function buildAuth(redis: Redis, options: BuildAuthOptions = {}) {
         // same claim code - centralized here rather than duplicated in the
         // plugin, matching how the built-in endpoint's own handler carries
         // no claim-code logic either.
-        if (ctx.path === '/sign-up/email' || ctx.path === SIGN_UP_USERNAME_PATH) {
+        if (
+          ctx.path === '/sign-up/email' ||
+          ctx.path === SIGN_UP_USERNAME_PATH ||
+          ctx.path === EMBY_SETUP_PATH
+        ) {
           assertClaimCode((ctx.body as { claimCode?: string } | undefined)?.claimCode);
         }
         if (ctx.path === '/sign-in/oauth2') {
@@ -285,6 +300,7 @@ function buildAuth(redis: Redis, options: BuildAuthOptions = {}) {
       adminPlugin({ adminRoles: ['owner'], roles: { owner: adminAc } }),
       bearer(),
       embyPlugin(),
+      embySetupPlugin(),
       signupPlugin(),
       ...(oidcConfigured
         ? [

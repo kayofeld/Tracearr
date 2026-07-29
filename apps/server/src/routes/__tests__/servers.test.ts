@@ -113,6 +113,15 @@ function mockDbInsert(result: unknown[]) {
   return chain;
 }
 
+function mockDbInsertRejecting(err: Error) {
+  const chain = {
+    values: vi.fn().mockReturnThis(),
+    returning: vi.fn().mockRejectedValue(err),
+  };
+  vi.mocked(db.insert).mockReturnValue(chain as never);
+  return chain;
+}
+
 function mockDbDelete() {
   const chain = {
     where: vi.fn().mockResolvedValue(undefined),
@@ -436,6 +445,45 @@ describe('Server Routes', () => {
         'my-emby-token',
         'http://emby.local:8096'
       );
+    });
+
+    // SEC-02 fix (design §4.3 design A - single Emby is the product rule,
+    // migration 0070's servers_single_emby partial unique index): a second
+    // Emby row is rejected at the database, mapped to a clean 409 here
+    // rather than surfacing the raw constraint-violation as a 500.
+    it('maps a servers_single_emby unique violation to 409', async () => {
+      app = await buildTestApp(ownerUser);
+
+      let selectCall = 0;
+      vi.mocked(db.select).mockImplementation(() => {
+        selectCall++;
+        const chain = {
+          from: vi.fn().mockReturnThis(),
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockResolvedValue([]),
+        };
+        if (selectCall === 2) {
+          chain.from = vi.fn().mockResolvedValue([]);
+        }
+        return chain as never;
+      });
+
+      mockDbInsertRejecting(
+        new Error('duplicate key value violates unique constraint "servers_single_emby"')
+      );
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/servers',
+        payload: {
+          name: 'Second Emby',
+          type: 'emby',
+          url: 'http://emby-2.local:8096',
+          token: 'my-emby-token',
+        },
+      });
+
+      expect(response.statusCode).toBe(409);
     });
 
     it('rejects guest creating server', async () => {

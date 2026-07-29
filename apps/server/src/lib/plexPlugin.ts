@@ -33,8 +33,21 @@ import { syncServer } from '../services/sync.js';
 import { getUserById, getUserByPlexAccountId } from '../services/userService.js';
 import { getRedis } from './redisShared.js';
 import { assertSignupAllowed, assertClaimCode } from './authGuards.js';
+import { asJsonFetcher } from '../utils/safeProbe.js';
+import { isUniqueViolationOn, USERS_SINGLE_OWNER_CONSTRAINT } from '../utils/dbErrors.js';
 
 const PLEX_TEMP_TOKEN_TTL = 10 * 60; // 10 minutes for server selection
+
+// SEC-03/T10 fix (design §10, owner decision 5): /plex/connect accepts a
+// client-supplied serverUri on an unauthenticated pre-claim endpoint, same
+// shape as /emby/setup. It was guarded only by verifyServerAdmin's own
+// literal-only assertSafeProbeUrl pre-flight (defense-in-depth, never
+// resolves hostnames, no redirect handling). Routing it through the same
+// safeProbeJson module used by /emby/setup gives it hostname-resolution
+// validation, manual-redirect-as-failure, and connect-time re-validation too
+// - the weaker instance of the capability is fixed by the same module the
+// new endpoint introduced, rather than left inconsistent.
+const PLEX_CONNECT_PROBE_TIMEOUT_MS = 10_000;
 
 const checkPinBody = z.object({ pinId: z.string(), claimCode: z.string().optional() });
 const initiateBody = z.object({ forwardUrl: z.url().optional() });
@@ -348,16 +361,32 @@ export const plexPlugin = () =>
             // No servers - create the first user without a server connection.
             assertClaimCode(claimCode);
 
-            const [newUser] = await db
-              .insert(users)
-              .values({
-                username: authResult.username,
-                email: authResult.email,
-                thumbnail: authResult.thumb,
-                plexAccountId: authResult.id,
-                role: 'owner',
-              })
-              .returning();
+            let newUser: typeof users.$inferSelect | undefined;
+            try {
+              [newUser] = await db
+                .insert(users)
+                .values({
+                  username: authResult.username,
+                  email: authResult.email,
+                  thumbnail: authResult.thumb,
+                  plexAccountId: authResult.id,
+                  role: 'owner',
+                })
+                .returning();
+            } catch (err) {
+              // Race loser against the users_single_owner partial unique index
+              // (SEC-05 fix, design §7.2): this insert bypasses the better-auth
+              // hook chain entirely, so the DB constraint is the only gate. Map
+              // it to the same clean 403 assertSignupAllowed() gives everywhere
+              // else, instead of a raw 500.
+              if (isUniqueViolationOn(err, USERS_SINGLE_OWNER_CONSTRAINT)) {
+                throw new APIError('FORBIDDEN', {
+                  message:
+                    'This Tracearr instance already has an owner. Only the owner can log in.',
+                });
+              }
+              throw err;
+            }
 
             if (!newUser) {
               throw new APIError('INTERNAL_SERVER_ERROR', { message: 'Failed to create user' });
@@ -437,7 +466,13 @@ export const plexPlugin = () =>
             // Claim code guard before the outbound admin probe.
             assertClaimCode(claimCode);
 
-            const adminCheck = await PlexClient.verifyServerAdmin(plexToken, serverUri);
+            const probeFetch = asJsonFetcher({
+              timeoutMs: PLEX_CONNECT_PROBE_TIMEOUT_MS,
+              onUpstreamError: (detail) => {
+                ctx.context.logger.error('Plex connect probe failed', detail);
+              },
+            });
+            const adminCheck = await PlexClient.verifyServerAdmin(plexToken, serverUri, probeFetch);
             if (!adminCheck.success) {
               if (adminCheck.code === PlexClient.AdminVerifyError.CONNECTION_FAILED) {
                 throw new APIError('SERVICE_UNAVAILABLE', { message: adminCheck.message });
@@ -449,6 +484,38 @@ export const plexPlugin = () =>
             const localAccounts = await pmsClient.getUsers();
             const ownerLocalAccount = localAccounts.find((a) => a.isAdmin) ?? localAccounts[0];
             const ownerLocalId = ownerLocalAccount?.id ?? '1';
+
+            // Contended insert moves first (SEC-05 fix, design §7.2/§7.3
+            // ordering principle): if this loses the race against the
+            // users_single_owner index, nothing else exists yet, so there is
+            // no orphan server row and no server's token has been overwritten.
+            // Previously the servers write ran first, so a race loser left
+            // exactly that orphan/overwrite behind.
+            let newUser: typeof users.$inferSelect | undefined;
+            try {
+              [newUser] = await db
+                .insert(users)
+                .values({
+                  username: plexUsername,
+                  email: plexEmail,
+                  thumbnail: plexThumb,
+                  plexAccountId,
+                  role: 'owner',
+                })
+                .returning();
+            } catch (err) {
+              if (isUniqueViolationOn(err, USERS_SINGLE_OWNER_CONSTRAINT)) {
+                throw new APIError('FORBIDDEN', {
+                  message:
+                    'This Tracearr instance already has an owner. Only the owner can log in.',
+                });
+              }
+              throw err;
+            }
+
+            if (!newUser) {
+              throw new APIError('INTERNAL_SERVER_ERROR', { message: 'Failed to create user' });
+            }
 
             let server = await db
               .select()
@@ -483,21 +550,6 @@ export const plexPlugin = () =>
             }
 
             const serverId = server[0]!.id;
-
-            const [newUser] = await db
-              .insert(users)
-              .values({
-                username: plexUsername,
-                email: plexEmail,
-                thumbnail: plexThumb,
-                plexAccountId,
-                role: 'owner',
-              })
-              .returning();
-
-            if (!newUser) {
-              throw new APIError('INTERNAL_SERVER_ERROR', { message: 'Failed to create user' });
-            }
 
             const [newPlexAccount] = await db
               .insert(plexAccounts)

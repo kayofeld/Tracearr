@@ -15,6 +15,7 @@
  *   set-email <username> <new-email>          Change a user's email
  *   list-users                                List users and their login methods
  *   enable-local-login                        Re-enable local username/password login
+ *   promote-owner <username>                  Promote a user to owner (ownerless-with-data recovery)
  */
 
 import { randomBytes } from 'node:crypto';
@@ -25,6 +26,7 @@ import {
   setEmailCommand,
   listUsersCommand,
   enableLocalLoginCommand,
+  promoteOwnerCommand,
   shutdown,
 } from './lib/commands.ts';
 
@@ -36,6 +38,7 @@ Usage:
   cli set-email <username> <new-email>
   cli list-users
   cli enable-local-login
+  cli promote-owner <username>
 `;
 
 function promptPassword(): Promise<string> {
@@ -103,6 +106,18 @@ async function runEnableLocalLogin(): Promise<void> {
   console.log('\nLocal username/password login is now enabled.\n');
 }
 
+async function runPromoteOwner(args: string[]): Promise<void> {
+  const [username] = args;
+  if (!username) {
+    throw new Error('Usage: cli promote-owner <username>');
+  }
+  await promoteOwnerCommand({ username });
+  console.log(`\n${username} has been promoted to owner.`);
+  console.log(
+    `Set a local password with:\n  pnpm --filter @tracearr/server cli reset-password ${username}\n`
+  );
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
 
@@ -122,6 +137,9 @@ async function main(): Promise<void> {
         break;
       case 'enable-local-login':
         await runEnableLocalLogin();
+        break;
+      case 'promote-owner':
+        await runPromoteOwner(args);
         break;
       default:
         console.log(USAGE);

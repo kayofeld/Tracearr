@@ -16,6 +16,7 @@ import {
 } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { servers, plexAccounts } from '../db/schema.js';
+import { isUniqueViolationOn, SERVERS_SINGLE_EMBY_CONSTRAINT } from '../utils/dbErrors.js';
 // Token encryption removed - tokens now stored in plain text (DB is localhost-only)
 import { PlexClient, JellyfinClient, EmbyClient } from '../services/mediaServer/index.js';
 import { syncServer } from '../services/sync.js';
@@ -173,25 +174,45 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
     );
 
     // Save server with plain text token (DB is localhost-only)
-    const inserted = await db
-      .insert(servers)
-      .values({
-        name,
-        type,
-        url,
-        token,
-        color,
-        plexAccountId, // Links Plex servers to their owning account (undefined for non-Plex)
-      })
-      .returning({
-        id: servers.id,
-        name: servers.name,
-        type: servers.type,
-        url: servers.url,
-        color: servers.color,
-        createdAt: servers.createdAt,
-        updatedAt: servers.updatedAt,
-      });
+    let inserted: {
+      id: string;
+      name: string;
+      type: string;
+      url: string;
+      color: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+    }[];
+    try {
+      inserted = await db
+        .insert(servers)
+        .values({
+          name,
+          type,
+          url,
+          token,
+          color,
+          plexAccountId, // Links Plex servers to their owning account (undefined for non-Plex)
+        })
+        .returning({
+          id: servers.id,
+          name: servers.name,
+          type: servers.type,
+          url: servers.url,
+          color: servers.color,
+          createdAt: servers.createdAt,
+          updatedAt: servers.updatedAt,
+        });
+    } catch (err) {
+      // servers_single_emby partial unique index (SEC-02 fix, design §4.3
+      // design A - single Emby is the product rule, migration 0070): a
+      // second `type: 'emby'` row is rejected at the database, mapped here
+      // to a clean 409 instead of a raw constraint-violation 500.
+      if (isUniqueViolationOn(err, SERVERS_SINGLE_EMBY_CONSTRAINT)) {
+        return reply.conflict('Only one Emby server can be configured on this Tracearr instance.');
+      }
+      throw err;
+    }
 
     const server = inserted[0];
     if (!server) {
