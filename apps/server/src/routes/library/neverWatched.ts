@@ -148,12 +148,12 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
             li.server_id,
             s.name AS server_name,
             li.library_id,
-            -- library_name: no library display-name source is persisted in the DB;
-            -- library_id is the server-side section key (Plex/Jellyfin/Emby "library
-            -- ID"), used here as a stand-in so multi-library servers don't collapse
-            -- to one repeated server-name label. Backlog: persist real names during
-            -- librarySync so this can become a proper display name.
-            li.library_id AS library_name,
+            -- Real display name from the libraries table (populated during
+            -- librarySync). Falls back to the raw library_id when no row
+            -- exists yet - either the table hasn't been backfilled by a sync
+            -- since this feature shipped, or the library was just created and
+            -- hasn't synced once.
+            COALESCE(lib.name, li.library_id) AS library_name,
             li.media_type,
             li.created_at AS added_at,
             CASE
@@ -165,6 +165,8 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
           LEFT JOIN child_size cs ON li.media_type = 'show'
             AND cs.grandparent_rating_key = li.rating_key
             AND cs.server_id = li.server_id
+          LEFT JOIN libraries lib ON lib.server_id = li.server_id
+            AND lib.library_id = li.library_id
           WHERE li.media_type IN ('movie', 'show')
             ${serverFilter}
             ${libraryFilter}

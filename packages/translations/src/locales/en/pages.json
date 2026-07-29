@@ -247,7 +247,6 @@
       "bucketGt365": "1+ year",
       "byLibrary": "By Library",
       "byLibraryDesc": "Never-watched items grouped by library",
-      "libraryKeyLabel": "Library {{id}}",
       "colTitle": "Title",
       "colLibrary": "Library",
       "colAdded": "Added",

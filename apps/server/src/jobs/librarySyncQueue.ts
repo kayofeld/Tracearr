@@ -46,10 +46,12 @@ const BACKFILL_CHECK_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 /**
  * Invalidate library-related caches after sync completes.
  * Uses pattern matching to clear all variants (per-server, per-library, with timezone, etc.)
+ *
+ * Exported (redis passed in, mirrors invalidateOmbiCaches in ombiSyncQueue.ts) so
+ * the key-pattern list itself is unit-testable without a live BullMQ worker/Redis
+ * connection - the worker path below still calls it the same way.
  */
-async function invalidateLibraryCaches(serverId: string): Promise<void> {
-  if (!redisClient) return;
-
+export async function invalidateLibraryCaches(redis: Redis, serverId: string): Promise<void> {
   const patterns = [
     `${REDIS_KEYS.LIBRARY_STATS}*`,
     `${REDIS_KEYS.LIBRARY_GROWTH}*`,
@@ -57,6 +59,7 @@ async function invalidateLibraryCaches(serverId: string): Promise<void> {
     `${REDIS_KEYS.LIBRARY_STORAGE}*`,
     `${REDIS_KEYS.LIBRARY_DUPLICATES}*`,
     `${REDIS_KEYS.LIBRARY_STALE}*`,
+    `${REDIS_KEYS.LIBRARY_NEVER_WATCHED}*`,
     `${REDIS_KEYS.LIBRARY_WATCH}*`,
     `${REDIS_KEYS.LIBRARY_COMPLETION}*`,
     `${REDIS_KEYS.LIBRARY_PATTERNS}*`,
@@ -69,9 +72,9 @@ async function invalidateLibraryCaches(serverId: string): Promise<void> {
 
   let totalDeleted = 0;
   for (const pattern of patterns) {
-    const keys = await redisClient.keys(pattern);
+    const keys = await redis.keys(pattern);
     if (keys.length > 0) {
-      await redisClient.del(...keys);
+      await redis.del(...keys);
       totalDeleted += keys.length;
     }
   }
@@ -173,7 +176,9 @@ export function startLibrarySyncWorker(): void {
         const results = await librarySyncService.syncServer(serverId, onProgress, triggeredBy);
 
         // Invalidate library caches after successful sync
-        await invalidateLibraryCaches(serverId);
+        if (redisClient) {
+          await invalidateLibraryCaches(redisClient, serverId);
+        }
 
         const duration = Math.round((Date.now() - startTime) / 1000);
         console.log(`[LibrarySync] Job ${job.id} completed in ${duration}s:`, {

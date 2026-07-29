@@ -146,7 +146,7 @@ function mockTransaction() {
     delete: vi.fn().mockReturnValue(deleteChain),
   };
   // Transaction executes the callback with tx and returns its result
-   
+
   vi.mocked(db.transaction).mockImplementation(async (callback: any) => {
     return callback(tx);
   });
@@ -164,7 +164,7 @@ function mockSelectDistinctChain(results: unknown[][]) {
       }),
     } as never;
   });
-   
+
   vi.mocked((db as any).selectDistinct as ReturnType<typeof vi.fn>).mockImplementation(mock);
   return mock;
 }
@@ -242,8 +242,9 @@ function setupSelectForIncrementalTest(mockServer: ReturnType<typeof createMockS
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Default: no orphaned libraries (selectDistinct returns matching current libraries)
-  mockSelectDistinctChain([[], []]);
+  // Default: no orphaned libraries (selectDistinct returns matching current
+  // libraries). Three sources: library_items, library_snapshots, libraries.
+  mockSelectDistinctChain([[], [], []]);
 });
 
 // ============================================================================
@@ -376,6 +377,114 @@ describe('LibrarySyncService', () => {
       expect(results).toHaveLength(2);
       expect(results[0]!.libraryId).toBe('1');
       expect(results[1]!.libraryId).toBe('3');
+    });
+
+    it('should persist display names only for libraries that will actually be synced', async () => {
+      const service = new LibrarySyncService();
+      const mockServer = createMockServer();
+      const mockLibraries = [
+        createMockLibrary({ id: '1', name: 'Movies', type: 'movie' }),
+        createMockLibrary({ id: '2', name: 'Photos', type: 'photo' }),
+        createMockLibrary({ id: '3', name: 'TV Shows', type: 'show' }),
+      ];
+      const mockItems = [createMockLibraryItem({ ratingKey: 'item-1' })];
+
+      let selectCallCount = 0;
+      vi.mocked(db.select).mockImplementation(() => {
+        selectCallCount++;
+        const chain = {
+          from: vi.fn().mockReturnThis(),
+          where: vi.fn().mockImplementation(() => {
+            const whereResult = Promise.resolve([]);
+            (whereResult as typeof whereResult & { limit: typeof vi.fn }).limit = vi
+              .fn()
+              .mockImplementation(() => {
+                if (selectCallCount === 1) return Promise.resolve([mockServer]);
+                return Promise.resolve([]);
+              });
+            return whereResult;
+          }),
+          limit: vi.fn().mockImplementation(() => {
+            if (selectCallCount === 1) return Promise.resolve([mockServer]);
+            return Promise.resolve([]);
+          }),
+          returning: vi.fn().mockResolvedValue([]),
+        };
+        return chain as never;
+      });
+
+      mockInsertChain([{ id: randomUUID() }]);
+      mockDeleteChain();
+      mockTransaction();
+      mockMediaServerClient({
+        libraries: mockLibraries,
+        items: mockItems,
+        totalCount: 1,
+      });
+
+      const upsertSpy = vi.spyOn(service, 'upsertLibraries');
+
+      await service.syncServer(mockServer.id);
+
+      // Called once with only the synced (non-photo) libraries.
+      expect(upsertSpy).toHaveBeenCalledTimes(1);
+      expect(upsertSpy).toHaveBeenCalledWith(mockServer.id, [
+        expect.objectContaining({ id: '1', name: 'Movies', type: 'movie' }),
+        expect.objectContaining({ id: '3', name: 'TV Shows', type: 'show' }),
+      ]);
+    });
+
+    it('should not fail sync when persisting library display names throws', async () => {
+      const service = new LibrarySyncService();
+      const mockServer = createMockServer();
+      const mockLibraries = [createMockLibrary()];
+      const mockItems = [createMockLibraryItem()];
+
+      let selectCallCount = 0;
+      vi.mocked(db.select).mockImplementation(() => {
+        selectCallCount++;
+        const chain = {
+          from: vi.fn().mockReturnThis(),
+          where: vi.fn().mockImplementation(() => {
+            const whereResult = Promise.resolve([]);
+            (whereResult as typeof whereResult & { limit: typeof vi.fn }).limit = vi
+              .fn()
+              .mockImplementation(() => {
+                if (selectCallCount === 1) return Promise.resolve([mockServer]);
+                return Promise.resolve([]);
+              });
+            return whereResult;
+          }),
+          limit: vi.fn().mockImplementation(() => {
+            if (selectCallCount === 1) return Promise.resolve([mockServer]);
+            return Promise.resolve([]);
+          }),
+          returning: vi.fn().mockResolvedValue([]),
+        };
+        return chain as never;
+      });
+
+      mockInsertChain([{ id: randomUUID() }]);
+      mockDeleteChain();
+      mockTransaction();
+      mockMediaServerClient({
+        libraries: mockLibraries,
+        items: mockItems,
+        totalCount: 1,
+      });
+
+      vi.spyOn(service, 'upsertLibraries').mockRejectedValue(new Error('unique violation'));
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await expect(service.syncServer(mockServer.id)).resolves.not.toThrow();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to persist library display names'),
+        expect.any(Error)
+      );
+
+      warnSpy.mockRestore();
     });
 
     it('should report progress via callback', async () => {
@@ -699,6 +808,115 @@ describe('LibrarySyncService', () => {
 
       // Should be called 3 times (batches of 100, 100, 50)
       expect(db.delete).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('upsertLibraries', () => {
+    it('should insert display name and type for each library', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const libs = [
+        { id: 'lib-1', name: 'Movies', type: 'movie' },
+        { id: 'lib-2', name: 'TV Shows', type: 'show' },
+      ];
+
+      const insertChain = mockInsertChain();
+
+      await service.upsertLibraries(serverId, libs);
+
+      expect(db.insert).toHaveBeenCalled();
+      expect(insertChain.values).toHaveBeenCalledWith([
+        { serverId, libraryId: 'lib-1', name: 'Movies', type: 'movie' },
+        { serverId, libraryId: 'lib-2', name: 'TV Shows', type: 'show' },
+      ]);
+      expect(insertChain.onConflictDoUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: expect.any(Array),
+          set: expect.objectContaining({
+            name: expect.anything(),
+            type: expect.anything(),
+            updatedAt: expect.any(Date),
+          }),
+        })
+      );
+    });
+
+    it('should update name/type on conflict (rename propagates)', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const insertChain = mockInsertChain();
+
+      // Second sync: library was renamed on the media server.
+      await service.upsertLibraries(serverId, [
+        { id: 'lib-1', name: 'Renamed Movies', type: 'movie' },
+      ]);
+
+      const conflictArg = insertChain.onConflictDoUpdate.mock.calls[0]![0] as {
+        target: unknown[];
+      };
+      expect(conflictArg.target).toHaveLength(2); // (server_id, library_id)
+      expect(insertChain.values).toHaveBeenCalledWith([
+        { serverId, libraryId: 'lib-1', name: 'Renamed Movies', type: 'movie' },
+      ]);
+    });
+
+    it('should no-op for an empty library list', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+
+      await service.upsertLibraries(serverId, []);
+
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('should strip null bytes from name/type instead of inserting raw', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const insertChain = mockInsertChain();
+
+      await service.upsertLibraries(serverId, [{ id: 'lib-1', name: 'Movi es', type: 'mo vie' }]);
+
+      expect(insertChain.values).toHaveBeenCalledWith([
+        { serverId, libraryId: 'lib-1', name: 'Movies', type: 'movie' },
+      ]);
+    });
+
+    it('should truncate an overlength name to 255 chars and type to 20 chars', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const insertChain = mockInsertChain();
+      const longName = 'A'.repeat(300);
+      const longType = 'B'.repeat(30);
+
+      await service.upsertLibraries(serverId, [{ id: 'lib-1', name: longName, type: longType }]);
+
+      expect(insertChain.values).toHaveBeenCalledWith([
+        { serverId, libraryId: 'lib-1', name: 'A'.repeat(255), type: 'B'.repeat(20) },
+      ]);
+    });
+
+    it('should skip a library whose name is whitespace-only after trim, without inserting a blank', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+
+      await service.upsertLibraries(serverId, [{ id: 'lib-1', name: '   ', type: 'movie' }]);
+
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('should insert the remaining valid libraries when one has a blank name', async () => {
+      const service = new LibrarySyncService();
+      const serverId = randomUUID();
+      const insertChain = mockInsertChain();
+
+      await service.upsertLibraries(serverId, [
+        { id: 'lib-1', name: '   ', type: 'movie' },
+        { id: 'lib-2', name: 'TV Shows', type: 'show' },
+      ]);
+
+      expect(insertChain.values).toHaveBeenCalledWith([
+        { serverId, libraryId: 'lib-2', name: 'TV Shows', type: 'show' },
+      ]);
     });
   });
 
@@ -1134,6 +1352,8 @@ describe('LibrarySyncService', () => {
       items: MediaLibraryItem[];
       itemLibraryIds: { libraryId: string }[];
       snapshotLibraryIds: { libraryId: string }[];
+      /** Rows from the `libraries` display-name table. Defaults to []. */
+      nameLibraryIds?: { libraryId: string }[];
     }) {
       let selectCallCount = 0;
       vi.mocked(db.select).mockImplementation(() => {
@@ -1159,7 +1379,11 @@ describe('LibrarySyncService', () => {
         return chain as never;
       });
 
-      mockSelectDistinctChain([options.itemLibraryIds, options.snapshotLibraryIds]);
+      mockSelectDistinctChain([
+        options.itemLibraryIds,
+        options.snapshotLibraryIds,
+        options.nameLibraryIds ?? [],
+      ]);
       mockInsertChain([{ id: randomUUID() }]);
       mockDeleteChain();
       mockTransaction();
@@ -1266,6 +1490,34 @@ describe('LibrarySyncService', () => {
       expect(db.execute).not.toHaveBeenCalled();
     });
 
+    it('should clean up a library that only has a persisted display name (no items or snapshots)', async () => {
+      const mockServer = createMockServer();
+      const libraries = [createMockLibrary({ id: 'lib-2', name: 'Current' })];
+
+      setupSyncWithOrphans({
+        server: mockServer,
+        libraries,
+        items: [createMockLibraryItem()],
+        // lib-1 never had items or a snapshot - e.g. an empty library that
+        // was deleted right after its first name-only sync. Without the
+        // libraries table as an orphan-detection source, it would never be
+        // found and its stale name row would linger forever.
+        itemLibraryIds: [{ libraryId: 'lib-2' }],
+        snapshotLibraryIds: [{ libraryId: 'lib-2' }],
+        nameLibraryIds: [{ libraryId: 'lib-1' }, { libraryId: 'lib-2' }],
+      });
+
+      const service = new LibrarySyncService();
+      await service.syncServer(mockServer.id);
+
+      // Delete should be called for orphan cleanup (libraries row for lib-1,
+      // at minimum - items/snapshots deletes are no-ops for lib-1 since it
+      // never had rows there, but the code still issues them unconditionally).
+      expect(db.delete).toHaveBeenCalled();
+      // No orphaned snapshot row for lib-1 -> no aggregate refresh.
+      expect(db.execute).not.toHaveBeenCalled();
+    });
+
     it('should not fail sync when aggregate refresh throws', async () => {
       const mockServer = createMockServer();
       const libraries = [createMockLibrary({ id: 'lib-2', name: 'Current' })];
@@ -1312,7 +1564,6 @@ describe('LibrarySyncService', () => {
       const service = new LibrarySyncService();
       await service.syncServer(mockServer.id);
 
-       
       expect((db as any).selectDistinct).not.toHaveBeenCalled();
       // No aggregate refresh either
       expect(db.execute).not.toHaveBeenCalled();
