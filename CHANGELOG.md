@@ -4,6 +4,22 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v1.11.0 — Telegram pairs itself, and CI actually runs
+
+- **Adding a Telegram bot is now a pairing flow.** The old form asked for a bot token and a chat id
+  at the same time, which nobody can supply: the chat id does not exist until you have messaged the
+  bot. You now paste the token, it is checked against Telegram immediately so a wrong one fails on
+  the spot, and Tracearr shows you the bot's own link plus a one-time code. Send the code to the bot
+  and the agent is saved. Removing a Telegram agent now also clears its stored token and chat id,
+  which it previously left behind.
+- **The end-to-end test suite has not run in CI for over a week**, across two releases, and nobody
+  could tell because the job failed before reaching a single test. Three separate faults: the dev
+  server was started with Node's `--env-file`, which is fatal when the file is missing and `.env` is
+  not committed; Turborepo's strict environment mode dropped the database and Redis URLs, so the
+  server booted pointing at a database no CI runner has; and underneath both, the Never Watched menu
+  added in v1.7.0 gave the sidebar two links matching "Watch", which broke a navigation test. All
+  three fixed — the suite now runs 30 tests against a real TimescaleDB and Redis.
+
 ## v1.10.0 — watch analytics fixed, updates on Portainer, and Emby-first sign-in
 
 - **Watch analytics worked again.** `/library/watch` and `/library/patterns` were failing on a
