@@ -1312,6 +1312,7 @@ export interface ServerToClientEvents {
   'library:sync:progress': (progress: LibrarySyncProgress) => void;
   'ombi:sync:progress': (event: OmbiSyncProgressEvent) => void;
   'seerr:sync:progress': (event: SeerrSyncProgressEvent) => void;
+  'played-state:sync:progress': (progress: PlayedStateSyncProgress) => void;
   'tasks:updated': (tasks: RunningTask[]) => void;
   'version:update': (data: { current: string; latest: string; releaseUrl: string }) => void;
   'server:down': (data: { serverId: string; serverName: string }) => void;
@@ -1956,7 +1957,8 @@ export type RunningTaskType =
   | 'jellystat_import'
   | 'maintenance'
   | 'ombi_sync'
-  | 'seerr_sync';
+  | 'seerr_sync'
+  | 'played_state_sync';
 
 export interface RunningTask {
   /** Unique task identifier */
@@ -2564,6 +2566,71 @@ export interface StaleResponse {
   items: StaleItem[];
   summary: StaleSummary;
   pagination: { page: number; pageSize: number; total: number };
+  /**
+   * Per-server played-state coverage for the servers in scope. Optional because
+   * cached pre-upgrade payloads may omit it for up to one cache TTL; treat a
+   * missing value as "coverage unknown" and render no banner.
+   */
+  playedStateCoverage?: PlayedStateCoverage;
+}
+
+// =============================================================================
+// Played-state coverage (per-user watched flags mirrored from Emby/Jellyfin)
+// Contract: docs/architecture/emby-played-state-sync.md, ADRs 0010-0011.
+// =============================================================================
+
+/** Whether a server exposes per-user played state (Plex does not). */
+export type PlayedStateCapability = 'supported' | 'unsupported';
+
+export interface PlayedStateServerCoverage {
+  serverId: string;
+  serverName: string;
+  capability: PlayedStateCapability;
+  /** ISO-8601 completion time of the last successful/partial sync; null = never synced */
+  lastSyncedAt: string | null;
+}
+
+export interface PlayedStateCoverage {
+  servers: PlayedStateServerCoverage[];
+  /** true only when EVERY server in the response scope is supported AND has synced */
+  full: boolean;
+}
+
+export type PlayedStateSyncRunStatus = 'never_run' | 'running' | 'success' | 'partial' | 'error';
+
+export interface PlayedStateServerSyncStatus {
+  serverId: string;
+  serverName: string;
+  capability: PlayedStateCapability;
+  status: PlayedStateSyncRunStatus;
+  startedAt: string | null;
+  completedAt: string | null;
+  usersTotal: number;
+  usersSynced: number;
+  itemsUpserted: number;
+  itemsPruned: number;
+  error: string | null;
+}
+
+export interface PlayedStateSyncStatusResponse {
+  servers: PlayedStateServerSyncStatus[];
+}
+
+export interface PlayedStateSyncTriggerResponse {
+  jobId: string;
+}
+
+export interface PlayedStateSyncProgress {
+  serverId: string;
+  serverName: string;
+  status: 'running' | 'complete' | 'error';
+  totalUsers: number;
+  processedUsers: number;
+  itemsProcessed: number;
+  message: string;
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
 }
 
 // Library Never-Watched Statistics Response (GET /library/never-watched)
@@ -2611,6 +2678,12 @@ export interface NeverWatchedStatsResponse {
   ageDistribution: NeverWatchedAgeDistribution[];
   /** ISO timestamp of the oldest never-watched item's added-at date, null when none. */
   oldestAddedAt: string | null;
+  /**
+   * Per-server played-state coverage for the servers in scope. Optional because
+   * cached pre-upgrade payloads may omit it for up to one cache TTL; treat a
+   * missing value as "coverage unknown" and render no banner.
+   */
+  playedStateCoverage?: PlayedStateCoverage;
 }
 
 // =============================================================================
