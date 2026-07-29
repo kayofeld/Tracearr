@@ -186,6 +186,10 @@ export type {
   UnlinkPlexAccountResponse,
   // Version
   VersionInfo,
+  VersionUpdateCapability,
+  VersionUpdateStartResponse,
+  VersionUpdateState,
+  VersionUpdateStatus,
   // Backup & Restore
   BackupMetadata,
   RestorePhase,

@@ -101,6 +101,16 @@ const INTERNAL_DEFAULTS = {
   // Notify once per new version; re-arms when a newer version appears. Persisted (not in-memory)
   // so a server restart does not re-notify for a version already announced.
   lastNotifiedAppUpdateVersion: null as string | null,
+  // Docker in-app update: Portainer stack redeploy webhook URL (routes/version.ts).
+  // The embedded webhook UUID *is* the auth - anyone holding it can trigger a
+  // redeploy - so this is deliberately INTERNAL (not part of the public
+  // `Settings` type/PUBLIC_DEFAULTS above) and must never be returned by any
+  // endpoint. GET /version/update/capability exposes only the derived
+  // `dockerRedeployConfigured: boolean`. Written via PATCH /settings
+  // (routes/settings.ts special-cases it, same as externalUrl, to run the
+  // SSRF check before persisting) but never read back through GET/PATCH
+  // /settings, since it is excluded from PUBLIC_KEYS/getAllSettings().
+  dockerRedeployWebhookUrl: null as string | null,
 };
 
 type InternalSettings = typeof INTERNAL_DEFAULTS;
@@ -287,6 +297,17 @@ export interface SeerrSettings {
 export async function getSeerrSettings(): Promise<SeerrSettings> {
   const s = await getSettings(['seerrUrl', 'seerrApiKey']);
   return { seerrUrl: s.seerrUrl, seerrApiKey: s.seerrApiKey };
+}
+
+/**
+ * Docker redeploy webhook URL - internal only (see INTERNAL_DEFAULTS above).
+ * Callers (routes/version.ts) use this raw value ONLY to fire the outbound
+ * webhook request; it must never be placed in a JSON response body, log
+ * line, or error message. Derive a `configured: boolean` for anything
+ * user-facing instead.
+ */
+export async function getDockerRedeployWebhookUrl(): Promise<string | null> {
+  return getSetting('dockerRedeployWebhookUrl');
 }
 
 export async function getBackupScheduleSettings(): Promise<{

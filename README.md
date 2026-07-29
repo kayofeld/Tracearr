@@ -272,6 +272,29 @@ This fork's headline convenience: **update from the interface** on bare-metal/sy
   `APP_VERSION` against the checked-out tag and restarts, instead of reporting "already up to date"
   and leaving the banner up.
 
+### Updating on Docker / Portainer
+
+A container cannot rebuild itself, so the Update button used to be unavailable on Docker. It now
+works through Portainer's **stack redeploy webhook**: Tracearr calls the webhook, and Portainer
+re-pulls the image and recreates the stack.
+
+1. In Portainer, open your Tracearr stack and enable the webhook (**Stack details → Webhooks**), then
+   copy the URL. Make sure the stack is set to re-pull the image on redeploy.
+2. In Tracearr, go to **Settings → Updates** and paste it into **Redeploy webhook**.
+
+Two things to know:
+
+- **The webhook URL is a credential.** Anyone holding it can redeploy your stack, so Tracearr stores
+  it write-only: it is never returned by the API, never shown again after saving, and never logged.
+  To change it, paste a new one; the field always starts empty.
+- **Pin nothing if you want updates.** A redeploy only changes the running version if your compose
+  file tracks a moving tag such as `:latest`. Pinned to `:1.9.0`, the stack redeploys the exact same
+  image — the button will report success and the version will not change.
+
+Progress is not reported for this path the way it is on bare metal: Portainer replaces the container,
+so the process serving the UI is gone mid-update. Tracearr reports that the redeploy was triggered
+rather than pretending to track a build it can no longer observe.
+
 Migrations run automatically on the next start.
 
 ### Docker Tags (upstream)

@@ -12,7 +12,8 @@
     "accessControl": "Access Control",
     "backup": "Backup",
     "ombi": "Requests (Ombi)",
-    "seerr": "Requests (Seerr)"
+    "seerr": "Requests (Seerr)",
+    "updates": "Updates"
   },
   "general": {
     "title": "General Settings",
@@ -381,7 +382,10 @@
     "stableRelease": "Stable Release",
     "betaUpdate": "Beta Update",
     "newVersion": "New Version",
-    "versionAvailable": "{{version}} available"
+    "versionAvailable": "{{version}} available",
+    "dockerTriggered": "Redeploy triggered. The container will restart shortly.",
+    "dockerRestarting": "Waiting for the container to restart.",
+    "dockerTimedOut": "Couldn't confirm the redeploy finished. Refresh once the container is back."
   },
   "serverHealth": {
     "unreachable": "{{serverName}} is unreachable",
@@ -525,6 +529,19 @@
     "purgeConfirmDescription": "This permanently deletes every mirrored request and requester mapping. This cannot be undone. Reconnecting the connector later will start from an empty state.",
     "purgeConfirmAction": "Yes, permanently delete",
     "purgeResult": "Deleted {{requests}} requests and {{mappings}} mappings."
+  },
+  "dockerUpdate": {
+    "title": "Docker Redeploy Webhook",
+    "description": "Let Tracearr trigger a Portainer redeploy so the in-app Update button works on Docker.",
+    "bareMetalDescription": "This deployment updates in place, so a redeploy webhook doesn't apply here.",
+    "configured": "Configured",
+    "notConfigured": "Not configured",
+    "webhookUrl": "Webhook URL",
+    "webhookUrlPlaceholder": "https://portainer.example.com/api/webhooks/...",
+    "webhookUrlHelp": "Paste the redeploy webhook URL from your Portainer stack (Stack → Webhooks). This is a secret - once saved, it can't be viewed again.",
+    "clearConfirmTitle": "Remove the redeploy webhook?",
+    "clearConfirmDescription": "The in-app Update button will stop working on this deployment until a webhook is configured again.",
+    "clearConfirmAction": "Yes, remove it"
   },
   "seerr": {
     "title": "Seerr Connector",

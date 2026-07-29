@@ -175,6 +175,12 @@
       },
       "seerrMappingReverted": {
         "title": "Requester mapping reverted to automatic"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
       }
     },
     "error": {
@@ -232,7 +238,9 @@
       "seerrSyncAlreadyRunning": "A Seerr sync is already running",
       "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "seerrPurgeFailed": "Failed to purge Seerr data",
-      "seerrMappingUpdateFailed": "Failed to update requester mapping"
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook"
     },
     "warning": {
       "jobFailed": {

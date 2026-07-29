@@ -821,6 +821,13 @@ export const updateSettingsSchema = z.object({
   backupScheduleDayOfWeek: z.number().int().min(0).max(6).optional(),
   backupScheduleDayOfMonth: z.number().int().min(1).max(31).optional(),
   backupRetentionCount: z.number().int().min(1).max(30).optional(),
+  // Docker in-app update: Portainer stack redeploy webhook URL. The embedded
+  // webhook UUID *is* the auth (anyone holding it can trigger a redeploy), so
+  // this is write-only - it is intentionally NOT part of the `Settings` type
+  // and is never echoed back by GET/PATCH /settings (see services/settings.ts
+  // INTERNAL_DEFAULTS + routes/version.ts capability endpoint, which exposes
+  // only a derived `dockerRedeployConfigured: boolean`).
+  dockerRedeployWebhookUrl: nullableUrlSchema.optional(),
 });
 
 // ============================================================================

@@ -153,7 +153,15 @@ export {
 } from './useTailscale';
 
 // Version hooks
-export { useVersion, useForceVersionCheck } from './useVersion';
+export {
+  useVersion,
+  useForceVersionCheck,
+  useUpdateCapability,
+  UPDATE_CAPABILITY_QUERY_KEY,
+} from './useVersion';
+
+// Docker/Portainer redeploy webhook hooks (owner-only)
+export { useSetDockerRedeployWebhook, useClearDockerRedeployWebhook } from './useUpdateWebhook';
 
 // Library hooks
 export {
