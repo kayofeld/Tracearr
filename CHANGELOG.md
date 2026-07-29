@@ -4,6 +4,28 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v1.12.0 — set Tracearr up with your Emby account
+
+- **First-run setup can now use Emby directly.** On a fresh instance you give it your Emby server
+  address, an admin API key and your Emby username and password, and the owner account is created from
+  that — no separate Tracearr password to invent and forget. The setup screen says plainly that Emby
+  then becomes your only way in, because recovery from an Emby outage is a console command rather than
+  a page in the app.
+- Accepting a server address from the browser is exactly what the sign-in path refuses to do, for good
+  reason: point it at an Emby you control and you are trivially an administrator there. So it is
+  accepted at one endpoint only, and only while the instance is genuinely unclaimed — meaning it holds
+  no users, accounts or servers at all. An instance that lost its owner but kept its data is a
+  different situation entirely and is refused outright, before any outbound request, and recovered from
+  the console with the new `promote-owner`, `list-servers` and `delete-server` commands.
+- Two database constraints now enforce what the code assumed: at most one owner, and at most one Emby
+  server. The first closes a race where two simultaneous signups could both become owner. The second
+  matters because sign-in resolved "the" Emby server with no defined order, so a second one made the
+  authentication authority a coin flip; it now fails closed instead of picking.
+- Outbound checks during setup resolve the hostname and validate every address they get back, pin the
+  connection to a validated one, and treat any redirect as a failure — a server that answers cannot
+  talk Tracearr into probing something else on your network. The same hardening now covers the
+  equivalent Plex path, which was the weaker instance of the same thing.
+
 ## v1.11.0 — Telegram pairs itself, and CI actually runs
 
 - **Adding a Telegram bot is now a pairing flow.** The old form asked for a bot token and a chat id
