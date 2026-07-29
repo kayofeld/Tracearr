@@ -19,6 +19,7 @@ export type {
   SetupStatus,
   EmbySetupResult,
   EmbySetupErrorCode,
+  EmbyLoginFailureReason,
   UserLocation,
   UserDevice,
   UserMergeResult,
@@ -162,6 +163,10 @@ export type {
   NotificationChannelRouting,
   EncryptedPushPayload,
   PushNotificationPayload,
+  // Telegram interactive pairing
+  TelegramPairingState,
+  TelegramPairingStart,
+  TelegramPairingStatus,
   // SSE (Server-Sent Events)
   SSEConnectionState,
   PlexSSENotification,
@@ -188,6 +193,10 @@ export type {
   UnlinkPlexAccountResponse,
   // Version
   VersionInfo,
+  VersionUpdateCapability,
+  VersionUpdateStartResponse,
+  VersionUpdateState,
+  VersionUpdateStatus,
   // Backup & Restore
   BackupMetadata,
   RestorePhase,
@@ -367,6 +376,8 @@ export {
   // Tailscale
   tailscaleEnableSchema,
   tailscaleExitNodeSchema,
+  // Telegram interactive pairing
+  telegramPairingStartSchema,
   // Tautulli import
   tautulliImportSchema,
   // Jellystat import
@@ -486,6 +497,7 @@ export {
   API_BASE_PATH,
   SIGN_UP_USERNAME_PATH,
   EMBY_SETUP_PATH,
+  EMBY_LOGIN_PATH,
   JWT_CONFIG,
   POLLING_INTERVALS,
   POLLER_CONFIG,
@@ -529,6 +541,9 @@ export {
 
 // Role helper exports
 export { ROLE_PERMISSIONS, LOGIN_ROLES, canLogin, hasMinRole, isOwner, isActive } from './types.js';
+
+// Emby login failure reason codes (POST /emby/login error body `code` field)
+export { EMBY_LOGIN_FAILURE_REASONS } from './types.js';
 
 // Session constants
 export { MEDIA_TYPES, DEFAULT_STREAM_DETAILS, EMBY_SETUP_ERROR_CODES } from './types.js';

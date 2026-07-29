@@ -4,6 +4,60 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v1.11.0 — Telegram pairs itself, and CI actually runs
+
+- **Adding a Telegram bot is now a pairing flow.** The old form asked for a bot token and a chat id
+  at the same time, which nobody can supply: the chat id does not exist until you have messaged the
+  bot. You now paste the token, it is checked against Telegram immediately so a wrong one fails on
+  the spot, and Tracearr shows you the bot's own link plus a one-time code. Send the code to the bot
+  and the agent is saved. Removing a Telegram agent now also clears its stored token and chat id,
+  which it previously left behind.
+- **The end-to-end test suite has not run in CI for over a week**, across two releases, and nobody
+  could tell because the job failed before reaching a single test. Three separate faults: the dev
+  server was started with Node's `--env-file`, which is fatal when the file is missing and `.env` is
+  not committed; Turborepo's strict environment mode dropped the database and Redis URLs, so the
+  server booted pointing at a database no CI runner has; and underneath both, the Never Watched menu
+  added in v1.7.0 gave the sidebar two links matching "Watch", which broke a navigation test. All
+  three fixed — the suite now runs 30 tests against a real TimescaleDB and Redis.
+
+## v1.10.0 — watch analytics fixed, updates on Portainer, and Emby-first sign-in
+
+- **Watch analytics worked again.** `/library/watch` and `/library/patterns` were failing on a
+  missing relation for anyone whose database role is not a superuser. The cause was three steps
+  upstream: TimescaleDB init created an _optional_ extension outside any error handling, that
+  statement needs superuser, and its failure skipped everything after it — the sessions hypertable,
+  the continuous aggregates, and all seven engagement views. Nothing uses that extension. Compression
+  and aggregate creation had the same shape and are guarded too, and a missing aggregate now says so
+  in the log instead of failing silently later.
+- **The update button works on Docker and Portainer.** A container cannot rebuild itself, so it now
+  calls your Portainer stack's redeploy webhook: Portainer re-pulls the image and recreates the stack.
+  The webhook URL is a credential, so it is stored write-only and never returned by the API. Note a
+  redeploy only changes your version if the stack tracks a moving tag — pinned to an exact version it
+  reinstalls the same image, and the UI says so rather than reporting a successful update that did
+  nothing.
+- **A phantom "update available" that could never be applied is fixed.** The app reports the version
+  it was stamped with, not the tag its checkout is on. If those drifted — after a manual upgrade, or a
+  restored `.env` — the banner never cleared, because the updater compared the checkout, found it
+  current, and exited before correcting the stamp. It now reconciles the stamp when it drifts. The
+  manual-update instructions in the README caused this and have been corrected.
+- **Never Watched shows library names** instead of raw section keys. The name was always fetched from
+  Plex/Jellyfin/Emby and thrown away after logging; it is now stored and kept in step with renames.
+- **A "Requested only" filter on Never Watched.** On a real library only about one in eight
+  never-watched titles was ever requested, so the "Requested By" column looked permanently empty and
+  the items worth acting on were scattered across pages.
+- **Requester names link to their profile**, and a failed Emby login now says why — user not found,
+  password rejected, or account disabled — rather than a flat "invalid username or password" that
+  cannot distinguish a wrong password from a changed one. Emby login errors were also being captured
+  and never displayed at all.
+- **Once your Emby account is linked, sign-in leads with Emby**, with local sign-in moved behind
+  "Other sign-in options". It stays reachable on purpose: Emby login checks live against your Emby
+  server, so if that server is down local sign-in is the only way in.
+- Security hardening found on the way: `/emby/login` was covered only by the lenient default rate
+  limit rather than the strict one guarding the other sign-in routes, and is now bounded properly;
+  `TRUST_PROXY=true` trusted every hop, which let a client header pick its own rate-limit bucket
+  behind a reverse proxy, so it now takes a hop count or a CIDR list; and the login diagnosis is
+  scoped to your own linked account so it cannot be used to enumerate accounts on your Emby server.
+
 ## v1.9.0 — Seerr connector, and email-free sign-up
 
 - **Seerr connector** (seerr-team/seerr), a sibling to Ombi: point it at your instance and request

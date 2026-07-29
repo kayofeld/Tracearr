@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Falha ao atualizar definições",
       "streamTerminateFailed": "Falha ao terminar a transmissão",
       "trustScoresResetFailed": "Falha ao redefinir pontuações de confiança",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Teste do webhook falhou"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} utilizador redefinido para 100",
         "message_other": "{{count}} utilizadores redefinidos para 100",
         "title": "Pontuações de confiança redefinidas"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

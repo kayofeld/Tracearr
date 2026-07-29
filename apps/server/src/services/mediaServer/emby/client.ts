@@ -138,6 +138,8 @@ export class EmbyClient extends BaseMediaServerClient {
       // surfaced as an uncaught 500, rather than the null this function's
       // contract promises for bad credentials. `HttpClientError.statusCode`
       // is populated by both fetchers now (utils/http.ts, utils/safeProbe.ts).
+      // (L6, security review: also guards against a wrapped error whose
+      // message merely CONTAINS "401".)
       if (error instanceof HttpClientError && error.statusCode === 401) {
         return null;
       }
@@ -254,5 +256,57 @@ export class EmbyClient extends BaseMediaServerClient {
         message: `Could not verify admin access on Emby server at ${url}. ${message}`,
       };
     }
+  }
+
+  /**
+   * Fetches the SINGLE Emby account already linked to the Tracearr owner, by
+   * its Emby account id - never a name search or a list scan across
+   * `/Users`. Used by embyPlugin.ts's diagnoseEmbyLoginFailure to read the
+   * account's LIVE disabled state after it has already confirmed locally
+   * (via the server_users sync cache) that the submitted username
+   * corresponds to this linked account (security review F1) - this method
+   * itself never sees or compares a username.
+   *
+   * account_locked_out is no longer a possible outcome anywhere in this path
+   * (security review F2, owner decision): this endpoint forwards the
+   * submitted credentials to Emby's own AuthenticateByName, so reporting a
+   * lockout here would confirm to an anonymous caller that their
+   * credential-stuffing tripped Emby's own lockout. A locked-out account now
+   * reads as "not disabled" and falls back to wrong_password in the caller
+   * (still true: exists, not disabled, credentials rejected).
+   *
+   * Throws on anything it cannot use to make a determination (network
+   * error, timeout, 404 if the linked account was since deleted on Emby,
+   * invalid/insufficient admin key, unparseable response) - the caller
+   * treats any throw as "diagnosis unavailable" and falls back to the
+   * generic message.
+   */
+  static async getLinkedEmbyAccount(
+    serverUrl: string,
+    adminApiKey: string,
+    accountId: string,
+    timeoutMs: number
+  ): Promise<{ isDisabled: boolean }> {
+    const url = serverUrl.replace(/\/$/, '');
+    const headers = {
+      'X-Emby-Authorization': BaseMediaServerClient.buildStaticAuthHeader(adminApiKey),
+      Accept: 'application/json',
+    };
+
+    const data = await fetchJson<unknown>(`${url}/Users/${encodeURIComponent(accountId)}`, {
+      headers,
+      service: 'emby',
+      timeout: timeoutMs,
+    });
+    if (!data || typeof data !== 'object') {
+      throw new Error('Unexpected /Users/{id} response shape');
+    }
+
+    const policy =
+      (data as Record<string, unknown>).Policy &&
+      typeof (data as Record<string, unknown>).Policy === 'object'
+        ? ((data as Record<string, unknown>).Policy as Record<string, unknown>)
+        : {};
+    return { isDisabled: policy.IsDisabled === true };
   }
 }

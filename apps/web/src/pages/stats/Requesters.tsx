@@ -63,9 +63,17 @@ export function StatsRequesters() {
       {
         accessorKey: 'username',
         header: t('statsRequesters.colRequester'),
-        cell: ({ row }) => (
-          <span className="font-medium">{row.original.username ?? t('common:labels.unknown')}</span>
-        ),
+        cell: ({ row }) => {
+          const { userId, username } = row.original;
+          if (userId) {
+            return (
+              <Link to={`/users/${userId}`} className="font-medium hover:underline">
+                {username ?? t('common:labels.unknown')}
+              </Link>
+            );
+          }
+          return <span className="font-medium">{username ?? t('common:labels.unknown')}</span>;
+        },
       },
       {
         accessorKey: 'requestCount',

@@ -37,6 +37,9 @@ import type {
   HistoryAggregatesQueryInput,
   HistoryAggregates,
   VersionInfo,
+  VersionUpdateCapability,
+  VersionUpdateStartResponse,
+  VersionUpdateStatus,
   EngagementStats,
   ShowStatsResponse,
   SetupStatus,
@@ -98,6 +101,12 @@ import type {
   SeerrMappingsResponse,
   SeerrMappingUpsertRequest,
 } from '@tracearr/shared';
+// Telegram pairing types re-exported from @tracearr/shared via one isolated
+// module - see telegramPairingContract.ts.
+import type {
+  TelegramPairingStart,
+  TelegramPairingStatus,
+} from '@/components/settings/notification-agents/telegramPairingContract';
 
 // Re-export shared types needed by frontend components
 export type {
@@ -1262,7 +1271,11 @@ class ApiClient {
       // server-side - pass this to scope the table to an exact set of media
       // types (e.g. ['movie', 'show'] to match the stats endpoint's scope,
       // which never includes 'artist').
-      mediaTypes?: ('movie' | 'show' | 'artist')[]
+      mediaTypes?: ('movie' | 'show' | 'artist')[],
+      // Scope to items that have at least one attributed request (Ombi/Seerr).
+      // Absent/false preserves today's behavior. Appended last to keep every
+      // existing positional call site (StaleContentTabs, Storage) unaffected.
+      requestedOnly?: boolean
     ) => {
       const params = new URLSearchParams();
       if (serverIds?.length) {
@@ -1284,6 +1297,7 @@ class ApiClient {
       }
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
+      if (requestedOnly) params.set('requestedOnly', 'true');
       return this.request<StaleResponse>(`/library/stale?${params.toString()}`);
     },
     neverWatched: (
@@ -1436,6 +1450,20 @@ class ApiClient {
     get: () => this.request<Settings>('/settings'),
     update: (data: Partial<Settings>) =>
       this.request<Settings>('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+    /**
+     * Set (or clear, with `url: null`) the Docker/Portainer redeploy webhook.
+     * Deliberately NOT part of `Settings`/`update()` above - the server never
+     * echoes this field back (the embedded webhook UUID is the auth secret),
+     * so it is typed and called separately even though it PATCHes the same
+     * `/settings` endpoint (see updateSettingsSchema in @tracearr/shared and
+     * routes/settings.ts). Read `dockerRedeployConfigured` from
+     * GET /version/update/capability to know the current state.
+     */
+    setDockerRedeployWebhook: (url: string | null) =>
+      this.request<Settings>('/settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ dockerRedeployWebhookUrl: url }),
+      }),
     testWebhook: (data: {
       type: 'discord' | 'custom';
       url?: string;
@@ -1508,6 +1536,25 @@ class ApiClient {
           method: 'DELETE',
         }),
     },
+  };
+
+  // Telegram bot pairing - interactive setup wizard.
+  // Contract: apps/server/src/routes/telegramPairing.ts (types re-exported via
+  // ./components/settings/notification-agents/telegramPairingContract.ts).
+  telegramPairing = {
+    start: (botToken: string) =>
+      this.request<TelegramPairingStart>('/notifications/telegram/pairing', {
+        method: 'POST',
+        body: JSON.stringify({ botToken }),
+      }),
+    status: (pairingId: string) =>
+      this.request<TelegramPairingStatus>(
+        `/notifications/telegram/pairing/${encodeURIComponent(pairingId)}`
+      ),
+    cancel: (pairingId: string) =>
+      this.request<void>(`/notifications/telegram/pairing/${encodeURIComponent(pairingId)}`, {
+        method: 'DELETE',
+      }),
   };
 
   // Channel Routing
@@ -1792,19 +1839,13 @@ class ApiClient {
     get: () => this.request<VersionInfo>('/version'),
     check: () =>
       this.request<{ message: string }>('/version/check', { method: 'POST', body: '{}' }),
-    updateCapability: () =>
-      this.request<{ available: boolean; enabled: boolean; isDocker: boolean }>(
-        '/version/update/capability'
-      ),
+    updateCapability: () => this.request<VersionUpdateCapability>('/version/update/capability'),
     update: () =>
-      this.request<{ started: boolean; target: string }>('/version/update', {
+      this.request<VersionUpdateStartResponse>('/version/update', {
         method: 'POST',
         body: '{}',
       }),
-    updateStatus: () =>
-      this.request<{ state: string; message: string | null; at: string | null }>(
-        '/version/update/status'
-      ),
+    updateStatus: () => this.request<VersionUpdateStatus>('/version/update/status'),
   };
 
   // Tailscale VPN

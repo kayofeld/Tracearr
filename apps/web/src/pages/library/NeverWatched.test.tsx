@@ -215,6 +215,57 @@ describe('LibraryNeverWatched', () => {
     expect(screen.getByText('(2010)')).toBeInTheDocument();
   });
 
+  it('renders the real library display name in the "By Library" breakdown, unprefixed on a single server', () => {
+    renderPage();
+
+    expect(screen.getByText('Movies')).toBeInTheDocument();
+    expect(screen.queryByText(/Server A · Movies/)).not.toBeInTheDocument();
+  });
+
+  it('prefixes the library name with the server name in the "By Library" breakdown on multiple servers', () => {
+    mockUseServer.mockReturnValue(serverReturn({ isMultiServer: true }));
+
+    renderPage();
+
+    expect(screen.getByText('Server A · Movies')).toBeInTheDocument();
+  });
+
+  it('falls back to a placeholder in the "By Library" breakdown when libraryName is empty', () => {
+    mockUseLibraryNeverWatched.mockReturnValue(
+      neverWatchedStatsReturn({
+        data: {
+          totals: { count: 2, sizeBytes: 20_000_000_000, libraryCount: 50, pctOfLibrary: 4 },
+          byMediaType: [
+            { mediaType: 'movie', count: 1, sizeBytes: 10_000_000_000 },
+            { mediaType: 'show', count: 1, sizeBytes: 10_000_000_000 },
+          ],
+          byLibrary: [
+            {
+              serverId: 'srv-1',
+              serverName: 'Server A',
+              libraryId: 'lib-1',
+              libraryName: '',
+              count: 2,
+              sizeBytes: 20_000_000_000,
+            },
+          ],
+          ageDistribution: [
+            { bucket: 'lt30', count: 0, sizeBytes: 0 },
+            { bucket: 'd30to90', count: 0, sizeBytes: 0 },
+            { bucket: 'd90to180', count: 0, sizeBytes: 0 },
+            { bucket: 'd180to365', count: 1, sizeBytes: 10_000_000_000 },
+            { bucket: 'gt365', count: 1, sizeBytes: 10_000_000_000 },
+          ],
+          oldestAddedAt: '2023-01-01T00:00:00Z',
+        },
+      })
+    );
+
+    renderPage();
+
+    expect(screen.getByText('common:labels.unknown')).toBeInTheDocument();
+  });
+
   it('shows the empty state once stats have loaded and there are no never-watched items', () => {
     mockUseLibraryNeverWatched.mockReturnValue(
       neverWatchedStatsReturn({
@@ -346,6 +397,128 @@ describe('LibraryNeverWatched', () => {
     const lastItemsCall = itemsCalls[itemsCalls.length - 1];
     // useLibraryStale(serverIds, libraryId, staleDays, category, page, pageSize, mediaType, sortBy, sortOrder)
     expect(lastItemsCall?.[6]).toBe('movie');
+  });
+
+  describe('requested-only filter', () => {
+    function lastItemsArgs() {
+      const calls = mockUseLibraryStale.mock.calls;
+      return calls[calls.length - 1] as unknown[];
+    }
+
+    it('is absent when no request connector is configured', () => {
+      mockUseRequesterStats.mockReturnValue(requesterStatsReturn({ ombi: false, seerr: false }));
+
+      renderPage();
+
+      expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('library.neverWatched.requestedOnlyToggle')
+      ).not.toBeInTheDocument();
+    });
+
+    it('is absent when configuredSources is missing entirely (older server)', () => {
+      const withoutConfiguredSources = requesterStatsReturn();
+      // Force the field itself to be absent from the response, rather than
+      // going through the helper's default-parameter substitution (which
+      // treats an explicit `undefined` argument the same as "not passed").
+      delete (withoutConfiguredSources as unknown as { data: { configuredSources?: unknown } }).data
+        .configuredSources;
+      mockUseRequesterStats.mockReturnValue(withoutConfiguredSources);
+
+      renderPage();
+
+      expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    });
+
+    it('is present, unchecked by default, and defaults requestedOnly to false in the query', () => {
+      renderPage();
+
+      const toggle = screen.getByRole('switch', {
+        name: 'library.neverWatched.requestedOnlyToggle',
+      });
+      expect(toggle).toBeInTheDocument();
+      expect(toggle).toHaveAttribute('aria-checked', 'false');
+      // useLibraryStale(..., mediaTypes, requestedOnly) - requestedOnly is the 11th positional arg
+      expect(lastItemsArgs()[10]).toBe(false);
+    });
+
+    it('sets requestedOnly on the query when toggled on, and resets pagination', async () => {
+      renderPage();
+
+      // Move off page 1 first so we can prove the toggle resets it.
+      await userEvent.click(screen.getByText('library.neverWatched.filterMovies'));
+      expect(lastItemsArgs()[4]).toBe(1);
+
+      const toggle = screen.getByRole('switch', {
+        name: 'library.neverWatched.requestedOnlyToggle',
+      });
+      await userEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute('aria-checked', 'true');
+      const args = lastItemsArgs();
+      expect(args[10]).toBe(true);
+      expect(args[4]).toBe(1);
+    });
+
+    it('resets pagination specifically when requestedOnly changes after paging forward', async () => {
+      mockUseLibraryStale.mockReturnValue(
+        staleItemsReturn({
+          data: {
+            items: [],
+            summary: {
+              neverWatched: { count: 100, sizeBytes: 0 },
+              stale: { count: 0, sizeBytes: 0 },
+              total: { count: 100, sizeBytes: 0 },
+              threshold: { days: 90 },
+            },
+            pagination: { page: 1, pageSize: 20, total: 100 },
+          },
+        })
+      );
+
+      renderPage();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+      expect(lastItemsArgs()[4]).toBe(2);
+
+      const toggle = screen.getByRole('switch', {
+        name: 'library.neverWatched.requestedOnlyToggle',
+      });
+      await userEvent.click(toggle);
+
+      expect(lastItemsArgs()[4]).toBe(1);
+    });
+
+    it('renders a distinct empty message when the filter is on and nothing matches', async () => {
+      mockUseLibraryStale.mockReturnValue(
+        staleItemsReturn({
+          data: {
+            items: [],
+            summary: {
+              neverWatched: { count: 2, sizeBytes: 20_000_000_000 },
+              stale: { count: 0, sizeBytes: 0 },
+              total: { count: 2, sizeBytes: 20_000_000_000 },
+              threshold: { days: 90 },
+            },
+            pagination: { page: 1, pageSize: 20, total: 0 },
+          },
+        })
+      );
+
+      renderPage();
+
+      const toggle = screen.getByRole('switch', {
+        name: 'library.neverWatched.requestedOnlyToggle',
+      });
+      await userEvent.click(toggle);
+
+      // The library-wide stats still report never-watched items (count: 2), so
+      // the page must stay on the table view - not fall back to the global
+      // "everything watched" empty state - and show the requested-only-specific
+      // message instead of the generic one.
+      expect(screen.getByText('library.neverWatched.requestedOnlyEmptyTitle')).toBeInTheDocument();
+      expect(screen.queryByText('library.neverWatched.emptyTitle')).not.toBeInTheDocument();
+    });
   });
 
   describe('requestedBy attribution column', () => {

@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "فشل تحديث الإعدادات",
       "streamTerminateFailed": "فشل في إنهاء البث",
       "trustScoresResetFailed": "فشل في إعادة تعيين نقاط الثقة",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "فشل اختبار Webhook"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} user reset to 100",
         "message_other": "{{count}} إعادة تعيين المستخدمين إلى 100",
         "title": "إعادة تعيين نقاط الثقة"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

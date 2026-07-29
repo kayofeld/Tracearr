@@ -14,6 +14,7 @@ import { Redis } from 'ioredis';
 import { API_BASE_PATH, REDIS_KEYS, WS_EVENTS } from '@tracearr/shared';
 import { createBetterAuthHandler } from './lib/betterAuthRequest.js';
 import { getBasePath } from './lib/basePath.js';
+import { resolveTrustProxy } from './lib/trustProxy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -64,6 +65,7 @@ import { stopImageCacheCleanup } from './services/imageProxy.js';
 import { debugRoutes } from './routes/debug.js';
 import { mobileRoutes } from './routes/mobile.js';
 import { notificationPreferencesRoutes } from './routes/notificationPreferences.js';
+import { telegramPairingRoutes } from './routes/telegramPairing.js';
 import { channelRoutingRoutes } from './routes/channelRouting.js';
 import { versionRoutes } from './routes/version.js';
 import { maintenanceRoutes } from './routes/maintenance.js';
@@ -242,7 +244,7 @@ const BASE_PATH = getBasePath();
 // required secrets like BETTER_AUTH_SECRET are missing)
 // ============================================================================
 
-async function buildApp(options: { trustProxy?: boolean } = {}) {
+async function buildApp(options: { trustProxy?: boolean | number | string[] } = {}) {
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
@@ -251,9 +253,12 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
           ? { target: 'pino-pretty', options: { colorize: true } }
           : undefined,
     },
-    // Trust proxy if enabled in settings or via env var
-    // This respects X-Forwarded-For, X-Forwarded-Proto headers from reverse proxies
-    trustProxy: options.trustProxy ?? process.env.TRUST_PROXY === 'true',
+    // Trust proxy if enabled in settings or via env var. This respects
+    // X-Forwarded-For / X-Forwarded-Proto headers from reverse proxies - see
+    // resolveTrustProxy() for why a bare boolean is a rate-limit bypass
+    // (security review F3) and TRUST_PROXY should be a hop count or an
+    // explicit proxy IP/CIDR list instead.
+    trustProxy: options.trustProxy ?? resolveTrustProxy(process.env.TRUST_PROXY),
     // Strip basePath prefix from incoming URLs before routing.
     // All existing routes (/api/v1/..., /health, etc.) match without changes.
     // Fastify automatically stores the original URL as request.originalUrl.
@@ -441,6 +446,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   await app.register(debugRoutes, { prefix: `${API_BASE_PATH}/debug` });
   await app.register(mobileRoutes, { prefix: `${API_BASE_PATH}/mobile` });
   await app.register(notificationPreferencesRoutes, { prefix: `${API_BASE_PATH}/notifications` });
+  await app.register(telegramPairingRoutes, { prefix: `${API_BASE_PATH}/notifications` });
   await app.register(versionRoutes, { prefix: `${API_BASE_PATH}/version` });
   await app.register(maintenanceRoutes, { prefix: `${API_BASE_PATH}/maintenance` });
   await app.register(tailscaleRoutes, { prefix: `${API_BASE_PATH}/tailscale` });
@@ -1173,11 +1179,20 @@ async function initializePostListen(app: FastifyInstance) {
 
   // Log network settings status
   const networkSettings = await getNetworkSettings();
-  const envTrustProxy = process.env.TRUST_PROXY === 'true';
+  // Use the same parser Fastify is configured from, not a `=== 'true'` check:
+  // TRUST_PROXY also accepts a hop count or a CIDR/IP list, and those are the
+  // recommended forms. Comparing against the string 'true' warned a correctly
+  // configured `TRUST_PROXY=1` deployment that the variable was unset, and the
+  // old message then steered the operator to the any-hop form that lets a
+  // client pick its own rate-limit bucket via X-Forwarded-For.
+  const envTrustProxy = resolveTrustProxy(process.env.TRUST_PROXY) !== false;
   if (networkSettings.trustProxy && !envTrustProxy) {
     app.log.warn(
-      'Trust proxy is enabled in settings but TRUST_PROXY env var is not set. ' +
-        'Set TRUST_PROXY=true and restart for reverse proxy support.'
+      'Trust proxy is enabled in settings but TRUST_PROXY is not set in the environment. ' +
+        'Set TRUST_PROXY to the number of proxies in front of Tracearr (TRUST_PROXY=1 for a ' +
+        'single reverse proxy), or to a comma-separated list of trusted proxy IPs/CIDRs, then ' +
+        'restart. Avoid TRUST_PROXY=true: it trusts every hop, so a client can choose the ' +
+        'address Tracearr rate-limits on.'
     );
   }
   if (networkSettings.externalUrl) {

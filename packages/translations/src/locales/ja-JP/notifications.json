@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "設定の更新に失敗しました",
       "streamTerminateFailed": "配信の終了に失敗しました",
       "trustScoresResetFailed": "信頼度のリセットに失敗しました",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Webhookテストに失敗しました"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} ユーザーを 100 にリセットしました",
         "message_other": "{{count}} ユーザーが 100 にリセットされました",
         "title": "信頼スコアをリセット"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

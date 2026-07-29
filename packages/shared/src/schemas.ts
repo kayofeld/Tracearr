@@ -821,6 +821,13 @@ export const updateSettingsSchema = z.object({
   backupScheduleDayOfWeek: z.number().int().min(0).max(6).optional(),
   backupScheduleDayOfMonth: z.number().int().min(1).max(31).optional(),
   backupRetentionCount: z.number().int().min(1).max(30).optional(),
+  // Docker in-app update: Portainer stack redeploy webhook URL. The embedded
+  // webhook UUID *is* the auth (anyone holding it can trigger a redeploy), so
+  // this is write-only - it is intentionally NOT part of the `Settings` type
+  // and is never echoed back by GET/PATCH /settings (see services/settings.ts
+  // INTERNAL_DEFAULTS + routes/version.ts capability endpoint, which exposes
+  // only a derived `dockerRedeployConfigured: boolean`).
+  dockerRedeployWebhookUrl: nullableUrlSchema.optional(),
 });
 
 // ============================================================================
@@ -833,6 +840,21 @@ export const tailscaleEnableSchema = z.object({
     .max(63)
     .regex(/^[a-zA-Z0-9-]*$/, 'Hostname may only contain letters, numbers, and hyphens')
     .optional(),
+});
+
+// ============================================================================
+// Telegram Interactive Pairing Schemas
+// ============================================================================
+
+export const telegramPairingStartSchema = z.object({
+  // Shape from @BotFather: "<numeric id>:<35-char token>". Loose bound here -
+  // the real validity check is the getMe call the route makes with it.
+  botToken: z
+    .string()
+    .trim()
+    .min(1, 'Bot token is required')
+    .max(200)
+    .regex(/^\d+:[A-Za-z0-9_-]+$/, 'Not a valid Telegram bot token'),
 });
 
 export const tailscaleExitNodeSchema = z.object({
@@ -1093,6 +1115,10 @@ export const libraryStaleQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
   timezone: timezoneSchema,
+  // Restrict results to items with a matching media-request attribution
+  // (contract §7 requester join). Default false/absent preserves today's
+  // behaviour byte-for-byte.
+  requestedOnly: booleanStringSchema.default(false),
 });
 
 // Library never-watched statistics query schema

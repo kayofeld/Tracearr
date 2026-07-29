@@ -92,7 +92,9 @@ test.describe('Library Navigation', () => {
     await page.goto('/');
     const libraryGroup = page.locator('li', { has: page.getByRole('button', { name: 'Library' }) });
     await libraryGroup.getByRole('button', { name: 'Library' }).click();
-    await libraryGroup.getByRole('link', { name: 'Watch' }).click();
+    // exact: the sidebar also has a "Never Watched" link, and a substring match
+    // resolves to both, which trips Playwright's strict mode.
+    await libraryGroup.getByRole('link', { name: 'Watch', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Watch Analytics', level: 1 })).toBeVisible();
   });
 });

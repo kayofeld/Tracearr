@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Не удалось обновить настройки",
       "streamTerminateFailed": "Не удалось завершить поток",
       "trustScoresResetFailed": "Не удалось сбросить баллы доверия",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Тест Webhook не удался"
@@ -270,6 +272,12 @@
         "message_one": "Пользователь {{count}} сброшен на 100",
         "message_other": "{{count}} пользователей сброшены на 100",
         "title": "Сброс баллов доверия"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

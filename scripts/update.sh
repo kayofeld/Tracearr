@@ -48,6 +48,31 @@ fail() {
   exit 1
 }
 
+# The app reports the version it was STAMPED with (APP_VERSION in .env), not the
+# version its checkout is on - buildInfo reads /app/.build-info.json in Docker and
+# falls back to APP_VERSION everywhere else. So the stamp is the source of truth
+# for "what version am I", and keeping it in step with the checkout is this
+# script's job.
+read_stamped_version() {
+  [ -f .env ] || return 0
+  # Last assignment wins, matching dotenv precedence.
+  grep '^APP_VERSION=' .env | tail -1 | cut -d= -f2-
+}
+
+# stamp_version(tag) - write APP_VERSION=<tag without leading v> into .env.
+# Rewrite without sed: the version is trusted (validated semver by the caller),
+# but a sed s/// on file content is needlessly fragile - rebuild the file instead.
+stamp_version() {
+  local version="${1#v}"
+  if [ -f .env ]; then
+    grep -v '^APP_VERSION=' .env >.env.tmp || true
+    echo "APP_VERSION=$version" >>.env.tmp
+    mv .env.tmp .env
+  else
+    echo "APP_VERSION=$version" >.env
+  fi
+}
+
 exec >>"$LOG_FILE" 2>&1
 echo "=== update run $(date -u +%FT%TZ) ==="
 
@@ -65,6 +90,24 @@ CURRENT="$(git describe --tags --always 2>/dev/null || echo unknown)"
 echo "[update] current=$CURRENT target=$TARGET"
 
 if [ "$CURRENT" = "$TARGET" ]; then
+  # The checkout is already on the target, but APP_VERSION can still disagree
+  # with it: the app reads its version from that stamp, not from git, so a
+  # manual deploy (checkout + build + restart, bypassing this script), a
+  # restored .env, or a run that died between checkout and stamp leaves the UI
+  # reporting an old version and offering an update forever - while this path
+  # keeps answering "already up to date" and never repairs it. Reconcile the
+  # stamp here so the loop is self-healing, and restart only when it actually
+  # changed (this path runs on every update click).
+  if [ "$(read_stamped_version)" != "${TARGET#v}" ]; then
+    echo "[update] stamp drift: .env has '$(read_stamped_version)', checkout is $TARGET"
+    status "running" "Reconciling version stamp to $TARGET"
+    stamp_version "$TARGET"
+    status "restarting" "Restarting on $TARGET"
+    $RESTART_CMD || fail "restart failed (stamp reconciled to $TARGET; run: $RESTART_CMD)"
+    status "done" "Reconciled version stamp to $TARGET"
+    echo "[update] stamp reconciled -> $TARGET"
+    exit 0
+  fi
   status "done" "Already on $TARGET"
   echo "[update] already up to date"
   exit 0
@@ -80,16 +123,7 @@ status "running" "Building"
 corepack pnpm build || fail "build failed"
 
 # Stamp the version so the update checker compares correctly after restart.
-# Rewrite without sed: the version is trusted (validated semver above), but a
-# sed s/// on file content is needlessly fragile — rebuild the file instead.
-VERSION="${TARGET#v}"
-if [ -f .env ]; then
-  grep -v '^APP_VERSION=' .env >.env.tmp || true
-  echo "APP_VERSION=$VERSION" >>.env.tmp
-  mv .env.tmp .env
-else
-  echo "APP_VERSION=$VERSION" >.env
-fi
+stamp_version "$TARGET"
 
 # Point of no return: everything built. Migrations run on the new process start.
 status "restarting" "Restarting on $TARGET"

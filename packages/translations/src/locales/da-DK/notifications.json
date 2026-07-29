@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Kunne ikke opdatere indstillinger",
       "streamTerminateFailed": "Kunne ikke afslutte stream",
       "trustScoresResetFailed": "Mislykkedes at nulstille trust scores",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Webhook-test mislykkedes"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} bruger nulstillet til 100",
         "message_other": "{{count}} brugere nulstillet til 100",
         "title": "Stol På Scores Nulstil"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

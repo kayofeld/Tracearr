@@ -239,6 +239,20 @@ export interface SetupStatus {
     oidc: boolean;
     oidcProviderName: string | null;
   };
+  /**
+   * True once the owner has a bound Emby identity (an auth_accounts row with
+   * providerId 'emby' for the owner) AND a configured Emby-type row still
+   * exists in `servers` - see embyPlugin.ts and setup.ts. Both conditions are
+   * required so that deleting the configured Emby server (while the link row
+   * survives) does not leave this true with no server left to authenticate
+   * against - see M1 in the security review. Purely a presentation signal for
+   * the frontend (e.g. move the local email/password form behind an "Other
+   * sign-in options" disclosure once Emby login is available) - it does NOT
+   * mean local login is disabled. `authMethods.local` keeps its existing
+   * meaning ("local login is enabled") unchanged; local login stays enabled
+   * and is the recovery path if Emby is unreachable.
+   */
+  embyAccountLinked: boolean;
 }
 
 /**
@@ -284,6 +298,44 @@ export const EMBY_SETUP_ERROR_CODES = [
 ] as const;
 
 export type EmbySetupErrorCode = (typeof EMBY_SETUP_ERROR_CODES)[number];
+
+/**
+ * Machine-readable reason for a failed POST /emby/login, returned as the
+ * `code` field alongside `message` in the error body so the frontend can
+ * render its own copy without string-matching the human-readable message.
+ *
+ * - `user_not_found` / `wrong_password` / `account_disabled` are only ever
+ *   returned when the server could confidently determine that specific state
+ *   for the Emby account already linked to the Tracearr owner (best-effort -
+ *   see embyPlugin.ts's diagnoseEmbyLoginFailure). Whenever that lookup is
+ *   unavailable, invalid, slow, inconclusive, or the submitted username does
+ *   not correspond to the linked account, the server falls back to
+ *   `invalid_credentials` - the same undifferentiated message this endpoint
+ *   always returned before this diagnosis existed.
+ * - `account_locked_out` was removed (owner decision, security review F2):
+ *   this endpoint forwards real credentials to the owner's own Emby server,
+ *   so reporting a lockout to an anonymous caller would confirm that
+ *   credential-stuffing tripped Emby's own lockout. A locked-out account now
+ *   falls back to `wrong_password`.
+ */
+export const EMBY_LOGIN_FAILURE_REASONS = {
+  INVALID_CREDENTIALS: 'invalid_credentials',
+  /**
+   * DO NOT emit this for a username that does not match the owner's linked
+   * Emby account. The diagnosis is deliberately scoped to that one account,
+   * and answering "no such user" for an arbitrary submitted name is exactly
+   * the enumeration oracle that scoping closed (security review F1): it would
+   * let an anonymous caller probe which accounts exist on the owner's Emby
+   * server. Kept in the union only for the owner's own account, where it
+   * distinguishes a deleted Emby account from a rejected password.
+   */
+  USER_NOT_FOUND: 'user_not_found',
+  WRONG_PASSWORD: 'wrong_password',
+  ACCOUNT_DISABLED: 'account_disabled',
+} as const;
+
+export type EmbyLoginFailureReason =
+  (typeof EMBY_LOGIN_FAILURE_REASONS)[keyof typeof EMBY_LOGIN_FAILURE_REASONS];
 
 // Session types
 export type SessionState = 'playing' | 'paused' | 'stopped';
@@ -1573,6 +1625,32 @@ export interface NotificationChannelRouting {
   updatedAt: Date;
 }
 
+// =============================================================================
+// Telegram interactive pairing (POST/GET/DELETE /notifications/telegram/pairing)
+// =============================================================================
+
+/** Lifecycle state of a Telegram bot-token/chat-id pairing session. */
+export type TelegramPairingState = 'pending' | 'paired' | 'expired';
+
+/** Response from starting a Telegram pairing (POST /notifications/telegram/pairing). */
+export interface TelegramPairingStart {
+  pairingId: string;
+  /** Single-use code the owner sends to the bot (embedded in botLink's /start param). */
+  code: string;
+  /** Bot's @username, resolved from Telegram's getMe. */
+  botUsername: string;
+  /** Deep link (t.me/<botUsername>?start=<code>) that pre-fills the code. */
+  botLink: string;
+  expiresAt: Date;
+}
+
+/** Response from polling a Telegram pairing (GET /notifications/telegram/pairing/:pairingId). */
+export interface TelegramPairingStatus {
+  state: TelegramPairingState;
+  /** Only set once state is 'paired'. */
+  chatId: string | null;
+}
+
 // Encrypted push payload (AES-256-GCM with separate authTag per security best practices)
 export interface EncryptedPushPayload {
   v: 1; // Version for future-proofing
@@ -2060,6 +2138,51 @@ export interface VersionInfo {
   updateAvailable: boolean;
   // When the last check occurred (ISO timestamp)
   lastChecked: string | null;
+}
+
+// GET /version/update/capability response.
+export interface VersionUpdateCapability {
+  // True iff the in-app update button can be used: owner + bare-metal
+  // self-update enabled, OR owner + Docker with a redeploy webhook configured.
+  available: boolean;
+  // Bare-metal self-update opt-in flag (TRACEARR_SELF_UPDATE=true).
+  enabled: boolean;
+  // True when this instance is running inside a Docker container.
+  isDocker: boolean;
+  // Docker only: whether the owner has configured a Portainer redeploy
+  // webhook (see Settings service dockerRedeployWebhookUrl). Always false
+  // on bare metal.
+  dockerRedeployConfigured: boolean;
+  // Docker only, non-null: an owner-facing caveat for the UI to render -
+  // either how to configure the webhook, or that a redeploy only changes the
+  // running version when the compose stack tracks a moving tag (e.g.
+  // `:latest`); a pinned exact tag (e.g. `:1.9.0`) redeploys unchanged. Null
+  // on bare metal.
+  dockerNote: string | null;
+}
+
+// POST /version/update response.
+export interface VersionUpdateStartResponse {
+  started: boolean;
+  // Version the update is targeting (from the last version check).
+  target: string;
+  // Docker only: this process may be recreated shortly after the webhook
+  // fires, so further progress cannot be observed from here - see
+  // VersionUpdateStatus's 'unknown' state.
+  note?: string;
+}
+
+// Update progress states written by scripts/update.sh (bare metal) into
+// .update-status.json, plus 'idle' (no update run yet) and 'unknown' (Docker
+// only - progress cannot be observed from inside the container once a
+// redeploy webhook has fired, since this process may already be gone).
+export type VersionUpdateState = 'idle' | 'running' | 'restarting' | 'done' | 'failed' | 'unknown';
+
+// GET /version/update/status response.
+export interface VersionUpdateStatus {
+  state: VersionUpdateState;
+  message: string | null;
+  at: string | null;
 }
 
 // =============================================================================

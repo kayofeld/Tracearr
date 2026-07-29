@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Error al actualizar ajustes",
       "streamTerminateFailed": "Error al terminar la reproducción",
       "trustScoresResetFailed": "Error al restablecer las puntuaciones de confianza",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Prueba de Webhook fallida"
@@ -270,6 +272,12 @@
         "message_one": "Usuario {{count}} restablecido a 100",
         "message_other": "Usuario {{count}} restablecido a 100",
         "title": "Restablecer puntuaciones de confianza"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

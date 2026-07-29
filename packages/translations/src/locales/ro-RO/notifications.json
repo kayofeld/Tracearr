@@ -96,6 +96,8 @@
       "settingsUpdateFailed": "Actualizarea setărilor a eșuat",
       "streamTerminateFailed": "Nu s-a putut termina transmisiunea",
       "trustScoresResetFailed": "Resetarea scorurilor de încredere a eșuat",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
+      "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Testul Webhook a eșuat"
@@ -270,6 +272,12 @@
         "message_one": "{{count}} utilizator resetează la 100",
         "message_other": "{{count}} utilizatori resetați la 100",
         "title": "Resetarea scorurilor de încredere"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
       },
       "usersMerged": {
         "rulesKept": "Kept target's version of: {{names}}",

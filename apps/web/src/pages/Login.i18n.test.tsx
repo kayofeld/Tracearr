@@ -48,6 +48,7 @@ const BASE_STATUS: SetupStatus = {
   hasJellyfinServers: false,
   hasPasswordAuth: true,
   authMethods: { local: true, plex: false, emby: true, oidc: false, oidcProviderName: null },
+  embyAccountLinked: false,
 };
 
 describe('Login - real i18n resources (Emby setup keys)', () => {

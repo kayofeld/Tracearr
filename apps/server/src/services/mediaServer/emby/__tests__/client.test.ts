@@ -83,6 +83,16 @@ describe('EmbyClient.authenticate', () => {
     expect(result).toBeNull();
   });
 
+  it('rethrows a non-HttpClientError whose message merely CONTAINS "401" (L6 regression)', async () => {
+    // A plain Error carrying "401" in its message text (e.g. from a wrapping
+    // layer) must never be misread as bad credentials - only a real
+    // HttpClientError with statusCode 401 means that.
+    mockFetchJson.mockRejectedValue(new Error('emby request failed: 401 Unauthorized'));
+    await expect(EmbyClient.authenticate(URL, 'demo', 'wrong')).rejects.toThrow(
+      'emby request failed: 401 Unauthorized'
+    );
+  });
+
   it('rethrows a non-401 HttpClientError rather than swallowing it as bad credentials', async () => {
     mockFetchJson.mockRejectedValue(httpError(500));
     await expect(EmbyClient.authenticate(URL, 'demo', 'wrong')).rejects.toThrow();
@@ -218,5 +228,96 @@ describe('EmbyClient.verifyServerAdmin', () => {
       success: false,
       code: EmbyClient.AdminVerifyError.CONNECTION_FAILED,
     });
+  });
+});
+
+describe('EmbyClient.getLinkedEmbyAccount', () => {
+  const ADMIN_KEY = 'admin-key';
+  const ACCOUNT_ID = 'emby-account-1';
+  const TIMEOUT_MS = 3000;
+
+  beforeEach(() => {
+    mockFetchJson.mockReset();
+  });
+
+  it('fetches by account id (never a name search/list scan), using the admin key and given timeout', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo', Policy: { IsDisabled: false } });
+
+    await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS);
+
+    const call = mockFetchJson.mock.calls[0];
+    expect(call?.[0]).toBe(`${URL}/Users/${ACCOUNT_ID}`);
+    const options = call?.[1] as { headers?: Record<string, string>; timeout?: number };
+    expect(options?.headers?.['X-Emby-Authorization']).toContain(ADMIN_KEY);
+    expect(options?.timeout).toBe(TIMEOUT_MS);
+  });
+
+  it('URL-encodes the account id in the request path', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo', Policy: {} });
+
+    await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, 'weird id/with?chars', TIMEOUT_MS);
+
+    const call = mockFetchJson.mock.calls[0];
+    expect(call?.[0]).toBe(`${URL}/Users/weird%20id%2Fwith%3Fchars`);
+  });
+
+  it('returns isDisabled true when Policy.IsDisabled is true', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo', Policy: { IsDisabled: true } });
+
+    const result = await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS);
+
+    expect(result).toEqual({ isDisabled: true });
+  });
+
+  it('returns isDisabled false when the account is not disabled', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo', Policy: { IsDisabled: false } });
+
+    const result = await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS);
+
+    expect(result).toEqual({ isDisabled: false });
+  });
+
+  it('returns isDisabled false when Policy is missing (never fabricates a disabled state)', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo' });
+
+    const result = await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS);
+
+    expect(result).toEqual({ isDisabled: false });
+  });
+
+  // account_locked_out no longer exists anywhere in this path (security
+  // review F2) - there is deliberately no test asserting a locked-out
+  // reason; a lockout observed on Emby now just reads isDisabled: false.
+
+  it('throws when the admin key is rejected (caller must fall back)', async () => {
+    mockFetchJson.mockRejectedValue(httpError(401));
+
+    await expect(
+      EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS)
+    ).rejects.toThrow();
+  });
+
+  it('throws when the account was since deleted on Emby (404)', async () => {
+    mockFetchJson.mockRejectedValue(httpError(404));
+
+    await expect(
+      EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS)
+    ).rejects.toThrow();
+  });
+
+  it('throws when the response is not an object (cannot determine)', async () => {
+    mockFetchJson.mockResolvedValue('unexpected string shape');
+
+    await expect(
+      EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS)
+    ).rejects.toThrow();
+  });
+
+  it('throws on a network error/timeout (caller must fall back)', async () => {
+    mockFetchJson.mockRejectedValue(new Error('ETIMEDOUT'));
+
+    await expect(
+      EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS)
+    ).rejects.toThrow();
   });
 });

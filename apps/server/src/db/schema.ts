@@ -825,6 +825,7 @@ export const serversRelations = relations(servers, ({ one, many }) => ({
   sessions: many(sessions),
   libraryItems: many(libraryItems),
   librarySnapshots: many(librarySnapshots),
+  libraries: many(libraries),
   plexAccount: one(plexAccounts, {
     fields: [servers.plexAccountId],
     references: [plexAccounts.id],
@@ -1140,6 +1141,59 @@ export const librarySnapshotsRelations = relations(librarySnapshots, ({ one }) =
 export const libraryItemsRelations = relations(libraryItems, ({ one }) => ({
   server: one(servers, {
     fields: [libraryItems.serverId],
+    references: [servers.id],
+  }),
+}));
+
+/**
+ * Libraries - dimension table mapping each server's library key to its
+ * display name and type, so UI/reporting can show "Movies" instead of the
+ * raw server-side section key (e.g. Plex's numeric section id, Jellyfin's
+ * GUID). Populated by librarySync from MediaLibrary.{id,name,type}
+ * (services/mediaServer/types.ts); library_id matches library_items.library_id
+ * and library_snapshots.library_id exactly (same varchar(100) shape) so both
+ * can join to this table on (server_id, library_id).
+ *
+ * Upserted on every library sync (upsert key: server_id + library_id) -
+ * never backfilled by this migration, so a library added before this table
+ * existed simply has no row until the next sync; consumers must tolerate a
+ * missing row and fall back to the raw library_id.
+ */
+export const libraries = pgTable(
+  'libraries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    serverId: uuid('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+
+    // Server-specific library identifier - matches library_items.library_id /
+    // library_snapshots.library_id exactly (varchar(100), same server-side key).
+    libraryId: varchar('library_id', { length: 100 }).notNull(),
+
+    // Display name as reported by the server (e.g. "Movies", "TV Shows").
+    name: varchar('name', { length: 255 }).notNull(),
+
+    // Library type as reported by the server (e.g. "movie", "show", "artist",
+    // "photo"). Freeform per-server vocabulary, NOT the same enum as
+    // library_items.media_type (which classifies individual items, not the
+    // library itself) - deliberately not constrained to mediaTypeEnum.
+    type: varchar('type', { length: 20 }).notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Upsert conflict target for librarySync, and the index the
+    // library_items/library_snapshots (server_id, library_id) join uses.
+    uniqueIndex('libraries_server_library_unique').on(table.serverId, table.libraryId),
+  ]
+);
+
+export const librariesRelations = relations(libraries, ({ one }) => ({
+  server: one(servers, {
+    fields: [libraries.serverId],
     references: [servers.id],
   }),
 }));

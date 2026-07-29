@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import type { RequesterStatsResponse } from '@tracearr/shared';
+import type { RequesterStatsResponse, RequesterStatsRow } from '@tracearr/shared';
 import { StatsRequesters } from './Requesters';
 
 function renderPage() {
@@ -108,6 +108,35 @@ describe('StatsRequesters', () => {
     expect(screen.getByText('statsRequesters.unattributedRow')).toBeInTheDocument();
     // The unattributed card's own requestCount (distinct from the alice row's 10).
     expect(screen.getAllByText('4').length).toBeGreaterThan(0);
+  });
+
+  it('links a requester with a matched userId to their user profile', () => {
+    renderPage();
+
+    const link = screen.getByRole('link', { name: 'alice' });
+    expect(link).toHaveAttribute('href', '/users/user-1');
+  });
+
+  it('renders the unattributed/null-userId requester as plain text, never a link', () => {
+    const [firstRow] = baseRequesterData().requesters;
+    const orphanRow: RequesterStatsRow = {
+      ...firstRow!,
+      userId: null,
+      username: 'orphan-request',
+    };
+    mockUseRequesterStats.mockReturnValue(
+      requesterStatsReturn({
+        data: {
+          ...baseRequesterData(),
+          requesters: [orphanRow],
+        },
+      })
+    );
+
+    renderPage();
+
+    expect(screen.getByText('orphan-request')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'orphan-request' })).not.toBeInTheDocument();
   });
 
   it('shows a clear "not configured" empty state (not an error) when neither connector is set up', () => {

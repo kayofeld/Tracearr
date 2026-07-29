@@ -28,11 +28,14 @@ import { setupRoutes } from '../setup.js';
 
 /**
  * Helper to mock db.select with multiple chained calls
- * Setup route uses Promise.all with 4 parallel queries:
+ * Setup route uses Promise.all with 6 parallel queries:
  * 1. All servers
  * 2. Jellyfin servers (where type = 'jellyfin')
  * 3. Owners (where role = 'owner')
  * 4. Password users (where passwordHash is not null)
+ * 5. Owner's bound Emby identity (auth_accounts joined to users, provider
+ *    'emby', role 'owner')
+ * 6. Configured Emby-type servers (M1 - embyAccountLinked also requires this)
  * Plus 1 settings query (localLoginEnabled), which falls through to its
  * default (true) when unmocked.
  */
@@ -40,6 +43,7 @@ function mockDbSelectMultiple(results: unknown[][]) {
   let callIndex = 0;
   const createChain = () => ({
     from: vi.fn().mockReturnThis(),
+    innerJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     limit: vi.fn().mockImplementation(() => {
       return Promise.resolve(results[callIndex++] || []);
@@ -90,6 +94,8 @@ describe('Setup Routes', () => {
         [], // jellyfin servers query
         [], // owners query (empty = needs setup)
         [], // password users query
+        [], // owner emby link query
+        [], // configured emby servers query
       ]);
 
       const response = await app.inject({
@@ -112,6 +118,7 @@ describe('Setup Routes', () => {
           oidc: false,
           oidcProviderName: null,
         },
+        embyAccountLinked: false,
       });
     });
 
@@ -127,6 +134,8 @@ describe('Setup Routes', () => {
         [], // jellyfin servers query
         [], // owners query (empty = needs setup)
         [], // password users query
+        [], // owner emby link query
+        [], // configured emby servers query
       ]);
 
       const response = await app.inject({
@@ -149,6 +158,7 @@ describe('Setup Routes', () => {
           oidc: false,
           oidcProviderName: null,
         },
+        embyAccountLinked: false,
       });
     });
 
@@ -161,6 +171,8 @@ describe('Setup Routes', () => {
         [{ id: 'server-1' }], // jellyfin servers query
         [{ id: 'user-1' }], // owners query (has owner)
         [{ id: 'user-1' }], // password users query
+        [], // owner emby link query
+        [], // configured emby servers query
       ]);
 
       const response = await app.inject({
@@ -183,6 +195,7 @@ describe('Setup Routes', () => {
           oidc: false,
           oidcProviderName: null,
         },
+        embyAccountLinked: false,
       });
     });
 
@@ -195,6 +208,8 @@ describe('Setup Routes', () => {
         [], // jellyfin servers query
         [], // owners query
         [], // password users query
+        [], // owner emby link query
+        [], // configured emby servers query
       ]);
 
       const response = await app.inject({
@@ -217,6 +232,7 @@ describe('Setup Routes', () => {
           oidc: false,
           oidcProviderName: null,
         },
+        embyAccountLinked: false,
       });
     });
 
@@ -229,6 +245,8 @@ describe('Setup Routes', () => {
         [], // jellyfin servers query
         [{ id: 'user-1' }], // owners query
         [{ id: 'user-1' }], // password users query (has password)
+        [], // owner emby link query
+        [], // configured emby servers query
       ]);
 
       const response = await app.inject({
@@ -251,6 +269,7 @@ describe('Setup Routes', () => {
           oidc: false,
           oidcProviderName: null,
         },
+        embyAccountLinked: false,
       });
     });
 
@@ -263,6 +282,8 @@ describe('Setup Routes', () => {
         [{ id: 'server-1' }], // jellyfin servers query
         [{ id: 'user-1' }], // owners query
         [], // password users query (empty)
+        [], // owner emby link query
+        [], // configured emby servers query
       ]);
 
       const response = await app.inject({
@@ -285,6 +306,7 @@ describe('Setup Routes', () => {
           oidc: false,
           oidcProviderName: null,
         },
+        embyAccountLinked: false,
       });
     });
 
@@ -297,6 +319,8 @@ describe('Setup Routes', () => {
         [], // no jellyfin servers
         [], // no owners
         [], // no password users
+        [], // owner emby link query
+        [], // configured emby servers query
       ]);
 
       const response = await app.inject({
@@ -319,6 +343,7 @@ describe('Setup Routes', () => {
           oidc: false,
           oidcProviderName: null,
         },
+        embyAccountLinked: false,
       });
     });
 
@@ -331,6 +356,8 @@ describe('Setup Routes', () => {
         [{ id: 'server-1' }], // jellyfin servers
         [{ id: 'owner-1' }], // owner exists
         [{ id: 'owner-1' }, { id: 'user-2' }], // multiple password users
+        [], // owner emby link query
+        [], // configured emby servers query
       ]);
 
       const response = await app.inject({
@@ -353,7 +380,80 @@ describe('Setup Routes', () => {
           oidc: false,
           oidcProviderName: null,
         },
+        embyAccountLinked: false,
       });
+    });
+
+    it('returns embyAccountLinked true when the owner has a bound Emby identity AND a configured Emby server', async () => {
+      app = await buildTestApp();
+
+      mockDbSelectMultiple([
+        [{ id: 'server-1' }], // servers query
+        [], // jellyfin servers query
+        [{ id: 'owner-1' }], // owners query
+        [{ id: 'owner-1' }], // password users query
+        [{ id: 'auth-account-1' }], // owner emby link query - link exists
+        [{ id: 'server-1' }], // configured emby servers query - server exists
+      ]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/setup/status',
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.embyAccountLinked).toBe(true);
+      // Purely additive presentation signal - local login stays reported as
+      // enabled regardless of the Emby link (never repurposed to mean
+      // "local login disabled").
+      expect(body.authMethods.local).toBe(true);
+    });
+
+    it('returns embyAccountLinked false when no owner Emby link exists', async () => {
+      app = await buildTestApp();
+
+      mockDbSelectMultiple([
+        [{ id: 'server-1' }], // servers query
+        [], // jellyfin servers query
+        [{ id: 'owner-1' }], // owners query
+        [{ id: 'owner-1' }], // password users query
+        [], // owner emby link query - no link
+        [{ id: 'server-1' }], // configured emby servers query - server exists
+      ]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/setup/status',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().embyAccountLinked).toBe(false);
+    });
+
+    // M1 (code review): the link row alone is not enough - deleting the
+    // configured Emby server while auth_accounts still has the owner's link
+    // must not leave the login page leading with an Emby-only form whose
+    // every submit fails "No Emby server is configured".
+    it('returns embyAccountLinked false when the owner has a link but the Emby server was deleted', async () => {
+      app = await buildTestApp();
+
+      mockDbSelectMultiple([
+        [], // servers query - no servers of any type left
+        [], // jellyfin servers query
+        [{ id: 'owner-1' }], // owners query
+        [{ id: 'owner-1' }], // password users query
+        [{ id: 'auth-account-1' }], // owner emby link query - link survives
+        [], // configured emby servers query - server gone
+      ]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/setup/status',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().embyAccountLinked).toBe(false);
     });
   });
 });
