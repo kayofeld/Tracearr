@@ -14,6 +14,7 @@ import { Redis } from 'ioredis';
 import { API_BASE_PATH, REDIS_KEYS, WS_EVENTS } from '@tracearr/shared';
 import { createBetterAuthHandler } from './lib/betterAuthRequest.js';
 import { getBasePath } from './lib/basePath.js';
+import { resolveTrustProxy } from './lib/trustProxy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -242,7 +243,7 @@ const BASE_PATH = getBasePath();
 // required secrets like BETTER_AUTH_SECRET are missing)
 // ============================================================================
 
-async function buildApp(options: { trustProxy?: boolean } = {}) {
+async function buildApp(options: { trustProxy?: boolean | number | string[] } = {}) {
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
@@ -251,9 +252,12 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
           ? { target: 'pino-pretty', options: { colorize: true } }
           : undefined,
     },
-    // Trust proxy if enabled in settings or via env var
-    // This respects X-Forwarded-For, X-Forwarded-Proto headers from reverse proxies
-    trustProxy: options.trustProxy ?? process.env.TRUST_PROXY === 'true',
+    // Trust proxy if enabled in settings or via env var. This respects
+    // X-Forwarded-For / X-Forwarded-Proto headers from reverse proxies - see
+    // resolveTrustProxy() for why a bare boolean is a rate-limit bypass
+    // (security review F3) and TRUST_PROXY should be a hop count or an
+    // explicit proxy IP/CIDR list instead.
+    trustProxy: options.trustProxy ?? resolveTrustProxy(process.env.TRUST_PROXY),
     // Strip basePath prefix from incoming URLs before routing.
     // All existing routes (/api/v1/..., /health, etc.) match without changes.
     // Fastify automatically stores the original URL as request.originalUrl.

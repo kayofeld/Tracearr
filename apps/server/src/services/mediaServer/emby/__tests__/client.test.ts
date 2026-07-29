@@ -58,9 +58,24 @@ describe('EmbyClient.authenticate', () => {
   });
 
   it('returns null on a 401 (bad credentials)', async () => {
-    mockFetchJson.mockRejectedValue(new Error('emby request failed: 401 Unauthorized'));
+    mockFetchJson.mockRejectedValue(httpError(401));
     const result = await EmbyClient.authenticate(URL, 'demo', 'wrong');
     expect(result).toBeNull();
+  });
+
+  it('rethrows a non-HttpClientError whose message merely CONTAINS "401" (L6 regression)', async () => {
+    // A plain Error carrying "401" in its message text (e.g. from a wrapping
+    // layer) must never be misread as bad credentials - only a real
+    // HttpClientError with statusCode 401 means that.
+    mockFetchJson.mockRejectedValue(new Error('emby request failed: 401 Unauthorized'));
+    await expect(EmbyClient.authenticate(URL, 'demo', 'wrong')).rejects.toThrow(
+      'emby request failed: 401 Unauthorized'
+    );
+  });
+
+  it('rethrows a non-401 HttpClientError', async () => {
+    mockFetchJson.mockRejectedValue(httpError(500));
+    await expect(EmbyClient.authenticate(URL, 'demo', 's3cret')).rejects.toThrow();
   });
 });
 
@@ -196,110 +211,85 @@ describe('EmbyClient.verifyServerAdmin', () => {
   });
 });
 
-describe('EmbyClient.diagnoseLoginFailure', () => {
+describe('EmbyClient.getLinkedEmbyAccount', () => {
   const ADMIN_KEY = 'admin-key';
+  const ACCOUNT_ID = 'emby-account-1';
   const TIMEOUT_MS = 3000;
 
   beforeEach(() => {
     mockFetchJson.mockReset();
   });
 
-  it('uses the admin key (X-Emby-Authorization) and the given timeout, never the submitted password', async () => {
-    mockFetchJson.mockResolvedValue([{ Name: 'demo', Policy: { IsDisabled: false } }]);
+  it('fetches by account id (never a name search/list scan), using the admin key and given timeout', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo', Policy: { IsDisabled: false } });
 
-    await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+    await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS);
 
     const call = mockFetchJson.mock.calls[0];
-    expect(call?.[0]).toBe(`${URL}/Users`);
+    expect(call?.[0]).toBe(`${URL}/Users/${ACCOUNT_ID}`);
     const options = call?.[1] as { headers?: Record<string, string>; timeout?: number };
     expect(options?.headers?.['X-Emby-Authorization']).toContain(ADMIN_KEY);
     expect(options?.timeout).toBe(TIMEOUT_MS);
   });
 
-  it('matches the username case-insensitively', async () => {
-    mockFetchJson.mockResolvedValue([{ Name: 'Demo', Policy: {} }]);
+  it('URL-encodes the account id in the request path', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo', Policy: {} });
 
-    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'DEMO', TIMEOUT_MS);
+    await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, 'weird id/with?chars', TIMEOUT_MS);
 
-    expect(result).toBe('wrong_password');
+    const call = mockFetchJson.mock.calls[0];
+    expect(call?.[0]).toBe(`${URL}/Users/weird%20id%2Fwith%3Fchars`);
   });
 
-  it('returns user_not_found when no user with that name exists', async () => {
-    mockFetchJson.mockResolvedValue([{ Name: 'someone-else', Policy: {} }]);
+  it('returns isDisabled true when Policy.IsDisabled is true', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo', Policy: { IsDisabled: true } });
 
-    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+    const result = await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS);
 
-    expect(result).toBe('user_not_found');
+    expect(result).toEqual({ isDisabled: true });
   });
 
-  it('returns account_disabled when Policy.IsDisabled is true', async () => {
-    mockFetchJson.mockResolvedValue([{ Name: 'demo', Policy: { IsDisabled: true } }]);
+  it('returns isDisabled false when the account is not disabled', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo', Policy: { IsDisabled: false } });
 
-    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+    const result = await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS);
 
-    expect(result).toBe('account_disabled');
+    expect(result).toEqual({ isDisabled: false });
   });
 
-  it('returns account_locked_out when invalid attempts meet a positive lockout threshold', async () => {
-    mockFetchJson.mockResolvedValue([
-      {
-        Name: 'demo',
-        Policy: { IsDisabled: false, LoginAttemptsBeforeLockout: 3, InvalidLoginAttemptCount: 3 },
-      },
-    ]);
+  it('returns isDisabled false when Policy is missing (never fabricates a disabled state)', async () => {
+    mockFetchJson.mockResolvedValue({ Name: 'demo' });
 
-    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
+    const result = await EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS);
 
-    expect(result).toBe('account_locked_out');
+    expect(result).toEqual({ isDisabled: false });
   });
 
-  it('does NOT claim a lockout when LoginAttemptsBeforeLockout is missing (not reliably observable)', async () => {
-    // Some Emby versions/configs never populate this field. Absent a
-    // verifiable threshold, this must fall back to wrong_password rather
-    // than fabricate a lockout state.
-    mockFetchJson.mockResolvedValue([
-      { Name: 'demo', Policy: { IsDisabled: false, InvalidLoginAttemptCount: 10 } },
-    ]);
-
-    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
-
-    expect(result).toBe('wrong_password');
-  });
-
-  it('does NOT claim a lockout when LoginAttemptsBeforeLockout is 0/disabled', async () => {
-    mockFetchJson.mockResolvedValue([
-      {
-        Name: 'demo',
-        Policy: { IsDisabled: false, LoginAttemptsBeforeLockout: 0, InvalidLoginAttemptCount: 50 },
-      },
-    ]);
-
-    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
-
-    expect(result).toBe('wrong_password');
-  });
-
-  it('returns wrong_password when the account exists, is not disabled, and is not locked out', async () => {
-    mockFetchJson.mockResolvedValue([{ Name: 'demo', Policy: { IsDisabled: false } }]);
-
-    const result = await EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS);
-
-    expect(result).toBe('wrong_password');
-  });
+  // account_locked_out no longer exists anywhere in this path (security
+  // review F2) - there is deliberately no test asserting a locked-out
+  // reason; a lockout observed on Emby now just reads isDisabled: false.
 
   it('throws when the admin key is rejected (caller must fall back)', async () => {
     mockFetchJson.mockRejectedValue(httpError(401));
 
     await expect(
-      EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS)
+      EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS)
     ).rejects.toThrow();
   });
 
-  it('throws when the /Users response is not an array (cannot determine)', async () => {
-    mockFetchJson.mockResolvedValue({ unexpected: 'shape' });
+  it('throws when the account was since deleted on Emby (404)', async () => {
+    mockFetchJson.mockRejectedValue(httpError(404));
 
     await expect(
-      EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS)
+      EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS)
+    ).rejects.toThrow();
+  });
+
+  it('throws when the response is not an object (cannot determine)', async () => {
+    mockFetchJson.mockResolvedValue('unexpected string shape');
+
+    await expect(
+      EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS)
     ).rejects.toThrow();
   });
 
@@ -307,7 +297,7 @@ describe('EmbyClient.diagnoseLoginFailure', () => {
     mockFetchJson.mockRejectedValue(new Error('ETIMEDOUT'));
 
     await expect(
-      EmbyClient.diagnoseLoginFailure(URL, ADMIN_KEY, 'demo', TIMEOUT_MS)
+      EmbyClient.getLinkedEmbyAccount(URL, ADMIN_KEY, ACCOUNT_ID, TIMEOUT_MS)
     ).rejects.toThrow();
   });
 });

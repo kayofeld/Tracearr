@@ -333,6 +333,18 @@ export const API_BASE_PATH = `/api/${API_VERSION}`;
 //   - Login.tsx posts directly to this path via authClient.$fetch.
 export const SIGN_UP_USERNAME_PATH = '/sign-up/username';
 
+// Better Auth Emby credential-login endpoint (server: embyPlugin.ts).
+// Single source of truth for every consumer of this path, so it can never
+// drift out of sync (security review F4 - a renamed copy at any one site
+// silently unbinds it from the others with no error):
+//   - embyPlugin.ts's createAuthEndpoint registers the endpoint at this path.
+//   - embyPlugin.ts's rateLimit pathMatcher compares ctx.path against this
+//     same constant - a mismatch here falls through to better-auth's lenient
+//     default rate limit with no error or log, silently unbounding the login
+//     oracle this rule exists to bound.
+//   - Login.tsx posts directly to this path via authClient.$fetch.
+export const EMBY_LOGIN_PATH = '/emby/login';
+
 // JWT configuration
 export const JWT_CONFIG = {
   ACCESS_TOKEN_EXPIRY: '48h',

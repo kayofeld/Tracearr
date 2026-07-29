@@ -132,7 +132,7 @@ describe('Login - Emby-linked focused mode', () => {
     expect(screen.getByLabelText('pages:login.usernameOrEmail')).toBeInTheDocument();
   });
 
-  it('does not render the disclosure at all when there are no other enabled methods', async () => {
+  it('shows the disabled-login hint instead of the disclosure when there are no other enabled methods', async () => {
     mockStatus.mockResolvedValue(
       withEmbyLinked(
         baseStatus({
@@ -150,10 +150,12 @@ describe('Login - Emby-linked focused mode', () => {
     renderLogin();
     await waitForSetupLoaded();
 
+    // Nothing to disclose - no disclosure trigger.
     expect(
       screen.queryByRole('button', { name: 'pages:login.otherSignInOptions' })
     ).not.toBeInTheDocument();
-    expect(screen.queryByText('pages:login.localDisabledHint')).not.toBeInTheDocument();
+    // But the user still gets an explanation for why no other method is offered.
+    expect(screen.getByText('pages:login.localDisabledHint')).toBeInTheDocument();
   });
 
   it('behaves exactly like today when the owner has no linked Emby account: all enabled methods shown together, no disclosure', async () => {
@@ -215,6 +217,27 @@ describe('Login - Emby credential input hygiene', () => {
     expect(passwordInput).toHaveAttribute('name', 'emby-password');
     expect(passwordInput).toHaveAttribute('autocomplete', 'current-password');
   });
+
+  it('posts to the Emby login path with no claimCode field - the Emby form is never shown during setup, so a claim code can never apply', async () => {
+    mockStatus.mockResolvedValue(baseStatus());
+    mockFetch.mockResolvedValue({ data: {}, error: null });
+    renderLogin();
+    await waitForSetupLoaded();
+
+    const scope = embyFormScope();
+    await userEvent.type(screen.getByLabelText('pages:login.embyUsername'), 'owner');
+    await userEvent.type(scope.getByLabelText('settings:account.password'), 'correct-password');
+    await userEvent.click(scope.getByRole('button', { name: /pages:login.signInWithEmby/ }));
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    // Non-null: the assertion above already proved this call exists.
+    const [path, options] = mockFetch.mock.calls[0]!;
+    // The rate-limit matcher on the server keys off this exact path - it must
+    // stay in sync with the shared EMBY_LOGIN_PATH constant, not a local literal.
+    expect(path).toBe('/emby/login');
+    expect(options?.body).toEqual({ username: 'owner', password: 'correct-password' });
+    expect(options?.body).not.toHaveProperty('claimCode');
+  });
 });
 
 describe('Login - Emby login failure reason codes', () => {
@@ -233,7 +256,6 @@ describe('Login - Emby login failure reason codes', () => {
     [EMBY_LOGIN_FAILURE_REASONS.USER_NOT_FOUND, 'pages:login.embyErrorUserNotFound'],
     [EMBY_LOGIN_FAILURE_REASONS.WRONG_PASSWORD, 'pages:login.embyErrorInvalidPassword'],
     [EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_DISABLED, 'pages:login.embyErrorAccountDisabled'],
-    [EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_LOCKED_OUT, 'pages:login.embyErrorAccountLocked'],
     [EMBY_LOGIN_FAILURE_REASONS.INVALID_CREDENTIALS, 'pages:login.embyLoginFailed'],
   ] as const)(
     'renders its own copy for %s without string-matching server prose',
@@ -254,6 +276,28 @@ describe('Login - Emby login failure reason codes', () => {
       ).not.toBeInTheDocument();
     }
   );
+
+  it('never renders lockout-specific copy - a locked-out account must never be reported on this public page', async () => {
+    mockStatus.mockResolvedValue(baseStatus());
+    mockFetch.mockResolvedValue({
+      data: null,
+      // Literal string, not EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_LOCKED_OUT - that
+      // member no longer exists in the frozen contract. This guards against any
+      // orphan lockout copy/key, regardless of whether a stray server ever sends
+      // it. No `message` override, so a recognized code would fall through to
+      // its own translated copy - here it must fall through to the generic key.
+      error: { code: 'account_locked_out' },
+    });
+    renderLogin();
+    await waitForSetupLoaded();
+
+    await submitEmbyLogin();
+
+    // Falls through to the generic message like any other unrecognized code -
+    // never a lockout-specific message.
+    expect(await screen.findByText('pages:login.embyLoginFailed')).toBeInTheDocument();
+    expect(screen.queryByText(/locked/i)).not.toBeInTheDocument();
+  });
 
   it('falls back to the server message when the code is missing (e.g. a connection error)', async () => {
     mockStatus.mockResolvedValue(baseStatus());
@@ -279,4 +323,23 @@ describe('Login - Emby login failure reason codes', () => {
 
     expect(await screen.findByText('pages:login.embyLoginFailed')).toBeInTheDocument();
   });
+
+  it.each(['toString', 'constructor', 'hasOwnProperty', '__proto__'])(
+    'treats prototype-chain property name %s as an unrecognized code, not an inherited function',
+    async (code) => {
+      mockStatus.mockResolvedValue(baseStatus());
+      // No `message` override: a `code in EMBY_ERROR_MESSAGE_KEYS` guard would
+      // match these via the prototype chain, treat them as "recognized", and
+      // hand the inherited Object.prototype member to `t()` instead of a
+      // string key. The fixed Object.hasOwn guard treats them as unrecognized,
+      // so this must fall through to the plain generic translated key.
+      mockFetch.mockResolvedValue({ data: null, error: { code } });
+      renderLogin();
+      await waitForSetupLoaded();
+
+      await submitEmbyLogin();
+
+      expect(await screen.findByText('pages:login.embyLoginFailed')).toBeInTheDocument();
+    }
+  );
 });

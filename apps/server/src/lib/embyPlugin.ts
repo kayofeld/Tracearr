@@ -21,10 +21,21 @@ import { createAuthEndpoint, APIError } from 'better-auth/api';
 import { setSessionCookie } from 'better-auth/cookies';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
-import { EMBY_LOGIN_FAILURE_REASONS, type EmbyLoginFailureReason } from '@tracearr/shared';
+import {
+  EMBY_LOGIN_FAILURE_REASONS,
+  EMBY_LOGIN_PATH,
+  type EmbyLoginFailureReason,
+} from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { users, servers, authAccounts } from '../db/schema.js';
+import { users, servers, authAccounts, serverUsers } from '../db/schema.js';
 import { EmbyClient } from '../services/mediaServer/index.js';
+
+/** Minimal logger shape accepted by diagnoseEmbyLoginFailure (matches Better
+ * Auth's ctx.context.logger and the repo's own Logger interface) - kept
+ * structural so tests can pass a bare `{ warn: vi.fn() }`. */
+interface DiagnosisLogger {
+  warn: (message: string, context?: Record<string, unknown>) => void;
+}
 
 export const EMBY_PROVIDER = 'emby';
 
@@ -39,23 +50,37 @@ const loginBody = z.object({
 });
 
 // Bounds the best-effort admin-API lookup diagnoseEmbyLoginFailure makes on a
-// failed login. Short and fixed: a slow/hanging Emby server must not make a
-// failed login take noticeably longer than it does today, and this is never
-// derived from the request.
+// failed login whose username matches the linked account (see F5: this DOES
+// add latency to that case - a slow/hanging Emby server can delay the
+// response by up to this many ms - so it is short and fixed, and never
+// derived from the request, to cap the worst case rather than pretend there
+// is none).
 const EMBY_LOGIN_DIAGNOSIS_TIMEOUT_MS = 3000;
 
-// SECURITY (deliberate, owner-accepted trade-off): diagnoseEmbyLoginFailure
-// below distinguishes "no such Emby user" from "wrong password" on this
-// UNAUTHENTICATED endpoint, which is a user-enumeration oracle - an anonymous
-// caller can learn whether a given username exists on the owner's Emby
-// server (and, once it does, whether it's disabled/locked-out vs. just a bad
-// password) that they could not learn before this endpoint existed. The
-// owner explicitly asked for this (self-hosted, single-owner instance) to
-// diagnose a stale-password autofill after changing their own Emby password.
-// This rate limit is the mitigation: it bounds how fast the oracle can be
-// queried in bulk. It is an explicit, fixed, server-side rule - never derived
-// from the request - registered on the plugin itself (Better Auth's built-in
-// /sign-in* rate limit, configured in auth.ts, does not match this path).
+// SECURITY (owner-accepted, narrowed after security review): an earlier
+// version of diagnoseEmbyLoginFailure below matched the submitted username
+// against every account on the owner's Emby server (`/Users`), which was a
+// user-enumeration oracle covering every Emby account, not only the owner's
+// - flagged as F1 (High) in the security review. It is now scoped to ONLY
+// the single Emby account already linked to the Tracearr owner in
+// auth_accounts, resolved by its stored account id - never a name search.
+// A caller who does not already know the owner's own linked Emby username
+// (or submits any other username) gets the pre-existing generic message
+// with no diagnosis and no outbound call to Emby at all. `account_locked_out`
+// is never reported (F2, High): this endpoint forwards real credentials to
+// the owner's own Emby server, so reporting a lockout would confirm to an
+// attacker that their credential-stuffing tripped Emby's own lockout - a
+// locked-out account now falls back to `wrong_password`.
+// This rate limit remains the mitigation for the residual signal (whether
+// the owner's OWN account is disabled vs. simply rejected the password): it
+// bounds how fast that can be queried. It is an explicit, fixed, server-side
+// rule - never derived from the request - registered on the plugin itself
+// (Better Auth's built-in /sign-in* rate limit, configured in auth.ts, does
+// not match this path). See security review F3/F4 for the two conditions
+// this rule depends on: the resolved client IP must reflect only the real
+// proxy hop (trustProxy.ts), and this path must be a single frozen constant
+// shared with the pathMatcher below (EMBY_LOGIN_PATH), never a second
+// hand-typed literal.
 const EMBY_LOGIN_RATE_LIMIT_WINDOW_SECONDS = 60;
 const EMBY_LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
 
@@ -104,28 +129,55 @@ export function decideEmbyOwnerLogin(input: {
 }
 
 /** The owner's configured Emby server — the only server we trust to auth against. */
-async function resolveConfiguredEmbyServer(): Promise<{ url: string; token: string } | null> {
+async function resolveConfiguredEmbyServer(): Promise<{
+  id: string;
+  url: string;
+  token: string;
+} | null> {
   const [server] = await db
-    .select({ url: servers.url, token: servers.token })
+    .select({ id: servers.id, url: servers.url, token: servers.token })
     .from(servers)
     .where(eq(servers.type, 'emby'))
     .limit(1);
-  return server ? { url: server.url.replace(/\/$/, ''), token: server.token } : null;
+  return server ? { id: server.id, url: server.url.replace(/\/$/, ''), token: server.token } : null;
 }
 
 /**
- * Best-effort reason for a failed Emby username/password login. Uses the
- * configured server's own admin API key (see EmbyClient.diagnoseLoginFailure)
- * to look up the account - NEVER the password the caller submitted, which is
- * not echoed anywhere in this path. Never throws and never takes noticeably
- * longer than the plain "invalid" case: any missing key, lookup failure, or
- * timeout falls back to today's undifferentiated message so the diagnosis
- * can only make a failed login MORE informative, never worse (slower,
- * different failure mode, etc).
+ * Best-effort reason for a failed Emby username/password login, scoped ONLY
+ * to the Emby account already linked to the Tracearr owner (owner decision,
+ * security review F1) - resolved entirely from LOCAL data before any call to
+ * Emby is made:
+ *
+ * 1. Look up the owner's linked Emby account id in auth_accounts. No link at
+ *    all -> generic message, no outbound call.
+ * 2. Compare the submitted username against the username LOCALLY cached for
+ *    that account id in server_users (populated by the existing Emby sync -
+ *    see sync.ts / embyRoutes.ts). No cached row, or a mismatch -> generic
+ *    message, no outbound call. This is what makes the endpoint safe against
+ *    enumeration: a caller who does not already know the owner's own linked
+ *    Emby username can never get anything beyond the pre-existing generic
+ *    message, regardless of what they submit.
+ * 3. Only once the username corresponds to the linked account does this make
+ *    the single bounded outbound call (EmbyClient.getLinkedEmbyAccount, by
+ *    account id - never a name search or a list scan) needed to read the
+ *    account's LIVE disabled state, which the sync cache must never be
+ *    trusted for.
+ *
+ * Never echoes the password the caller submitted, which does not reach this
+ * function at all. This makes a failed login MORE informative when it can
+ * determine a specific reason, but it is not free: every login whose
+ * username matches the linked account now costs one extra request to the
+ * Emby server (bounded by EMBY_LOGIN_DIAGNOSIS_TIMEOUT_MS), and a hanging
+ * Emby server delays the response by up to that timeout. Any missing key,
+ * lookup failure, or timeout falls back to the plain "invalid" message
+ * rather than throwing; a caught failure is logged (message only, never
+ * credentials or the server URL) so a persistently broken diagnosis (e.g. a
+ * rotated admin key) is visible instead of silently degrading forever.
  */
 export async function diagnoseEmbyLoginFailure(
-  server: { url: string; token: string },
-  username: string
+  server: { id: string; url: string; token: string },
+  username: string,
+  logger?: DiagnosisLogger
 ): Promise<{ code: EmbyLoginFailureReason; message: string }> {
   const fallback = {
     code: EMBY_LOGIN_FAILURE_REASONS.INVALID_CREDENTIALS,
@@ -133,46 +185,52 @@ export async function diagnoseEmbyLoginFailure(
   };
   if (!server.token) return fallback;
 
-  let reason: EmbyLoginFailureReason;
-  try {
-    reason = await EmbyClient.diagnoseLoginFailure(
-      server.url,
-      server.token,
-      username,
-      EMBY_LOGIN_DIAGNOSIS_TIMEOUT_MS
-    );
-  } catch {
+  const [ownerEmbyLink] = await db
+    .select({ accountId: authAccounts.accountId })
+    .from(authAccounts)
+    .innerJoin(users, eq(authAccounts.userId, users.id))
+    .where(and(eq(authAccounts.providerId, EMBY_PROVIDER), eq(users.role, 'owner')))
+    .limit(1);
+  if (!ownerEmbyLink) return fallback;
+
+  const [cachedAccount] = await db
+    .select({ username: serverUsers.username })
+    .from(serverUsers)
+    .where(
+      and(eq(serverUsers.serverId, server.id), eq(serverUsers.externalId, ownerEmbyLink.accountId))
+    )
+    .limit(1);
+  if (cachedAccount?.username.toLowerCase() !== username.toLowerCase()) {
     return fallback;
   }
 
-  switch (reason) {
-    case EMBY_LOGIN_FAILURE_REASONS.USER_NOT_FOUND:
-      return {
-        code: reason,
-        message: 'No Emby account exists with that username.',
-      };
-    case EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_DISABLED:
-      return {
-        code: reason,
-        message: 'This Emby account has been disabled by an administrator.',
-      };
-    case EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_LOCKED_OUT:
-      return {
-        code: reason,
-        message:
-          'This Emby account is temporarily locked after too many failed sign-in attempts. Wait a few minutes and try again, or unlock it from the Emby dashboard.',
-      };
-    case EMBY_LOGIN_FAILURE_REASONS.WRONG_PASSWORD:
-      return {
-        code: reason,
-        // Points at the scenario the owner actually hit: a browser autofilling
-        // a password from before an Emby password change.
-        message:
-          'This Emby account exists, but the password was rejected. If you recently changed your Emby password, make sure your browser is not autofilling the old one.',
-      };
-    default:
-      return fallback;
+  let account: { isDisabled: boolean };
+  try {
+    account = await EmbyClient.getLinkedEmbyAccount(
+      server.url,
+      server.token,
+      ownerEmbyLink.accountId,
+      EMBY_LOGIN_DIAGNOSIS_TIMEOUT_MS
+    );
+  } catch (err) {
+    logger?.warn('Emby login diagnosis lookup failed; falling back to generic message', { err });
+    return fallback;
   }
+
+  if (account.isDisabled) {
+    return {
+      code: EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_DISABLED,
+      message: 'This Emby account has been disabled by an administrator.',
+    };
+  }
+
+  return {
+    code: EMBY_LOGIN_FAILURE_REASONS.WRONG_PASSWORD,
+    // Points at the scenario the owner actually hit: a browser autofilling
+    // a password from before an Emby password change.
+    message:
+      'This Emby account exists, but the password was rejected. If you recently changed your Emby password, make sure your browser is not autofilling the old one.',
+  };
 }
 
 export const embyPlugin = () =>
@@ -180,7 +238,7 @@ export const embyPlugin = () =>
     id: 'emby',
     endpoints: {
       embyLogin: createAuthEndpoint(
-        '/emby/login',
+        EMBY_LOGIN_PATH,
         { method: 'POST', body: loginBody },
         async (ctx) => {
           const { username, password } = ctx.body;
@@ -196,13 +254,20 @@ export const embyPlugin = () =>
           let authResult;
           try {
             authResult = await EmbyClient.authenticate(url, username, password);
-          } catch {
+          } catch (err) {
+            // Anonymous caller - never disclose the configured Emby host/port
+            // (security review F7). Logged server-side (URL only, never
+            // credentials) so the owner can still diagnose connectivity.
+            ctx.context.logger.warn('Could not reach configured Emby server for login', {
+              err,
+              url,
+            });
             throw new APIError('SERVICE_UNAVAILABLE', {
-              message: `Could not reach the Emby server at ${url}.`,
+              message: 'Could not reach the Emby server. Try again shortly.',
             });
           }
           if (!authResult) {
-            const diagnosis = await diagnoseEmbyLoginFailure(server, username);
+            const diagnosis = await diagnoseEmbyLoginFailure(server, username, ctx.context.logger);
             throw new APIError('UNAUTHORIZED', {
               message: diagnosis.message,
               code: diagnosis.code,
@@ -306,11 +371,14 @@ export const embyPlugin = () =>
     },
     // See EMBY_LOGIN_RATE_LIMIT_* above for why this endpoint needs its own
     // rule: it doesn't match Better Auth's built-in /sign-in* special rule
-    // (auth.ts), and the enumeration-oracle trade-off this endpoint makes
-    // (diagnoseEmbyLoginFailure) needs its own bound on query volume.
+    // (auth.ts), and the residual diagnosis signal (diagnoseEmbyLoginFailure)
+    // needs its own bound on query volume. pathMatcher compares against the
+    // SAME EMBY_LOGIN_PATH constant the endpoint above is registered at
+    // (security review F4) - a second hand-typed literal here would silently
+    // unbind this rule from the real path on any rename, with no error.
     rateLimit: [
       {
-        pathMatcher: (path: string) => path === '/emby/login',
+        pathMatcher: (path: string) => path === EMBY_LOGIN_PATH,
         window: EMBY_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
         max: EMBY_LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
       },

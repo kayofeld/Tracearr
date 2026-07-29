@@ -8,7 +8,6 @@
  */
 
 import { fetchJson, HttpClientError } from '../../../utils/http.js';
-import { EMBY_LOGIN_FAILURE_REASONS, type EmbyLoginFailureReason } from '@tracearr/shared';
 import {
   BaseMediaServerClient,
   type JellyfinEmbyActivityEntry,
@@ -118,7 +117,11 @@ export class EmbyClient extends BaseMediaServerClient {
 
       return parseAuthResponse(data);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('401')) {
+      // Matches the real error type/statusCode (as verifyServerAdmin does),
+      // not a message.includes('401') string check - a message that merely
+      // CONTAINS "401" (e.g. wrapped by an intermediate error) must not be
+      // misread as bad credentials (L6, security review).
+      if (error instanceof HttpClientError && error.statusCode === 401) {
         return null;
       }
       throw error;
@@ -236,82 +239,54 @@ export class EmbyClient extends BaseMediaServerClient {
   }
 
   /**
-   * Best-effort diagnosis of WHY a username/password login just failed,
-   * using the server's admin API key (never the submitted password) to
-   * inspect the account. Used by embyPlugin.ts to turn today's flat
-   * "Invalid Emby username or password" into a specific reason.
+   * Fetches the SINGLE Emby account already linked to the Tracearr owner, by
+   * its Emby account id - never a name search or a list scan across
+   * `/Users`. Used by embyPlugin.ts's diagnoseEmbyLoginFailure to read the
+   * account's LIVE disabled state after it has already confirmed locally
+   * (via the server_users sync cache) that the submitted username
+   * corresponds to this linked account (security review F1) - this method
+   * itself never sees or compares a username.
    *
-   * Distinguishes:
-   * - `user_not_found`     - no user with this name exists on the server.
-   * - `account_disabled`   - the account exists and Policy.IsDisabled is true
-   *                          (an administrator disabled it).
-   * - `account_locked_out` - the account exists, is not disabled, and Emby's
-   *                          own failed-login lockout has tripped (see below).
-   * - `wrong_password`     - the account exists, is not disabled, and no
-   *                          lockout was observed - the password itself was
-   *                          rejected.
-   *
-   * `account_locked_out` relies on Policy.InvalidLoginAttemptCount and
-   * Policy.LoginAttemptsBeforeLockout, which Emby only populates when its
-   * own lockout-after-failed-attempts feature is enabled for the account
-   * (LoginAttemptsBeforeLockout > 0). Neither field is guaranteed present on
-   * every Emby version/config - when either is missing or not a number, this
-   * deliberately does NOT claim a lockout it cannot verify and falls through
-   * to `wrong_password` instead (still true: account exists, not disabled,
-   * credentials rejected).
+   * account_locked_out is no longer a possible outcome anywhere in this path
+   * (security review F2, owner decision): this endpoint forwards the
+   * submitted credentials to Emby's own AuthenticateByName, so reporting a
+   * lockout here would confirm to an anonymous caller that their
+   * credential-stuffing tripped Emby's own lockout. A locked-out account now
+   * reads as "not disabled" and falls back to wrong_password in the caller
+   * (still true: exists, not disabled, credentials rejected).
    *
    * Throws on anything it cannot use to make a determination (network
-   * error, timeout, invalid/insufficient admin key, unparseable response) -
-   * the caller (embyPlugin.ts) treats any throw as "diagnosis unavailable"
-   * and falls back to the generic message, never surfacing this failure as
-   * more informative than it actually is.
+   * error, timeout, 404 if the linked account was since deleted on Emby,
+   * invalid/insufficient admin key, unparseable response) - the caller
+   * treats any throw as "diagnosis unavailable" and falls back to the
+   * generic message.
    */
-  static async diagnoseLoginFailure(
+  static async getLinkedEmbyAccount(
     serverUrl: string,
     adminApiKey: string,
-    username: string,
+    accountId: string,
     timeoutMs: number
-  ): Promise<EmbyLoginFailureReason> {
+  ): Promise<{ isDisabled: boolean }> {
     const url = serverUrl.replace(/\/$/, '');
     const headers = {
       'X-Emby-Authorization': BaseMediaServerClient.buildStaticAuthHeader(adminApiKey),
       Accept: 'application/json',
     };
 
-    const data = await fetchJson<unknown>(`${url}/Users`, {
+    const data = await fetchJson<unknown>(`${url}/Users/${encodeURIComponent(accountId)}`, {
       headers,
       service: 'emby',
       timeout: timeoutMs,
     });
-    if (!Array.isArray(data)) {
-      throw new Error('Unexpected /Users response shape (not an array)');
+    if (!data || typeof data !== 'object') {
+      throw new Error('Unexpected /Users/{id} response shape');
     }
-
-    const normalizedUsername = username.toLowerCase();
-    const match = data.find((entry): entry is Record<string, unknown> => {
-      if (!entry || typeof entry !== 'object') return false;
-      const name = (entry as Record<string, unknown>).Name;
-      return typeof name === 'string' && name.toLowerCase() === normalizedUsername;
-    });
-    if (!match) return EMBY_LOGIN_FAILURE_REASONS.USER_NOT_FOUND;
 
     const policy =
-      match.Policy && typeof match.Policy === 'object'
-        ? (match.Policy as Record<string, unknown>)
+      (data as Record<string, unknown>).Policy &&
+      typeof (data as Record<string, unknown>).Policy === 'object'
+        ? ((data as Record<string, unknown>).Policy as Record<string, unknown>)
         : {};
-    if (policy.IsDisabled === true) return EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_DISABLED;
-
-    const lockoutThreshold = policy.LoginAttemptsBeforeLockout;
-    const invalidAttempts = policy.InvalidLoginAttemptCount;
-    if (
-      typeof lockoutThreshold === 'number' &&
-      lockoutThreshold > 0 &&
-      typeof invalidAttempts === 'number' &&
-      invalidAttempts >= lockoutThreshold
-    ) {
-      return EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_LOCKED_OUT;
-    }
-
-    return EMBY_LOGIN_FAILURE_REASONS.WRONG_PASSWORD;
+    return { isDisabled: policy.IsDisabled === true };
   }
 }

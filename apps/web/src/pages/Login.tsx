@@ -24,9 +24,9 @@ import { authClient } from '@/lib/authClient';
 import { api, BASE_URL } from '@/lib/api';
 import {
   SIGN_UP_USERNAME_PATH,
+  EMBY_LOGIN_PATH,
   EMBY_LOGIN_FAILURE_REASONS,
   type SetupStatus,
-  type EmbyLoginFailureReason,
 } from '@tracearr/shared';
 import { LogoIcon } from '@/components/brand/Logo';
 import { cn } from '@/lib/utils';
@@ -48,16 +48,31 @@ type Translate = (key: string) => string;
 // @tracearr/shared) - never string-match the server's prose. `INVALID_CREDENTIALS`
 // is the server's own undifferentiated fallback (diagnosis unavailable/inconclusive);
 // it maps to the same generic message an unrecognized/missing code falls back to.
-const EMBY_ERROR_MESSAGE_KEYS: Record<EmbyLoginFailureReason, string> = {
+//
+// Deliberately not an exhaustive map over every `EmbyLoginFailureReason`: a
+// locked-out Emby account must never be reported on this public page (it would
+// confirm to an attacker that they succeeded in locking the owner out of their
+// own Emby server), so that reason has no entry here and falls through to the
+// generic message like any other unrecognized code. Left untyped (inferred)
+// rather than annotated as `Record<EmbyLoginFailureReason, string>` so the map
+// only ever claims the keys it actually lists.
+const EMBY_ERROR_MESSAGE_KEYS = {
   [EMBY_LOGIN_FAILURE_REASONS.USER_NOT_FOUND]: 'pages:login.embyErrorUserNotFound',
   [EMBY_LOGIN_FAILURE_REASONS.WRONG_PASSWORD]: 'pages:login.embyErrorInvalidPassword',
   [EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_DISABLED]: 'pages:login.embyErrorAccountDisabled',
-  [EMBY_LOGIN_FAILURE_REASONS.ACCOUNT_LOCKED_OUT]: 'pages:login.embyErrorAccountLocked',
   [EMBY_LOGIN_FAILURE_REASONS.INVALID_CREDENTIALS]: 'pages:login.embyLoginFailed',
-};
+} as const;
 
-function isEmbyLoginFailureReason(code: unknown): code is EmbyLoginFailureReason {
-  return typeof code === 'string' && code in EMBY_ERROR_MESSAGE_KEYS;
+// `code in EMBY_ERROR_MESSAGE_KEYS` would walk the prototype chain, so a code
+// of `toString` or `constructor` would pass and hand an inherited function to
+// `t()`. An own-property check (the Object.hasOwn-equivalent
+// `Object.prototype.hasOwnProperty.call` - the app's ES2020 lib target here
+// doesn't yet expose the ES2022 `Object.hasOwn` global) restricts the check
+// to the object's own keys.
+function isEmbyLoginFailureReason(code: unknown): code is keyof typeof EMBY_ERROR_MESSAGE_KEYS {
+  return (
+    typeof code === 'string' && Object.prototype.hasOwnProperty.call(EMBY_ERROR_MESSAGE_KEYS, code)
+  );
 }
 
 /** Render our own copy per failure code - never string-match the server's prose. */
@@ -273,12 +288,11 @@ export function Login() {
     setEmbyPending(true);
 
     try {
-      const { error } = await authClient.$fetch('/emby/login', {
+      const { error } = await authClient.$fetch(EMBY_LOGIN_PATH, {
         method: 'POST',
         body: {
           username: embyUsername.trim(),
           password: embyPassword,
-          ...(requiresClaimCode && { claimCode: claimCode.trim() }),
         },
       });
 
@@ -621,7 +635,7 @@ export function Login() {
           {focusedEmbyMode ? (
             <>
               {embyForm}
-              {otherMethodsAvailable && (
+              {otherMethodsAvailable ? (
                 <Collapsible open={otherOptionsOpen} onOpenChange={setOtherOptionsOpen}>
                   <CollapsibleTrigger className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-[3px]">
                     {t('pages:login.otherSignInOptions')}
@@ -638,6 +652,13 @@ export function Login() {
                     {localBlock}
                   </CollapsibleContent>
                 </Collapsible>
+              ) : (
+                // No other method is enabled server-side, so there is nothing
+                // to disclose - but the user still deserves to know why local
+                // sign-in isn't offered here (same hint localBlock would show).
+                <p className="text-muted-foreground text-center text-sm">
+                  {t('pages:login.localDisabledHint')}
+                </p>
               )}
             </>
           ) : (

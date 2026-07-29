@@ -241,12 +241,16 @@ export interface SetupStatus {
   };
   /**
    * True once the owner has a bound Emby identity (an auth_accounts row with
-   * providerId 'emby' for the owner - see embyPlugin.ts). Purely a
-   * presentation signal for the frontend (e.g. move the local email/password
-   * form behind an "Other sign-in options" disclosure once Emby login is
-   * available) - it does NOT mean local login is disabled. `authMethods.local`
-   * keeps its existing meaning ("local login is enabled") unchanged; local
-   * login stays enabled and is the recovery path if Emby is unreachable.
+   * providerId 'emby' for the owner) AND a configured Emby-type row still
+   * exists in `servers` - see embyPlugin.ts and setup.ts. Both conditions are
+   * required so that deleting the configured Emby server (while the link row
+   * survives) does not leave this true with no server left to authenticate
+   * against - see M1 in the security review. Purely a presentation signal for
+   * the frontend (e.g. move the local email/password form behind an "Other
+   * sign-in options" disclosure once Emby login is available) - it does NOT
+   * mean local login is disabled. `authMethods.local` keeps its existing
+   * meaning ("local login is enabled") unchanged; local login stays enabled
+   * and is the recovery path if Emby is unreachable.
    */
   embyAccountLinked: boolean;
 }
@@ -256,20 +260,25 @@ export interface SetupStatus {
  * `code` field alongside `message` in the error body so the frontend can
  * render its own copy without string-matching the human-readable message.
  *
- * - `user_not_found` / `wrong_password` / `account_disabled` /
- *   `account_locked_out` are only ever returned when the server could
- *   confidently determine that specific state via the Emby admin API
- *   (best-effort - see embyPlugin.ts's diagnoseEmbyLoginFailure). Whenever
- *   that lookup is unavailable, invalid, slow, or inconclusive, the server
- *   falls back to `invalid_credentials` - the same undifferentiated message
- *   this endpoint always returned before this diagnosis existed.
+ * - `user_not_found` / `wrong_password` / `account_disabled` are only ever
+ *   returned when the server could confidently determine that specific state
+ *   for the Emby account already linked to the Tracearr owner (best-effort -
+ *   see embyPlugin.ts's diagnoseEmbyLoginFailure). Whenever that lookup is
+ *   unavailable, invalid, slow, inconclusive, or the submitted username does
+ *   not correspond to the linked account, the server falls back to
+ *   `invalid_credentials` - the same undifferentiated message this endpoint
+ *   always returned before this diagnosis existed.
+ * - `account_locked_out` was removed (owner decision, security review F2):
+ *   this endpoint forwards real credentials to the owner's own Emby server,
+ *   so reporting a lockout to an anonymous caller would confirm that
+ *   credential-stuffing tripped Emby's own lockout. A locked-out account now
+ *   falls back to `wrong_password`.
  */
 export const EMBY_LOGIN_FAILURE_REASONS = {
   INVALID_CREDENTIALS: 'invalid_credentials',
   USER_NOT_FOUND: 'user_not_found',
   WRONG_PASSWORD: 'wrong_password',
   ACCOUNT_DISABLED: 'account_disabled',
-  ACCOUNT_LOCKED_OUT: 'account_locked_out',
 } as const;
 
 export type EmbyLoginFailureReason =
