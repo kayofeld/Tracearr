@@ -1,3 +1,4 @@
+import type * as AuthGuardsModule from '../authGuards.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DrizzleQueryError } from 'drizzle-orm/errors';
 import { EMBY_SETUP_PATH } from '@tracearr/shared';
@@ -63,7 +64,7 @@ vi.mock('ioredis', () => {
 // Postgres; every other export (assertSignupAllowed, assertClaimCode, the
 // OWNERLESS_* constants embySetupPlugin.ts itself imports) stays real.
 vi.mock('../authGuards.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../authGuards.js')>();
+  const actual = await importOriginal<typeof AuthGuardsModule>();
   return { ...actual, getInstanceClaimState: vi.fn() };
 });
 

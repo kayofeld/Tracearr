@@ -1,3 +1,4 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { describe, it, expect, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -225,10 +226,7 @@ describe('safeProbeJson', () => {
 // ============================================================================
 describe('safeProbeJson: real connect-pinning end to end (no fetchImpl injected, IMP-02)', () => {
   async function withLocalServer(
-    handler: (
-      req: import('node:http').IncomingMessage,
-      res: import('node:http').ServerResponse
-    ) => void
+    handler: (req: IncomingMessage, res: ServerResponse) => void
   ): Promise<{ server: Server; port: number; close: () => Promise<void> }> {
     const server = createServer(handler);
     await new Promise<void>((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise));

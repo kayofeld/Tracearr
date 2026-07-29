@@ -82,7 +82,7 @@ describe('createLogger redaction wiring', () => {
   });
 
   it('never lets console.error see a raw apiKey/password field', () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const logger = createLogger('test');
 
     logger.error('setup failed', { apiKey: 'super-secret-api-key', password: 'super-secret-pw' });

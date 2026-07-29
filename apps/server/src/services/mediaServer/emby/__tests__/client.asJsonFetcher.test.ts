@@ -36,7 +36,7 @@ function routedFetch(routes: Record<string, () => Response>): typeof fetch {
       if (url.endsWith(suffix)) return factory();
     }
     throw new Error(`test fetchImpl: unexpected request to ${url}`);
-  }) as unknown as typeof fetch;
+  });
 }
 
 function jsonOk(body: unknown = {}) {
