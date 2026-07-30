@@ -127,7 +127,26 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
       const mediaTypeFilter = mediaType === 'all' ? sql`` : sql`AND li.media_type = ${mediaType}`;
 
       const result = await db.execute(sql`
-        WITH child_size AS (
+        WITH watched_keys AS (
+          -- Every library key any user has played, flattened to one column so
+          -- the anti-join below is a plain equality (design §5.1, ADR 0010).
+          --
+          -- Written as a UNION rather than an OR inside the NOT EXISTS on
+          -- purpose: an OR across two columns cannot drive a hash/merge
+          -- anti-join, so the planner falls back to scanning played_states
+          -- once per candidate row. Measured at production scale (22.5k items,
+          -- 18.4k played rows) that cost 1417ms and used neither index; this
+          -- form uses both played_states indexes and runs in 15ms.
+          --
+          -- The media_type guard the OR form needed is redundant here: movie
+          -- and episode ids live in rating_key, show ids only in
+          -- series_rating_key, and the two id spaces never overlap.
+          SELECT server_id, rating_key AS key FROM played_states
+          UNION
+          SELECT server_id, series_rating_key FROM played_states
+          WHERE series_rating_key IS NOT NULL
+        ),
+        child_size AS (
           -- Aggregate episode file sizes per show, for size roll-up
           SELECT grandparent_rating_key, server_id, SUM(file_size) AS total_size
           FROM library_items
@@ -193,16 +212,12 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
             )
             AND NOT EXISTS (
               -- Played-state mirror (design §5.1, ADR 0010): any user's played
-              -- flag on this item (movie) or the show itself via SeriesId
+              -- flag on this item (movie) or on the show via SeriesId
               -- (episode -> series_rating_key) counts as watched, even with no
               -- qualifying session (pre-polling history). No-op for Plex
               -- servers - they have zero played_states rows.
-              SELECT 1 FROM played_states ps
-              WHERE ps.server_id = li.server_id
-                AND (
-                  (li.media_type = 'movie' AND ps.rating_key = li.rating_key)
-                  OR (li.media_type = 'show' AND ps.series_rating_key = li.rating_key)
-                )
+              SELECT 1 FROM watched_keys w
+              WHERE w.server_id = li.server_id AND w.key = li.rating_key
             )
         ),
         totals_data AS (

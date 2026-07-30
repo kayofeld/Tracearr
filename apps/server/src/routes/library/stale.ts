@@ -421,7 +421,20 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
       // Combined query: items with pagination AND summary statistics in one round-trip
       // Uses window functions for summary aggregation alongside item results
       const combinedResult = await db.execute(sql`
-        WITH child_stats AS (
+        WITH watched_keys AS (
+          -- Every library key any user has played, flattened to one column so
+          -- the EXISTS below is a plain equality (design §5.2, ADR 0010).
+          -- A UNION rather than an OR across two columns: the OR form cannot
+          -- drive a hash/merge join and measured 1417ms vs 15ms at production
+          -- scale while using neither played_states index. Movie/episode ids
+          -- live in rating_key and show ids only in series_rating_key, so the
+          -- media_type guard the OR form needed is redundant here.
+          SELECT server_id, rating_key AS key FROM played_states
+          UNION
+          SELECT server_id, series_rating_key FROM played_states
+          WHERE series_rating_key IS NOT NULL
+        ),
+        child_stats AS (
           -- Aggregate child data for shows (episodes) and artists (tracks)
           SELECT
             grandparent_rating_key,
@@ -559,12 +572,8 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             -- entirely rather than showing up in either category.
             last_watched IS NULL
             AND EXISTS (
-              SELECT 1 FROM played_states ps
-              WHERE ps.server_id = iws.server_id
-                AND (
-                  (iws.media_type = 'movie' AND ps.rating_key = iws.rating_key)
-                  OR (iws.media_type = 'show' AND ps.series_rating_key = iws.rating_key)
-                )
+              SELECT 1 FROM watched_keys w
+              WHERE w.server_id = iws.server_id AND w.key = iws.rating_key
             )
           )
         ),
@@ -692,7 +701,15 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
       } else {
         // No items on current page - need summary separately for empty page case
         const summaryResult = await db.execute(sql`
-          WITH child_stats AS (
+          WITH watched_keys AS (
+            -- Same flattened played-key set as the main query above; both
+            -- paths must agree or summary_stats and the page rows diverge.
+            SELECT server_id, rating_key AS key FROM played_states
+            UNION
+            SELECT server_id, series_rating_key FROM played_states
+            WHERE series_rating_key IS NOT NULL
+          ),
+          child_stats AS (
             SELECT grandparent_rating_key, server_id, SUM(file_size) AS total_size
             FROM library_items
             WHERE media_type IN ('episode', 'track') AND grandparent_rating_key IS NOT NULL
@@ -724,12 +741,8 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             AND NOT (
               last_watched IS NULL
               AND EXISTS (
-                SELECT 1 FROM played_states ps
-                WHERE ps.server_id = iws.server_id
-                  AND (
-                    (iws.media_type = 'movie' AND ps.rating_key = iws.rating_key)
-                    OR (iws.media_type = 'show' AND ps.series_rating_key = iws.rating_key)
-                  )
+                SELECT 1 FROM watched_keys w
+                WHERE w.server_id = iws.server_id AND w.key = iws.rating_key
               )
             )
           ),
