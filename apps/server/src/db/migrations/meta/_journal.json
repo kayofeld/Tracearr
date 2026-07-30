@@ -498,6 +498,13 @@
       "when": 1785345444023,
       "tag": "0070_auth_integrity_partial_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1785397613726,
+      "tag": "0071_played_state_mirror",
+      "breakpoints": true
     }
   ]
 }

@@ -1199,6 +1199,116 @@ export const librariesRelations = relations(libraries, ({ one }) => ({
 }));
 
 // ============================================================================
+// Played-State Mirror (per-user watched flags from Emby / Jellyfin)
+// ============================================================================
+// Design: docs/architecture/emby-played-state-sync.md §4. ADRs: 0010 (mirror +
+// query semantics), 0011 (no-data vs never-watched).
+//
+// Why this exists: tracearr's own session history only covers the period since
+// it was installed, so deriving "never watched" from sessions alone is wrong
+// for every item watched before that. Emby and Jellyfin keep a per-user played
+// flag that survives indefinitely, which answers "has anyone ever watched
+// this" authoritatively. It does NOT carry timestamps for historical plays
+// (PlayCount comes back 0 and LastPlayedDate null), so these rows are never
+// used to reconstruct when or how long something was watched.
+
+export const playedStates = pgTable(
+  'played_states',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    // Denormalized from server_users so the analytics join never needs it.
+    serverId: uuid('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    serverUserId: uuid('server_user_id')
+      .notNull()
+      .references(() => serverUsers.id, { onDelete: 'cascade' }),
+
+    // Emby/Jellyfin item Id, equal to library_items.rating_key. Deliberately no
+    // FK: library_items is rebuilt on every library sync (same reasoning as
+    // ADR 0003), so the join happens at query time on (server_id, rating_key).
+    ratingKey: varchar('rating_key', { length: 255 }).notNull(),
+
+    // Only 'movie' and 'episode' are synced - those are the types a play is
+    // recorded against. Shows are derived through seriesRatingKey.
+    mediaType: varchar('media_type', { length: 20 }).notNull(),
+
+    // Emby SeriesId for episodes, null for movies. Lets a show roll up to
+    // "watched" without joining through library_items' episode rows.
+    seriesRatingKey: varchar('series_rating_key', { length: 255 }),
+
+    // Display-only, and null for historical plays. Never filter on these.
+    playedAt: timestamp('played_at', { withTimezone: true }),
+    playCount: integer('play_count'),
+
+    // Run-start stamp. Rows left with an older stamp after a user syncs
+    // successfully are pruned, which is what makes the mirror self-healing.
+    syncedAt: timestamp('synced_at', { withTimezone: true }).notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Upsert conflict target. serverUserId implies serverId, so this is
+    // globally unique on its own.
+    uniqueIndex('played_states_user_rating_unique').on(table.serverUserId, table.ratingKey),
+    // Movie / any-user EXISTS probe from the never-watched query.
+    index('played_states_server_rating_idx').on(table.serverId, table.ratingKey),
+    // Show roll-up EXISTS probe. Partial: only episodes carry a series key.
+    index('played_states_server_series_idx')
+      .on(table.serverId, table.seriesRatingKey)
+      .where(sql`${table.seriesRatingKey} IS NOT NULL`),
+    // Per-user prune at the end of each successful user sync.
+    index('played_states_user_synced_idx').on(table.serverUserId, table.syncedAt),
+  ]
+);
+
+export const playedStatesRelations = relations(playedStates, ({ one }) => ({
+  server: one(servers, {
+    fields: [playedStates.serverId],
+    references: [servers.id],
+  }),
+  serverUser: one(serverUsers, {
+    fields: [playedStates.serverUserId],
+    references: [serverUsers.id],
+  }),
+}));
+
+// One row per server. Lives in Postgres rather than Redis because the honesty
+// guarantee in ADR 0011 - never claiming "never watched" for a server whose
+// played state has not been synced - has to survive restarts and cache flushes.
+export const playedStateSyncStatus = pgTable('played_state_sync_status', {
+  serverId: uuid('server_id')
+    .primaryKey()
+    .references(() => servers.id, { onDelete: 'cascade' }),
+
+  // 'running' | 'success' | 'partial' | 'error'. 'partial' means some users
+  // synced and some failed; their rows are still trustworthy, which is why it
+  // counts as coverage.
+  status: varchar('status', { length: 20 }).notNull(),
+
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+
+  usersTotal: integer('users_total').notNull().default(0),
+  usersSynced: integer('users_synced').notNull().default(0),
+  itemsUpserted: integer('items_upserted').notNull().default(0),
+  itemsPruned: integer('items_pruned').notNull().default(0),
+
+  error: text('error'),
+
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const playedStateSyncStatusRelations = relations(playedStateSyncStatus, ({ one }) => ({
+  server: one(servers, {
+    fields: [playedStateSyncStatus.serverId],
+    references: [servers.id],
+  }),
+}));
+
+// ============================================================================
 // Media Request Connector Tables (Ombi + Seerr, source-discriminated)
 // ============================================================================
 // Design: docs/architecture/seerr-connector.md §4 (generalization) + the
