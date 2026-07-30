@@ -4,6 +4,32 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v1.13.0 — Never Watched now knows what you watched before Tracearr existed
+
+- **The Never Watched page was wrong for a large part of your library, and now isn't.** It worked out
+  what you had never watched purely from Tracearr's own session history, which only starts the day you
+  installed it. Anything watched before that looked untouched. On the library this was found in, 472 of
+  the 1,160 titles it was flagging had in fact been watched — 41% of the page.
+- Emby and Jellyfin keep a per-user "played" mark that survives indefinitely, so Tracearr now mirrors
+  those marks and treats a title as watched if either its own history or any user's played mark says so.
+  Watching one episode counts for the whole show. The mirror refreshes every twelve hours, and there is
+  a Sync now button under Settings if you would rather not wait.
+- **Where it genuinely doesn't know, it now says so.** Plex has no equivalent per-user mark that Tracearr
+  can read, and a server that has not been mirrored yet has nothing to go on. In both cases the page says
+  "No recorded plays" rather than claiming the title was never watched, and names the servers it cannot
+  vouch for. Saying nothing was watched is a different statement from having no record of it.
+- Titles that were played but carry no usable date drop out of the stale list too, rather than appearing
+  with an invented age. Emby keeps the fact of an old play but not when it happened.
+
+### Notes
+
+- The mirror is per media-server account, so plays made on an account you have since removed still count
+  while that account exists in Tracearr, and vanish with it.
+- A refresh that cannot resolve any of your media-server users now reports as failed instead of quietly
+  claiming success over an empty mirror, which would have looked identical to "nothing was ever watched".
+- Reading the Emby playback-reporting plugin as a second source is designed but not built yet. It carries
+  timestamps the played marks lack, so it would restore real dates rather than only removing wrong entries.
+
 ## v1.12.1 — fix the first-run end-to-end test
 
 - No user-facing change. The end-to-end suite's setup helper still expected the old single-form
