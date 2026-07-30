@@ -258,13 +258,21 @@ export class PlayedStateSyncService {
       onProgress({
         serverId,
         serverName: server.name,
-        status: 'complete',
+        // Track the persisted status rather than always reporting completion:
+        // a run that resolved nobody finalizes as 'error', and announcing
+        // "complete" for it would tell every socket consumer the opposite of
+        // what the status row says.
+        status: finalStatus === 'error' ? 'error' : 'complete',
         totalUsers: usersTotal,
         processedUsers: usersSynced,
         itemsProcessed: itemsUpserted,
-        message: `Sync complete: ${usersSynced}/${usersTotal} users, ${itemsUpserted} items upserted, ${itemsPruned} pruned`,
+        message:
+          finalStatus === 'error'
+            ? (finalError ?? 'Sync failed')
+            : `Sync complete: ${usersSynced}/${usersTotal} users, ${itemsUpserted} items upserted, ${itemsPruned} pruned`,
         startedAt: startedAtIso,
         completedAt: completedAt.toISOString(),
+        ...(finalStatus === 'error' && finalError ? { error: finalError } : {}),
       });
     }
 
@@ -276,7 +284,9 @@ export class PlayedStateSyncService {
       usersSkipped,
       itemsUpserted,
       itemsPruned,
-      error: finalStatus === 'partial' ? lastError : null,
+      // Carry the error for both non-success outcomes; scoping this to
+      // 'partial' alone silently dropped the zero-users-resolved reason.
+      error: finalError,
     };
   }
 

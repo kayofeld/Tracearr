@@ -29,7 +29,11 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import { eq, sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
-import type { AuthUser, NeverWatchedStatsResponse } from '@tracearr/shared';
+import type {
+  AuthUser,
+  NeverWatchedStatsResponse,
+  PlayedStateSyncProgress,
+} from '@tracearr/shared';
 
 const mockGetUsers = vi.fn();
 const mockGetPlayedItems = vi.fn();
@@ -648,5 +652,38 @@ describe('played-state coverage honesty', () => {
     const plexStatus = status.servers.find((s) => s.serverId === plex.id);
     expect(plexStatus?.status).toBe('never_run');
     expect(plexStatus?.capability).toBe('unsupported');
+  });
+});
+
+describe('zero-resolved-users run reports failure consistently (DEF-PS-1)', () => {
+  it('reports error over the progress channel and in the result, matching the status row', async () => {
+    const server = await createTestEmbyServer();
+
+    // The media server reports a user that has no matching server_users row -
+    // what a played sync racing ahead of the first user sync looks like.
+    mockGetUsers.mockResolvedValue([{ id: 'ext-unresolvable', username: 'ghost', isAdmin: false }]);
+    mockGetPlayedItems.mockResolvedValue({ items: [], rawCount: 0, totalCount: 0 });
+
+    const progressEvents: PlayedStateSyncProgress[] = [];
+    const result = await playedStateSyncService.syncServer(server.id, (p) => {
+      progressEvents.push(p);
+    });
+
+    expect(result.status).toBe('error');
+    expect(result.usersTotal).toBe(0);
+    expect(result.usersSkipped).toBe(1);
+    // The reason has to survive into the result, not just the status row.
+    expect(result.error).toMatch(/no media-server users could be resolved/i);
+
+    // The socket must not announce completion for a run the database calls a
+    // failure - any consumer other than the settings page would be misled.
+    const final = progressEvents.at(-1);
+    expect(final?.status).toBe('error');
+    expect(final?.message).toMatch(/no media-server users could be resolved/i);
+
+    // And coverage stays honest: an empty mirror is not coverage.
+    const coverage = await buildPlayedStateCoverage([server.id]);
+    expect(coverage.full).toBe(false);
+    expect(coverage.servers[0]?.lastSyncedAt).toBeNull();
   });
 });
