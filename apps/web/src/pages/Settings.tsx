@@ -16,6 +16,7 @@ import { ImportSettings } from '@/components/settings/ImportSettings';
 import { OmbiSettings } from '@/components/settings/OmbiSettings';
 import { SeerrSettings } from '@/components/settings/SeerrSettings';
 import { JobsSettings } from '@/components/settings/JobsSettings';
+import { PlayedStateSettings } from '@/components/settings/PlayedStateSettings';
 import { BackupSettings } from '@/components/settings/BackupSettings';
 import { UpdateSettings } from '@/components/settings/UpdateSettings';
 import { NotificationAgentsManager } from '@/components/settings/notification-agents';
@@ -36,6 +37,7 @@ function SettingsNav() {
     { href: '/settings/ombi', label: t('tabs.ombi') },
     { href: '/settings/seerr', label: t('tabs.seerr') },
     { href: '/settings/jobs', label: t('tabs.jobs') },
+    { href: '/settings/played-state', label: t('tabs.playedState') },
     { href: '/settings/backup', label: t('tabs.backup') },
     { href: '/settings/updates', label: t('tabs.updates') },
   ];
@@ -98,6 +100,7 @@ export function Settings() {
         <Route path="ombi" element={<OmbiSettings />} />
         <Route path="seerr" element={<SeerrSettings />} />
         <Route path="jobs" element={<JobsSettings />} />
+        <Route path="played-state" element={<PlayedStateSettings />} />
         <Route path="backup" element={<BackupSettings />} />
         <Route path="updates" element={<UpdateSettings />} />
       </Routes>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Archive, Film, Tv, Music, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { formatMediaTech, type StaleResponse } from '@tracearr/shared';
@@ -25,7 +26,7 @@ import { useLibraryStale } from '@/hooks/queries/useLibrary';
 import { useServerColorMap } from '@/hooks/useServerColorMap';
 import { ServerColumnCell } from '@/components/server';
 import { formatBytes } from '@/lib/formatters';
-import { EmptyState } from '@/components/library';
+import { EmptyState, PlayedStateCoverageBanner } from '@/components/library';
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'artist';
 type SortBy = 'size' | 'title' | 'days_stale' | 'added_at';
@@ -124,6 +125,7 @@ export function StaleContentTabs({
   const [sortBy, setSortBy] = useState<SortBy>('size');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
+  const { t } = useTranslation('pages');
   const colorMap = useServerColorMap();
 
   // Reset pages when filters change
@@ -177,12 +179,22 @@ export function StaleContentTabs({
     setActiveTab(value as 'never-watched' | 'stale');
   };
 
+  // Played-state coverage (ADR 0011, docs/architecture/emby-played-state-sync.md
+  // §7.7) is server-level, so either query's response carries the same object
+  // once loaded - prefer whichever has resolved. Absent means "coverage
+  // unknown" (never treated as "no coverage").
+  const coverage = neverWatched.data?.playedStateCoverage ?? stale.data?.playedStateCoverage;
+  const isNoDataMode = Boolean(coverage && !coverage.full);
+
   const renderTable = (
     data: StaleResponse | undefined,
     isLoading: boolean,
     page: number,
     onPageChange: (page: number) => void,
-    showStaleColumn: boolean
+    showStaleColumn: boolean,
+    // Only the never-watched tab swaps its empty-state copy under ADR 0011 -
+    // the "stale" category is untouched by played-state coverage (§5.2).
+    noDataEmptyState?: { title: string; description: string }
   ) => {
     if (isLoading) {
       return (
@@ -196,8 +208,11 @@ export function StaleContentTabs({
       return (
         <EmptyState
           icon={Archive}
-          title="No stale content"
-          description="All content in your library has been watched recently."
+          title={noDataEmptyState?.title ?? 'No stale content'}
+          description={
+            noDataEmptyState?.description ??
+            'All content in your library has been watched recently.'
+          }
         />
       );
     }
@@ -361,63 +376,72 @@ export function StaleContentTabs({
   };
 
   return (
-    <Tabs value={activeTab} onValueChange={handleTabChange}>
-      <div className="mb-4 flex items-center justify-between">
-        <TabsList>
-          <TabsTrigger value="never-watched">
-            Never Watched ({neverWatched.data?.summary.neverWatched.count ?? 0})
-          </TabsTrigger>
-          <TabsTrigger value="stale">
-            Stale Content ({stale.data?.summary.stale.count ?? 0})
-          </TabsTrigger>
-        </TabsList>
+    <div className="space-y-4">
+      <PlayedStateCoverageBanner coverage={coverage} />
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
+        <div className="mb-4 flex items-center justify-between">
+          <TabsList>
+            <TabsTrigger value="never-watched">
+              Never Watched ({neverWatched.data?.summary.neverWatched.count ?? 0})
+            </TabsTrigger>
+            <TabsTrigger value="stale">
+              Stale Content ({stale.data?.summary.stale.count ?? 0})
+            </TabsTrigger>
+          </TabsList>
 
-        <div className="flex items-center gap-2">
-          {/* Media type filter */}
-          <Select
-            value={mediaTypeFilter}
-            onValueChange={(v) => setMediaTypeFilter(v as MediaTypeFilter)}
-          >
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="movie">Movies</SelectItem>
-              <SelectItem value="show">TV Shows</SelectItem>
-              <SelectItem value="artist">Music</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* Threshold selector (only for stale tab) */}
-          {activeTab === 'stale' && (
-            <Select value={staleDays} onValueChange={setStaleDays}>
-              <SelectTrigger className="w-48">
+          <div className="flex items-center gap-2">
+            {/* Media type filter */}
+            <Select
+              value={mediaTypeFilter}
+              onValueChange={(v) => setMediaTypeFilter(v as MediaTypeFilter)}
+            >
+              <SelectTrigger className="w-32">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="90">Unwatched for 3+ months</SelectItem>
-                <SelectItem value="180">Unwatched for 6+ months</SelectItem>
-                <SelectItem value="365">Unwatched for 1+ year</SelectItem>
-                <SelectItem value="730">Unwatched for 2+ years</SelectItem>
+                <SelectItem value="all">All Types</SelectItem>
+                <SelectItem value="movie">Movies</SelectItem>
+                <SelectItem value="show">TV Shows</SelectItem>
+                <SelectItem value="artist">Music</SelectItem>
               </SelectContent>
             </Select>
-          )}
-        </div>
-      </div>
 
-      <TabsContent value="never-watched">
-        {renderTable(
-          neverWatched.data,
-          neverWatched.isLoading,
-          neverWatchedPage,
-          setNeverWatchedPage,
-          false
-        )}
-      </TabsContent>
-      <TabsContent value="stale">
-        {renderTable(stale.data, stale.isLoading, stalePage, setStalePage, true)}
-      </TabsContent>
-    </Tabs>
+            {/* Threshold selector (only for stale tab) */}
+            {activeTab === 'stale' && (
+              <Select value={staleDays} onValueChange={setStaleDays}>
+                <SelectTrigger className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="90">Unwatched for 3+ months</SelectItem>
+                  <SelectItem value="180">Unwatched for 6+ months</SelectItem>
+                  <SelectItem value="365">Unwatched for 1+ year</SelectItem>
+                  <SelectItem value="730">Unwatched for 2+ years</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        </div>
+
+        <TabsContent value="never-watched">
+          {renderTable(
+            neverWatched.data,
+            neverWatched.isLoading,
+            neverWatchedPage,
+            setNeverWatchedPage,
+            false,
+            isNoDataMode
+              ? {
+                  title: t('library.neverWatched.emptyTitleNoData'),
+                  description: t('library.neverWatched.emptyDescNoData'),
+                }
+              : undefined
+          )}
+        </TabsContent>
+        <TabsContent value="stale">
+          {renderTable(stale.data, stale.isLoading, stalePage, setStalePage, true)}
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }

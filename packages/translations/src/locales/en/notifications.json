@@ -239,6 +239,9 @@
       "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
       "seerrPurgeFailed": "Failed to purge Seerr data",
       "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "playedStateSyncFailed": "Failed to start played-state sync",
+      "playedStateSyncAlreadyRunning": "A played-state sync is already running for this server",
+      "playedStateSyncUnsupported": "This server does not support played-state sync",
       "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "updateWebhookClearFailed": "Failed to remove the redeploy webhook"
     },

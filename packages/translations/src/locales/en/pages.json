@@ -175,6 +175,13 @@
     "topShows": "Top TV Shows",
     "noMoviePlays": "No movie plays in this period",
     "noShowPlays": "No TV show plays in this period",
+    "playedStateCoverage": {
+      "bannerTitle": "Limited played-state coverage",
+      "bannerUnsupported": "{{servers}} cannot report per-user played state. This is a permanent platform limitation, not a pending sync.",
+      "bannerPending": "{{servers}} hasn't completed its played-state sync yet, so some historical plays may still be missing.",
+      "bannerMixed": "{{unsupportedServers}} cannot report per-user played state (a permanent platform limitation), and {{pendingServers}} hasn't completed its played-state sync yet.",
+      "bannerNote": "Some items below may already have been watched before Tracearr started tracking sessions."
+    },
     "overview": {
       "description": "Library health and growth metrics",
       "lastUpdated": "Last updated:",
@@ -250,6 +257,8 @@
     "neverWatched": {
       "title": "Never Watched",
       "description": "Series and films that have never been played",
+      "titleNoData": "No Recorded Plays",
+      "descriptionNoData": "Series and films with no recorded plays - some may have been watched before played-state sync began",
       "failedToLoad": "Failed to load never-watched data",
       "failedToLoadDesc": "Could not fetch never-watched data. Please try again.",
       "statCount": "Never Watched",
@@ -289,6 +298,8 @@
       "itemsDesc": "Sorted with the oldest additions first",
       "emptyTitle": "Nothing unwatched",
       "emptyDesc": "Every movie and show in your library has been watched at least once.",
+      "emptyTitleNoData": "Nothing without recorded plays",
+      "emptyDescNoData": "Every movie and show in your library has at least one recorded play.",
       "durationDays_one": "{{count}} day",
       "durationDays_other": "{{count}} days",
       "durationMonths_one": "{{count}} month",

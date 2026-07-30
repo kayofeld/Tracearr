@@ -51,6 +51,9 @@ export {
   useRevertSeerrMapping,
 } from './useSeerr';
 
+// Played-state sync hooks (status card + manual trigger)
+export { usePlayedStateStatus, usePlayedStateSync } from './usePlayedState';
+
 // Session hooks
 export { useSessions, useActiveSessions, useSession, useBulkDeleteSessions } from './useSessions';
 export { useTerminateSession } from './useTerminateSession';
