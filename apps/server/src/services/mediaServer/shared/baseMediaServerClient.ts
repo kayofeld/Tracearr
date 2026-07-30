@@ -15,6 +15,7 @@ import type {
   MediaLibrary,
   MediaLibraryItem,
   MediaWatchHistoryItem,
+  MediaPlayedItem,
   MediaServerConfig,
 } from '../types.js';
 
@@ -67,6 +68,52 @@ export interface JellyfinEmbyItemResult {
   };
   SeriesId?: string;
   SeriesPrimaryImageTag?: string;
+}
+
+/**
+ * Raw shape of one row from /Users/{id}/Items?IsPlayed=true, the subset of
+ * fields getPlayedItems needs. Identical for Jellyfin and Emby (shared API
+ * family, verified on Emby - see docs/architecture/emby-played-state-sync.md
+ * §3), so it is parsed inline here rather than through the per-platform
+ * MediaServerParsers - there is no platform difference to encapsulate.
+ */
+interface JellyfinEmbyPlayedItemRaw {
+  Id: string;
+  Type?: string;
+  SeriesId?: string;
+  UserData?: {
+    LastPlayedDate?: string;
+    PlayCount?: number;
+  };
+}
+
+/**
+ * Parse one raw /Items row into MediaPlayedItem. Returns null for rows this
+ * sync doesn't track (only Movie/Episode are synced - IncludeItemTypes
+ * already restricts the server-side response to these, this is defense in
+ * depth) or with no Id.
+ *
+ * Historical plays come back with PlayCount: 0 and LastPlayedDate: null -
+ * that is normal (verified on production Emby) and must never be read as
+ * "not played"; IsPlayed=true on the request is what establishes played-ness.
+ */
+function parseJellyfinEmbyPlayedItem(raw: JellyfinEmbyPlayedItemRaw): MediaPlayedItem | null {
+  if (!raw.Id) return null;
+
+  const mediaType = raw.Type === 'Movie' ? 'movie' : raw.Type === 'Episode' ? 'episode' : null;
+  if (!mediaType) return null;
+
+  const rawPlayedAt = raw.UserData?.LastPlayedDate;
+  const playedAt = rawPlayedAt ? new Date(rawPlayedAt) : undefined;
+  const validPlayedAt = playedAt && !isNaN(playedAt.getTime()) ? playedAt : undefined;
+
+  return {
+    ratingKey: raw.Id,
+    mediaType,
+    seriesRatingKey: mediaType === 'episode' ? raw.SeriesId : undefined,
+    playedAt: validPlayedAt,
+    playCount: typeof raw.UserData?.PlayCount === 'number' ? raw.UserData.PlayCount : undefined,
+  };
 }
 
 /**
@@ -392,6 +439,54 @@ export abstract class BaseMediaServerClient
     }
 
     return { items: allItems, totalCount: allItems.length };
+  }
+
+  /**
+   * Get every item one user has marked played, for the played-state mirror
+   * (docs/architecture/emby-played-state-sync.md §3, §6.4).
+   *
+   * Full mirror-style fetch, not incremental: MinDateLastSaved is not a
+   * trustworthy cursor here (DateLastSaved also moves on metadata refresh),
+   * so every sync run pages through the whole IsPlayed=true result set for
+   * the user.
+   *
+   * @param userExternalId - The media server's own user id
+   * @param options - Pagination options
+   * @returns Played items and total count for pagination tracking
+   */
+  async getPlayedItems(
+    userExternalId: string,
+    options?: { offset?: number; limit?: number }
+  ): Promise<{ items: MediaPlayedItem[]; totalCount: number }> {
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? 100;
+
+    const params = new URLSearchParams({
+      Recursive: 'true',
+      IsPlayed: 'true',
+      IncludeItemTypes: 'Movie,Episode',
+      Fields: 'UserData',
+      StartIndex: String(offset),
+      Limit: String(limit),
+      EnableTotalRecordCount: 'true',
+    });
+
+    const data = await fetchJson<{ Items?: unknown[]; TotalRecordCount?: number }>(
+      `${this.baseUrl}/Users/${userExternalId}/Items?${params}`,
+      {
+        headers: this.buildHeaders(),
+        service: this.serverType,
+        timeout: 30000,
+      }
+    );
+
+    const rawItems = (data.Items ?? []) as JellyfinEmbyPlayedItemRaw[];
+    const items = rawItems
+      .map((raw) => parseJellyfinEmbyPlayedItem(raw))
+      .filter((item): item is MediaPlayedItem => item !== null);
+    const totalCount = data.TotalRecordCount ?? items.length;
+
+    return { items, totalCount };
   }
 
   // ==========================================================================
