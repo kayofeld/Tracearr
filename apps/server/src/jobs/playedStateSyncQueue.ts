@@ -314,8 +314,17 @@ export async function enqueuePlayedStateSync(serverId?: string, userId?: string)
     throw new Error('Played-state sync queue not initialized');
   }
 
-  const activeJobs = await playedStateSyncQueue.getJobs(['active']);
-  const conflicting = activeJobs.some((job) => {
+  // Queued states count too, not just 'active'. Checking only 'active' let a
+  // caller stack runs while the worker was busy - each POST saw no active
+  // conflict and enqueued another full sync, so repeated clicks turned into
+  // hours of back-to-back load on the media server.
+  const pendingJobs = await playedStateSyncQueue.getJobs([
+    'active',
+    'waiting',
+    'delayed',
+    'prioritized',
+  ]);
+  const conflicting = pendingJobs.some((job) => {
     const jobServerId = job.data.serverId;
     if (serverId) {
       // A per-server request conflicts with a job already running for that

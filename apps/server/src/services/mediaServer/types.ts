@@ -511,14 +511,20 @@ export interface IMediaServerClient {
    * admin token, so it does not implement this and its servers report no
    * played-state coverage.
    *
+   * `rawCount` is how many rows the server returned before parsing dropped any
+   * malformed ones. Pagination must advance on that, not on `items.length`:
+   * StartIndex pages raw rows, so advancing by the parsed count drifts the
+   * offset and ends the loop early, which would leave real plays unsynced and
+   * then pruned.
+   *
    * @param userExternalId - The media server's own user id
    * @param options - Pagination options
-   * @returns Promise with played items and total count for pagination
+   * @returns Promise with played items, raw row count, and total count
    */
   getPlayedItems?(
     userExternalId: string,
     options?: { offset?: number; limit?: number }
-  ): Promise<{ items: MediaPlayedItem[]; totalCount: number }>;
+  ): Promise<{ items: MediaPlayedItem[]; rawCount: number; totalCount: number }>;
 }
 
 /**

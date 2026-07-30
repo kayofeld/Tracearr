@@ -190,7 +190,10 @@ export function PlayedStateSettings() {
       socket.off(WS_EVENTS.PLAYED_STATE_SYNC_PROGRESS, handleProgress);
       socket.off('tasks:updated', handleTasksUpdated);
     };
-  }, [socket, status]);
+    // Depend on refetch, not the query result: the result object gets a new
+    // identity every render, which would tear down and re-attach these
+    // handlers continuously.
+  }, [socket, status.refetch]);
 
   const handleSync = (serverId: string) => {
     setProgressByServer((prev) => {

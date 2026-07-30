@@ -207,7 +207,9 @@ export class PlayedStateSyncService {
 
         usersSynced++;
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        lastError = PlayedStateSyncService.sanitizeError(
+          error instanceof Error ? error.message : String(error)
+        );
         console.error(
           `[PlayedStateSync] Failed to sync user ${user.externalId} on server ${server.name}:`,
           error
@@ -221,8 +223,25 @@ export class PlayedStateSyncService {
     }
 
     const completedAt = new Date();
-    const finalStatus: 'success' | 'partial' =
-      usersTotal > 0 && usersSynced < usersTotal ? 'partial' : 'success';
+
+    // A run that resolved nobody has mirrored nothing, so it must report
+    // 'error', not 'success' or 'partial': coverage counts both of those
+    // (§4.2), and claiming coverage over an empty mirror produces exactly the
+    // false "never watched" state ADR 0011 exists to prevent. Happens when the
+    // played sync races ahead of the first user sync (fresh install, restored
+    // backup).
+    const resolvedNobody = usersTotal === 0 && usersSkipped > 0;
+    const finalStatus: 'success' | 'partial' | 'error' = resolvedNobody
+      ? 'error'
+      : usersTotal > 0 && usersSynced < usersTotal
+        ? 'partial'
+        : 'success';
+
+    const finalError = resolvedNobody
+      ? `No media-server users could be resolved (${usersSkipped} skipped); run the user sync first.`
+      : finalStatus === 'partial'
+        ? lastError
+        : null;
 
     await this.upsertStatusRow(serverId, {
       status: finalStatus,
@@ -232,7 +251,7 @@ export class PlayedStateSyncService {
       usersSynced,
       itemsUpserted,
       itemsPruned,
-      error: finalStatus === 'partial' ? lastError : null,
+      error: finalError,
     });
 
     if (onProgress) {
@@ -276,7 +295,7 @@ export class PlayedStateSyncService {
       getPlayedItems: (
         userExternalId: string,
         options?: { offset?: number; limit?: number }
-      ) => Promise<{ items: MediaPlayedItem[]; totalCount: number }>;
+      ) => Promise<{ items: MediaPlayedItem[]; rawCount: number; totalCount: number }>;
       runStart: Date;
     }
   ): Promise<number> {
@@ -284,21 +303,37 @@ export class PlayedStateSyncService {
     let totalUpserted = 0;
 
     while (true) {
-      const { items, totalCount } = await ctx.getPlayedItems(userExternalId, {
+      const { items, rawCount, totalCount } = await ctx.getPlayedItems(userExternalId, {
         offset,
         limit: PAGE_SIZE,
       });
 
-      if (items.length === 0) break;
+      // Guard the loop bound itself, not just the empty case: a non-finite
+      // rawCount would make `offset += rawCount` NaN and spin forever, hanging
+      // the worker. Cheaper to stop early than to hang.
+      if (!Number.isFinite(rawCount) || rawCount <= 0) break;
 
-      for (let i = 0; i < items.length; i += UPSERT_BATCH_SIZE) {
-        const batch = items.slice(i, i + UPSERT_BATCH_SIZE);
+      // Drop duplicate rating keys within a page: a single INSERT cannot touch
+      // the same conflict target twice ("cannot affect row a second time"),
+      // and that would fail the whole user on every run.
+      const seen = new Set<string>();
+      const deduped = items.filter((item) => {
+        if (seen.has(item.ratingKey)) return false;
+        seen.add(item.ratingKey);
+        return true;
+      });
+
+      for (let i = 0; i < deduped.length; i += UPSERT_BATCH_SIZE) {
+        const batch = deduped.slice(i, i + UPSERT_BATCH_SIZE);
         await this.upsertPlayedItems(serverId, serverUserId, batch, ctx.runStart);
         totalUpserted += batch.length;
       }
 
-      offset += items.length;
-      if (offset >= totalCount || items.length < PAGE_SIZE) break;
+      // Advance on the raw row count, never the parsed one - StartIndex pages
+      // raw rows, so a row dropped by the parser would otherwise shift the
+      // offset and end the loop early, stranding the tail to be pruned.
+      offset += rawCount;
+      if (offset >= totalCount || rawCount < PAGE_SIZE) break;
     }
 
     return totalUpserted;
@@ -421,6 +456,22 @@ export class PlayedStateSyncService {
       });
   }
 
+  /**
+   * Strip URLs out of anything persisted to played_state_sync_status.error or
+   * pushed over the progress socket.
+   *
+   * The status row is readable by any user with access to the server and is
+   * broadcast to connected clients, while most upstream failures are shaped by
+   * the media server rather than by us. Node's fetch, for one, puts the whole
+   * request URL into "Failed to parse URL from ..." - which would publish the
+   * internal server address and a user's external id. This repo has shipped a
+   * raw URL in an error body before, so the column gets a hard rule instead of
+   * a case-by-case judgement.
+   */
+  private static sanitizeError(message: string): string {
+    return message.replace(/\bhttps?:\/\/\S+/gi, '[url removed]');
+  }
+
   /** Server-level failure path: stamp status='error' and report it. */
   private async finalizeError(
     serverId: string,
@@ -429,7 +480,9 @@ export class PlayedStateSyncService {
     error: unknown,
     onProgress?: OnProgressCallback
   ): Promise<PlayedStateSyncResult> {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = PlayedStateSyncService.sanitizeError(
+      error instanceof Error ? error.message : String(error)
+    );
     const completedAt = new Date();
 
     console.error(`[PlayedStateSync] Server-level failure for ${serverName}:`, error);

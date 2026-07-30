@@ -91,13 +91,14 @@ describe('PlayedStateSyncService.syncServer', () => {
       if (externalId === 'ext-1') {
         return Promise.resolve({
           items: [{ ratingKey: 'new-item-u1', mediaType: 'movie' as const }],
+          rawCount: 1,
           totalCount: 1,
         });
       }
       if (externalId === 'ext-2') {
         return Promise.reject(new Error('emby unreachable'));
       }
-      return Promise.resolve({ items: [], totalCount: 0 });
+      return Promise.resolve({ items: [], rawCount: 0, totalCount: 0 });
     });
 
     const result = await playedStateSyncService.syncServer(server.id);
@@ -155,6 +156,7 @@ describe('PlayedStateSyncService.syncServer', () => {
         { ratingKey: 'movie-a', mediaType: 'movie' as const },
         { ratingKey: 'ep-a', mediaType: 'episode' as const, seriesRatingKey: 'show-a' },
       ],
+      rawCount: 2,
       totalCount: 2,
     });
 

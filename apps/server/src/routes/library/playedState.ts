@@ -11,7 +11,7 @@ import {
   playedStateSyncTriggerSchema,
   type PlayedStateSyncTriggerResponse,
 } from '@tracearr/shared';
-import { resolveServerIds } from '../../utils/serverFiltering.js';
+import { resolveServerIds, hasServerAccess } from '../../utils/serverFiltering.js';
 import {
   enqueuePlayedStateSync,
   getServerForPlayedStateSync,
@@ -50,7 +50,22 @@ export const libraryPlayedStateRoute: FastifyPluginAsync = async (app) => {
 
     const { serverId } = body.data;
 
+    // Sync-all fans out over every capable server, which a scoped admin has no
+    // authority over. They can still sync any server they do have access to by
+    // naming it explicitly.
+    if (!serverId && authUser.role !== 'owner') {
+      return reply.forbidden('Specify a serverId; syncing every server is owner-only');
+    }
+
     if (serverId) {
+      // Check access before existence. A scoped admin must not learn whether a
+      // server id exists, or what type it is, from the difference between the
+      // replies below - GET /played-state/status hides servers outside their
+      // scope, so POST must not confirm them. Inaccessible and unknown
+      // deliberately return the same thing.
+      if (!hasServerAccess(authUser, serverId)) {
+        return reply.badRequest('Unknown server');
+      }
       const server = await getServerForPlayedStateSync(serverId);
       if (!server) {
         return reply.badRequest('Unknown server');

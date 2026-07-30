@@ -366,6 +366,10 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             threshold: { days: staleDays },
           },
           pagination: { page, pageSize, total: 0 },
+          // Carried even on the empty short-circuit: this response is cached,
+          // and omitting coverage would drop the banner and the copy swap on
+          // this view alone while sibling views still show them.
+          playedStateCoverage: await buildPlayedStateCoverage(resolvedIds),
         };
         await app.redis.setex(cacheKey, CACHE_TTL.LIBRARY_STALE, JSON.stringify(emptyResponse));
         return emptyResponse;

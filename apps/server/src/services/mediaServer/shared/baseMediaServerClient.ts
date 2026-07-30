@@ -457,7 +457,7 @@ export abstract class BaseMediaServerClient
   async getPlayedItems(
     userExternalId: string,
     options?: { offset?: number; limit?: number }
-  ): Promise<{ items: MediaPlayedItem[]; totalCount: number }> {
+  ): Promise<{ items: MediaPlayedItem[]; rawCount: number; totalCount: number }> {
     const offset = options?.offset ?? 0;
     const limit = options?.limit ?? 100;
 
@@ -469,10 +469,16 @@ export abstract class BaseMediaServerClient
       StartIndex: String(offset),
       Limit: String(limit),
       EnableTotalRecordCount: 'true',
+      // Pin the order. Emby/Jellyfin do not guarantee a stable order for an
+      // unsorted paged query, and an order shift between page requests would
+      // skip items entirely - which the prune then reads as "no longer played"
+      // and deletes. getWatchHistory pins its sort for the same reason.
+      SortBy: 'SortName',
+      SortOrder: 'Ascending',
     });
 
     const data = await fetchJson<{ Items?: unknown[]; TotalRecordCount?: number }>(
-      `${this.baseUrl}/Users/${userExternalId}/Items?${params}`,
+      `${this.baseUrl}/Users/${encodeURIComponent(userExternalId)}/Items?${params}`,
       {
         headers: this.buildHeaders(),
         service: this.serverType,
@@ -484,9 +490,9 @@ export abstract class BaseMediaServerClient
     const items = rawItems
       .map((raw) => parseJellyfinEmbyPlayedItem(raw))
       .filter((item): item is MediaPlayedItem => item !== null);
-    const totalCount = data.TotalRecordCount ?? items.length;
+    const totalCount = data.TotalRecordCount ?? rawItems.length;
 
-    return { items, totalCount };
+    return { items, rawCount: rawItems.length, totalCount };
   }
 
   // ==========================================================================
