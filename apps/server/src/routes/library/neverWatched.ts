@@ -29,6 +29,7 @@ import {
 import { db } from '../../db/client.js';
 import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 import { buildLibraryCacheKey } from './utils.js';
+import { buildPlayedStateCoverage } from '../../services/playedStateSync.js';
 
 /** Age buckets, always returned in this order, zero-filled when empty. */
 const AGE_BUCKETS: NeverWatchedAgeBucket[] = ['lt30', 'd30to90', 'd90to180', 'd180to365', 'gt365'];
@@ -190,6 +191,19 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
                   )
                 )
             )
+            AND NOT EXISTS (
+              -- Played-state mirror (design §5.1, ADR 0010): any user's played
+              -- flag on this item (movie) or the show itself via SeriesId
+              -- (episode -> series_rating_key) counts as watched, even with no
+              -- qualifying session (pre-polling history). No-op for Plex
+              -- servers - they have zero played_states rows.
+              SELECT 1 FROM played_states ps
+              WHERE ps.server_id = li.server_id
+                AND (
+                  (li.media_type = 'movie' AND ps.rating_key = li.rating_key)
+                  OR (li.media_type = 'show' AND ps.series_rating_key = li.rating_key)
+                )
+            )
         ),
         totals_data AS (
           SELECT
@@ -257,6 +271,11 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
       const response: NeverWatchedStatsResponse = row
         ? buildResponse(row, mediaType)
         : buildEmptyResponse(mediaType);
+
+      // Coverage (ADR 0011): scoped to the same resolvedIds as the query
+      // above, so the banner always names the servers this exact response
+      // actually covers. Cached alongside the data - see §5.3.
+      response.playedStateCoverage = await buildPlayedStateCoverage(resolvedIds);
 
       await app.redis.setex(cacheKey, CACHE_TTL.LIBRARY_NEVER_WATCHED, JSON.stringify(response));
 

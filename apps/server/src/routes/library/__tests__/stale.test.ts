@@ -24,6 +24,14 @@ vi.mock('../../../services/settings.js', () => ({
   getSettings: vi.fn(),
 }));
 
+// Mock the played-state coverage helper (docs/architecture/emby-played-state-sync.md
+// §5.3/§7.3) - it runs its own db.select/leftJoin query, out of scope for this
+// file's execute-only db mock. Coverage computation itself is covered by
+// test/integration/playedStatePredicate.integration.test.ts against a real DB.
+vi.mock('../../../services/playedStateSync.js', () => ({
+  buildPlayedStateCoverage: vi.fn().mockResolvedValue({ servers: [], full: false }),
+}));
+
 // Mock server filtering utilities, mirroring the real implementation.
 vi.mock('../../../utils/serverFiltering.js', async () => {
   const { sql } = await import('drizzle-orm');
@@ -436,9 +444,12 @@ describe('GET /library/stale - requestedOnly query param', () => {
     const explicitFalseSql = renderCompiledSql(vi.mocked(db.execute).mock.calls[0]![0] as SQL);
 
     expect(explicitFalseSql).toBe(omittedSql);
-    // Confirms the default path carries no trace of the new filter (no added
-    // cost/shape change for the common unfiltered case).
-    expect(omittedSql).not.toContain('EXISTS (');
+    // Confirms the default path carries no trace of the requestedOnly filter
+    // specifically (no added cost/shape change for the common unfiltered
+    // case). Not a blanket "no EXISTS anywhere" check: the played-state
+    // predicate (docs/architecture/emby-played-state-sync.md §5.2) always
+    // adds its own unconditional `EXISTS (... played_states ...)` clause,
+    // independent of requestedOnly.
     expect(omittedSql).not.toContain('media_requests ro');
   });
 
@@ -492,9 +503,12 @@ describe('GET /library/stale - requestedOnly query param', () => {
     // a pre-existing English SQL comment on item_watch_stats
     // ("Carried through to stale_items/paginated_items purely for..."), so the
     // CTE-definition keywords ("AS (") are pinned specifically to find the
-    // real CTE boundaries, not that comment.
+    // real CTE boundaries, not that comment. Likewise "EXISTS (" alone is
+    // ambiguous now that the played-state predicate (§5.2) adds its own
+    // unconditional EXISTS earlier in stale_items - "media_requests ro" pins
+    // specifically the requestedOnly semi-join under test.
     const filteredItemsIdx = sqlText.indexOf('filtered_items AS (');
-    const existsIdx = sqlText.indexOf('EXISTS (');
+    const existsIdx = sqlText.indexOf('media_requests ro');
     const summaryStatsIdx = sqlText.indexOf('summary_stats AS (');
     const paginatedItemsCteIdx = sqlText.indexOf('paginated_items AS (');
     expect(filteredItemsIdx).toBeGreaterThan(-1);

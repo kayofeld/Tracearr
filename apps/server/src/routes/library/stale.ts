@@ -18,11 +18,13 @@ import {
   CACHE_TTL,
   libraryStaleQuerySchema,
   type LibraryStaleQueryInput,
+  type PlayedStateCoverage,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { getSettings } from '../../services/settings.js';
 import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 import { buildLibraryCacheKey } from './utils.js';
+import { buildPlayedStateCoverage } from '../../services/playedStateSync.js';
 
 /** Category for stale content */
 type StaleCategory = 'never_watched' | 'stale';
@@ -82,6 +84,13 @@ interface StaleResponse {
   items: StaleItem[];
   summary: StaleSummary;
   pagination: { page: number; pageSize: number; total: number };
+  /**
+   * Per-server played-state coverage (ADR 0011). Optional per contract §7.3 -
+   * mirrors NeverWatchedStatsResponse.playedStateCoverage; kept as a local
+   * field here (not imported) because this file re-declares its response
+   * shapes locally (see the file comment on StaleItemRequestedBy above).
+   */
+  playedStateCoverage?: PlayedStateCoverage;
 }
 
 /** Raw row from database for items */
@@ -452,6 +461,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             s.name AS library_name,
             li.title,
             li.media_type,
+            li.rating_key,
             li.year,
             -- Carried through to stale_items/paginated_items purely for the Ombi
             -- attribution join below (never returned to the client as columns).
@@ -504,7 +514,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             ${libraryFilter}
             ${mediaTypeFilter}
           GROUP BY li.id, li.server_id, s.name, li.library_id, li.title,
-                   li.media_type, li.year, li.imdb_id, li.tmdb_id, li.tvdb_id,
+                   li.media_type, li.rating_key, li.year, li.imdb_id, li.tmdb_id, li.tvdb_id,
                    li.file_size, li.video_resolution, li.created_at,
                    cs.total_size, cs.best_resolution_tier, cws.last_watched, cws.watch_count
         ),
@@ -536,10 +546,26 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
               ELSE
                 EXTRACT(DAY FROM NOW() - last_watched)::int
             END AS days_stale
-          FROM item_watch_stats
+          FROM item_watch_stats iws
           WHERE (
             last_watched IS NULL
             OR last_watched < NOW() - INTERVAL '1 day' * ${staleDays}
+          )
+          AND NOT (
+            -- Played-state mirror (design §5.2, ADR 0010): an item with no
+            -- qualifying session but a played flag from any user is provably
+            -- watched (not never_watched) but undatable (not honestly
+            -- stale - daysStale needs last_watched). It leaves this endpoint
+            -- entirely rather than showing up in either category.
+            last_watched IS NULL
+            AND EXISTS (
+              SELECT 1 FROM played_states ps
+              WHERE ps.server_id = iws.server_id
+                AND (
+                  (iws.media_type = 'movie' AND ps.rating_key = iws.rating_key)
+                  OR (iws.media_type = 'show' AND ps.series_rating_key = iws.rating_key)
+                )
+            )
           )
         ),
         filtered_items AS (
@@ -681,7 +707,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             GROUP BY child.grandparent_rating_key, child.server_id
           ),
           item_watch_stats AS (
-            SELECT li.id, li.server_id, li.media_type, li.imdb_id, li.tmdb_id, li.tvdb_id,
+            SELECT li.id, li.server_id, li.media_type, li.rating_key, li.imdb_id, li.tmdb_id, li.tvdb_id,
               CASE WHEN li.media_type IN ('show', 'artist') THEN COALESCE(cs.total_size, li.file_size) ELSE li.file_size END AS file_size,
               CASE WHEN li.media_type IN ('show', 'artist') THEN cws.last_watched ELSE MAX(sess.stopped_at) END AS last_watched
             FROM library_items li
@@ -689,11 +715,23 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             LEFT JOIN child_watch_stats cws ON li.media_type IN ('show', 'artist') AND cws.grandparent_rating_key = li.rating_key AND cws.server_id = li.server_id
             LEFT JOIN sessions sess ON li.media_type NOT IN ('show', 'artist') AND sess.rating_key = li.rating_key AND sess.server_id = li.server_id AND sess.duration_ms >= 120000
             WHERE li.media_type NOT IN ('episode', 'track', 'season', 'album') ${serverFilter} ${libraryFilter} ${mediaTypeFilter}
-            GROUP BY li.id, li.server_id, li.media_type, li.imdb_id, li.tmdb_id, li.tvdb_id, li.file_size, cs.total_size, cws.last_watched
+            GROUP BY li.id, li.server_id, li.media_type, li.rating_key, li.imdb_id, li.tmdb_id, li.tvdb_id, li.file_size, cs.total_size, cws.last_watched
           ),
           stale_items AS (
             SELECT id, media_type, imdb_id, tmdb_id, tvdb_id, file_size, CASE WHEN last_watched IS NULL THEN 'never_watched' ELSE 'stale' END AS category
-            FROM item_watch_stats WHERE (last_watched IS NULL OR last_watched < NOW() - INTERVAL '1 day' * ${staleDays})
+            FROM item_watch_stats iws
+            WHERE (last_watched IS NULL OR last_watched < NOW() - INTERVAL '1 day' * ${staleDays})
+            AND NOT (
+              last_watched IS NULL
+              AND EXISTS (
+                SELECT 1 FROM played_states ps
+                WHERE ps.server_id = iws.server_id
+                  AND (
+                    (iws.media_type = 'movie' AND ps.rating_key = iws.rating_key)
+                    OR (iws.media_type = 'show' AND ps.series_rating_key = iws.rating_key)
+                  )
+              )
+            )
           ),
           filtered AS (SELECT * FROM stale_items si WHERE 1=1 ${categoryFilter} ${requestedOnlyFilter})
           SELECT COUNT(*) FILTER (WHERE category = 'never_watched') AS never_watched_count,
@@ -728,14 +766,20 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
         items,
         summary,
         pagination: { page, pageSize, total },
+        // Coverage (ADR 0011): scoped to the same resolvedIds as the query
+        // above (§5.2/§7.3) so the banner names exactly the servers this
+        // response covers.
+        playedStateCoverage: await buildPlayedStateCoverage(resolvedIds),
       };
 
       // Cache for 1 hour (stale content changes slowly).
       // SEAM: this cached payload now embeds cross-source requestedBy
-      // attribution (contract §7). Invalidating REDIS_KEYS.LIBRARY_STALE on
-      // sync completion and mapping changes for EITHER connector is owned by
-      // that connector's sync/mapping code (services/ombi.ts,
-      // jobs/ombiSyncQueue.ts; the Seerr equivalents) - NOT implemented here.
+      // attribution (contract §7) AND played-state coverage (contract §7.3).
+      // Invalidating REDIS_KEYS.LIBRARY_STALE on sync completion is owned by:
+      // Ombi/Seerr mapping changes -> services/ombi.ts, jobs/ombiSyncQueue.ts
+      // (+ Seerr equivalents); played-state sync completion ->
+      // jobs/playedStateSyncQueue.ts's invalidatePlayedStateCaches - NOT
+      // implemented here.
       await app.redis.setex(cacheKey, CACHE_TTL.LIBRARY_STALE, JSON.stringify(response));
 
       return response;
