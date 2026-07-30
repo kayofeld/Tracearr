@@ -42,6 +42,7 @@ import type {
   JellystatImportProgress,
   MaintenanceJobProgress,
   LibrarySyncProgress,
+  PlayedStateSyncProgress,
   OmbiSyncProgressEvent,
   SeerrSyncProgressEvent,
 } from '@tracearr/shared';
@@ -118,6 +119,12 @@ import {
   scheduleAutoSync,
   shutdownLibrarySyncQueue,
 } from './jobs/librarySyncQueue.js';
+import {
+  initPlayedStateSyncQueue,
+  startPlayedStateSyncWorker,
+  schedulePlayedStateSync,
+  shutdownPlayedStateSyncQueue,
+} from './jobs/playedStateSyncQueue.js';
 import {
   initOmbiSyncQueue,
   startOmbiSyncWorker,
@@ -537,6 +544,7 @@ async function buildApp(options: { trustProxy?: boolean | number | string[] } = 
     await shutdownImportQueue();
     await shutdownMaintenanceQueue();
     await shutdownLibrarySyncQueue();
+    await shutdownPlayedStateSyncQueue();
     await shutdownOmbiSyncQueue();
     await shutdownSeerrSyncQueue();
     await shutdownVersionCheckQueue();
@@ -883,6 +891,23 @@ async function initializeServices(app: FastifyInstance) {
     // Don't throw - library sync is non-critical
   }
 
+  // Initialize played-state sync queue (uses Redis for job storage).
+  // docs/architecture/emby-played-state-sync.md §6.1/§6.3 - always-on for
+  // capable (non-Plex) servers, no settings gate in increment 1.
+  try {
+    initPlayedStateSyncQueue(redisUrl);
+    startPlayedStateSyncWorker();
+    setTimeout(() => {
+      schedulePlayedStateSync().catch((err) => {
+        app.log.error({ err }, 'Failed to schedule played-state auto-sync');
+      });
+    }, 5000);
+    app.log.info('Played-state sync queue initialized');
+  } catch (err) {
+    app.log.error({ err }, 'Failed to initialize played-state sync queue');
+    // Don't throw - played-state sync is non-critical
+  }
+
   // Initialize Ombi sync queue (uses Redis for job storage). Always scheduled
   // regardless of configuration - each firing self-guards and no-ops silently
   // when Ombi isn't configured (jobs/ombiSyncQueue.ts runOmbiSync), so
@@ -1125,6 +1150,9 @@ async function initializePostListen(app: FastifyInstance) {
         case WS_EVENTS.LIBRARY_SYNC_PROGRESS:
           broadcastToSessions('library:sync:progress', data as LibrarySyncProgress);
           break;
+        case WS_EVENTS.PLAYED_STATE_SYNC_PROGRESS:
+          broadcastToSessions('played-state:sync:progress', data as PlayedStateSyncProgress);
+          break;
         case WS_EVENTS.OMBI_SYNC_PROGRESS: {
           // Broadcast phase/progress only - `error` can include the configured
           // Ombi URL (e.g. from SsrfBlockedError) and must stay owner-only via
@@ -1304,6 +1332,7 @@ async function start() {
         void shutdownKillQueue();
         void shutdownImportQueue();
         void shutdownLibrarySyncQueue();
+        void shutdownPlayedStateSyncQueue();
         void shutdownVersionCheckQueue();
         void shutdownInactivityCheckQueue();
         void shutdownBackupQueue();
@@ -1342,6 +1371,7 @@ async function start() {
           shutdownImportQueue(),
           shutdownMaintenanceQueue(),
           shutdownLibrarySyncQueue(),
+          shutdownPlayedStateSyncQueue(),
           shutdownVersionCheckQueue(),
           shutdownInactivityCheckQueue(),
           shutdownBackupQueue(),
