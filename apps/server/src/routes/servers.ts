@@ -23,6 +23,7 @@ import { syncServer } from '../services/sync.js';
 import { sseManager } from '../services/sseManager.js';
 import { getCacheService } from '../services/cache.js';
 import { enqueueLibrarySync } from '../jobs/librarySyncQueue.js';
+import { enqueuePlayedStateSync } from '../jobs/playedStateSyncQueue.js';
 
 export const serverRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -539,6 +540,21 @@ export const serverRoutes: FastifyPluginAsync = async (app) => {
         // Don't fail the whole sync if library sync can't be queued
         const message = err instanceof Error ? err.message : 'Unknown error';
         app.log.warn({ serverId: id, error: message }, 'Could not enqueue library sync');
+      }
+
+      // And mirror played state, for servers that expose it. The repeatable
+      // schedule is built at boot over the servers existing then, so without
+      // this a server added later would show never-watched data derived from
+      // sessions alone - the wrong answer this feature exists to correct -
+      // until the process restarts.
+      if (serverRows[0]?.type !== 'plex') {
+        try {
+          const playedStateJobId = await enqueuePlayedStateSync(id, authUser.userId);
+          app.log.info({ serverId: id, jobId: playedStateJobId }, 'Played-state sync job enqueued');
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          app.log.warn({ serverId: id, error: message }, 'Could not enqueue played-state sync');
+        }
       }
 
       return {

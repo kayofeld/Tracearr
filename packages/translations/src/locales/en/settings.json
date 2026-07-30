@@ -9,6 +9,7 @@
     "import": "Import",
     "advanced": "Advanced",
     "jobs": "Jobs",
+    "playedState": "Played State",
     "accessControl": "Access Control",
     "backup": "Backup",
     "ombi": "Requests (Ombi)",
@@ -258,6 +259,27 @@
     "mayTakeAWhile": "This may take a while",
     "mayTakeAWhileDesc": "This job may take several minutes to complete depending on the size of your library.",
     "startJob": "Start Job"
+  },
+  "playedState": {
+    "title": "Played-State Sync",
+    "description": "Mirrors each server's per-user played flags so items watched before Tracearr started tracking sessions aren't wrongly flagged as never watched. Runs automatically every 12 hours for supported servers.",
+    "noServers": "No media servers configured yet.",
+    "capabilityUnsupported": "Not supported",
+    "capabilityUnsupportedDesc": "Plex has no per-user played-state API - this server can never gain coverage.",
+    "statusNeverRun": "Never run",
+    "statusRunning": "Running…",
+    "statusSuccess": "Success",
+    "statusPartial": "Partial - some users failed",
+    "statusError": "Error",
+    "lastSynced": "Last Synced",
+    "never": "Never",
+    "usersSynced": "{{synced}} / {{total}} users synced",
+    "itemsUpserted": "{{count}} items upserted",
+    "itemsPruned": "{{count}} items pruned",
+    "lastError": "Last Error",
+    "syncNow": "Sync Now",
+    "syncing": "Syncing…",
+    "ownerOnlyNote": "Only owners and admins can trigger a manual sync."
   },
   "notifications": {
     "routing": {

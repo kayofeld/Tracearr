@@ -239,6 +239,25 @@ export interface MediaLibrary {
 // ============================================================================
 
 /**
+ * One item one user has marked played, from the played-state mirror.
+ *
+ * Historical plays come back with no timestamp and a zero play count - Emby
+ * keeps the flag forever but not the surrounding detail - so playedAt and
+ * playCount are display-only and must never be filtered or aggregated on.
+ */
+export interface MediaPlayedItem {
+  /** Media server item id, equal to library_items.rating_key */
+  ratingKey: string;
+  mediaType: 'movie' | 'episode';
+  /** The parent series id, for episodes only. Lets shows roll up to watched. */
+  seriesRatingKey?: string;
+  /** Present only for recent plays; null for anything historical. */
+  playedAt?: Date;
+  /** Zero for historical plays, so absence does not mean unwatched. */
+  playCount?: number;
+}
+
+/**
  * Unified library item representation across media servers
  *
  * Used for library scanning and snapshot generation. Contains both
@@ -482,6 +501,30 @@ export interface IMediaServerClient {
     since: Date,
     options?: { offset?: number; limit?: number }
   ): Promise<{ items: MediaLibraryItem[]; totalCount: number }>;
+
+  /**
+   * Get every item one user has marked played, for the played-state mirror.
+   *
+   * Emby and Jellyfin keep this flag indefinitely, which makes it the only
+   * reliable answer to "has anyone ever watched this" for libraries that
+   * predate tracearr. Plex has no per-user equivalent reachable with a single
+   * admin token, so it does not implement this and its servers report no
+   * played-state coverage.
+   *
+   * `rawCount` is how many rows the server returned before parsing dropped any
+   * malformed ones. Pagination must advance on that, not on `items.length`:
+   * StartIndex pages raw rows, so advancing by the parsed count drifts the
+   * offset and ends the loop early, which would leave real plays unsynced and
+   * then pruned.
+   *
+   * @param userExternalId - The media server's own user id
+   * @param options - Pagination options
+   * @returns Promise with played items, raw row count, and total count
+   */
+  getPlayedItems?(
+    userExternalId: string,
+    options?: { offset?: number; limit?: number }
+  ): Promise<{ items: MediaPlayedItem[]; rawCount: number; totalCount: number }>;
 }
 
 /**

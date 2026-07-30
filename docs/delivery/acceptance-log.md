@@ -69,3 +69,72 @@ reviewing agents, open items, and the sign-off. Append one entry per gate using
 - **Contract surface changed:** an `EmbySetupErrorCode` union plus three mirrors (server mapper, client copy map, the error table), forced by the requirement that no upstream status text reaches the client. Enumerated in the freeze checklist.
 - **Owner decisions required before build (6):** claim code default-on plus persistence across restarts and single-use; in-app set-password surface versus CLI-only recovery (the design's stated mitigation does not exist — there is no HTTP surface, only `pnpm reset-password`); whether multiple Emby servers are supported (two designs specified, A: partial unique index, B: an `is_auth_authority` column); acceptance of the residual internal-probe exposure; whether to harden `/plex/connect` in the same increment; and whether the unclaimed gate should extend to `/sign-up/username` and OIDC.
 - **Sign-off:** gate not cleared; recorded as a blocked increment awaiting owner input.
+
+---
+
+## 2026-07-30 — Played-state mirror (Never Watched correctness)
+
+**Increment:** per-user played-state sync from Emby/Jellyfin, correcting the "Never Watched"
+analytics. Branch `feat/emby-played-state`, verified at `45e814c4`.
+
+**Why:** Never Watched derived its answer purely from tracearr's own `sessions` table, which
+only covers the period since tracearr was installed. Measured read-only against the owner's
+production instance: of 1,160 items flagged never-watched, **472 (41%) had in fact been
+watched** — 293 movies, 179 shows. 856 of the flagged items predate any session data at all,
+so for those the page was asserting a fact it had no basis for.
+
+**Verdict: GO for merge. NOT yet accepted as fixed in production** — see open items.
+
+**Evidence** (every run below on a freshly created database unless stated, at `45e814c4`):
+
+- `turbo run typecheck --force` — 9/9 packages, uncached.
+- `turbo run lint --force` — 9/9, 0 errors (pre-existing warning baseline unchanged).
+- `pnpm --filter @tracearr/server test` — 3,911 passed, 4 skipped.
+- Integration suite (real Postgres, database dropped and recreated first) — 38 files, 271 passed.
+- `pnpm --filter @tracearr/web test` — 50 files, 286 passed.
+- Migration 0071 applied to a fresh database; both tables, all four indexes (including the
+  partial one on `series_rating_key`) and both cascades confirmed present. A second
+  `drizzle-kit generate` reported no schema changes, proving the snapshot chain intact.
+- Contract reachability: every frozen member imported through the package barrel exactly as a
+  consumer would, with a deliberate negative control confirming the check was not vacuous.
+
+**Reviewing agents:** `code-reviewer` (GO — 0 critical, 0 high, 3 medium, 4 low),
+`security-reviewer` (GO — 0 critical, 0 high, 1 medium, 4 low). Both pinned to a stated SHA.
+`qa-engineer` **did not run** — four dispatch attempts died on upstream API 529 errors. The
+coordinator ran the gate directly and verified the flagged risk areas by reading the code, but
+this increment has **not** had an independent QA lens, which is a documented weakening of the
+Verify gate rather than a satisfied one.
+
+**Findings fixed after review:** paging advanced on the parsed rather than raw row count and
+had no stable sort (either could strand items for the prune to delete — the exact failure this
+feature exists to remove); a run resolving no users reported coverage over an empty mirror; a
+server added after boot never synced; `POST /played-state/sync` checked role but not server
+access, letting a scoped admin probe and act on servers hidden from them; persisted error text
+could carry the full server URL.
+
+**Coordinator-found defect (not raised by either reviewer):** the played predicate as first
+written could not drive a hash or merge anti-join, so it rescanned `played_states` per candidate
+row and used neither index migration 0071 had just added — 1,417 ms at production scale,
+degrading as items × played_rows on a page already slow when cold. Rewritten as a flattened
+`watched_keys` CTE: 19.8 ms, both indexes via index-only scans, with set-equivalence proven in
+both directions (1,222 rows either way, empty `EXCEPT` both directions) before the code changed.
+
+**Deferred, by decision, not oversight:** the Playback Reporting ingest (ADR 0012) — it adds
+timestamps that played flags lack, but corrects only ~23 further items against this increment's 472. Routes in design §5.4 keep session-only semantics deliberately, since they compute counts
+and durations that played flags cannot supply. Review findings F2 (progress events broadcast
+unscoped, mirroring existing library-sync behaviour) and F4 (bounding pagination against a
+hostile media server) are backlogged with their suggested fixes.
+
+**Open items:**
+
+1. **The 41% correction is arithmetic, not observation.** The intersection was measured; nobody
+   has run the sync and watched 1,160 fall to ~688. That needs a deploy and is the acceptance
+   test that actually matters.
+2. No independent QA lens ran (above).
+3. `/library/never-watched` has a pre-existing ~91 s cold query on production, untouched here.
+4. `totals.neverWatchedSizeBytes` de-duplicates shared items while per-row values do not
+   (pre-existing, ~81.8 GB discrepancy).
+5. Design §6.3 promises BullMQ retry on backoff; the worker never throws, so `attempts: 3` is
+   inert. Either implement or amend the spec — currently doc and code disagree.
+
+**Sign-off:** coordinator, pending owner decision on deploying to production to settle item 1.

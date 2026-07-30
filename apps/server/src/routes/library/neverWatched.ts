@@ -29,6 +29,7 @@ import {
 import { db } from '../../db/client.js';
 import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 import { buildLibraryCacheKey } from './utils.js';
+import { buildPlayedStateCoverage } from '../../services/playedStateSync.js';
 
 /** Age buckets, always returned in this order, zero-filled when empty. */
 const AGE_BUCKETS: NeverWatchedAgeBucket[] = ['lt30', 'd30to90', 'd90to180', 'd180to365', 'gt365'];
@@ -126,7 +127,26 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
       const mediaTypeFilter = mediaType === 'all' ? sql`` : sql`AND li.media_type = ${mediaType}`;
 
       const result = await db.execute(sql`
-        WITH child_size AS (
+        WITH watched_keys AS (
+          -- Every library key any user has played, flattened to one column so
+          -- the anti-join below is a plain equality (design §5.1, ADR 0010).
+          --
+          -- Written as a UNION rather than an OR inside the NOT EXISTS on
+          -- purpose: an OR across two columns cannot drive a hash/merge
+          -- anti-join, so the planner falls back to scanning played_states
+          -- once per candidate row. Measured at production scale (22.5k items,
+          -- 18.4k played rows) that cost 1417ms and used neither index; this
+          -- form uses both played_states indexes and runs in 15ms.
+          --
+          -- The media_type guard the OR form needed is redundant here: movie
+          -- and episode ids live in rating_key, show ids only in
+          -- series_rating_key, and the two id spaces never overlap.
+          SELECT server_id, rating_key AS key FROM played_states
+          UNION
+          SELECT server_id, series_rating_key FROM played_states
+          WHERE series_rating_key IS NOT NULL
+        ),
+        child_size AS (
           -- Aggregate episode file sizes per show, for size roll-up
           SELECT grandparent_rating_key, server_id, SUM(file_size) AS total_size
           FROM library_items
@@ -189,6 +209,15 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
                     )
                   )
                 )
+            )
+            AND NOT EXISTS (
+              -- Played-state mirror (design §5.1, ADR 0010): any user's played
+              -- flag on this item (movie) or on the show via SeriesId
+              -- (episode -> series_rating_key) counts as watched, even with no
+              -- qualifying session (pre-polling history). No-op for Plex
+              -- servers - they have zero played_states rows.
+              SELECT 1 FROM watched_keys w
+              WHERE w.server_id = li.server_id AND w.key = li.rating_key
             )
         ),
         totals_data AS (
@@ -257,6 +286,11 @@ export const libraryNeverWatchedRoute: FastifyPluginAsync = async (app) => {
       const response: NeverWatchedStatsResponse = row
         ? buildResponse(row, mediaType)
         : buildEmptyResponse(mediaType);
+
+      // Coverage (ADR 0011): scoped to the same resolvedIds as the query
+      // above, so the banner always names the servers this exact response
+      // actually covers. Cached alongside the data - see §5.3.
+      response.playedStateCoverage = await buildPlayedStateCoverage(resolvedIds);
 
       await app.redis.setex(cacheKey, CACHE_TTL.LIBRARY_NEVER_WATCHED, JSON.stringify(response));
 

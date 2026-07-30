@@ -16,3 +16,4 @@ export { TopShowsTable } from './TopShowsTable';
 export { MostWatchedSection } from './MostWatchedSection';
 export { CodecDistributionSection } from './CodecDistributionSection';
 export { ResolutionDistributionSection } from './ResolutionDistributionSection';
+export { PlayedStateCoverageBanner } from './PlayedStateCoverageBanner';

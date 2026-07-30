@@ -136,6 +136,7 @@
       "colRequestedBy": "Requested By",
       "colTitle": "Title",
       "description": "Series and films that have never been played",
+      "descriptionNoData": "Series and films with no recorded plays - some may have been watched before played-state sync began",
       "durationDays_one": "{{count}} day",
       "durationDays_other": "{{count}} days",
       "durationMonths_one": "{{count}} month",
@@ -144,7 +145,9 @@
       "durationYears_one": "{{count}} year",
       "durationYears_other": "{{count}} years",
       "emptyDesc": "Every movie and show in your library has been watched at least once.",
+      "emptyDescNoData": "Every movie and show in your library has at least one recorded play.",
       "emptyTitle": "Nothing unwatched",
+      "emptyTitleNoData": "Nothing without recorded plays",
       "failedToLoad": "Failed to load never-watched data",
       "failedToLoadDesc": "Could not fetch never-watched data. Please try again.",
       "filterAll": "All",
@@ -165,7 +168,8 @@
       "statOldest": "Oldest Item",
       "statPct": "% of Library",
       "statSize": "Total Size",
-      "title": "Never Watched"
+      "title": "Never Watched",
+      "titleNoData": "No Recorded Plays"
     },
     "noMoviePlays": "Ingen film spelas i denna period",
     "noShowPlays": "Ingen TV-serie spelas under denna period",
@@ -182,6 +186,13 @@
       "thisWeek": "denna vecka",
       "thisYear": "i år",
       "totalItems": "Totalt antal artiklar"
+    },
+    "playedStateCoverage": {
+      "bannerMixed": "{{unsupportedServers}} cannot report per-user played state (a permanent platform limitation), and {{pendingServers}} hasn't completed its played-state sync yet.",
+      "bannerNote": "Some items below may already have been watched before Tracearr started tracking sessions.",
+      "bannerPending": "{{servers}} hasn't completed its played-state sync yet, so some historical plays may still be missing.",
+      "bannerTitle": "Limited played-state coverage",
+      "bannerUnsupported": "{{servers}} cannot report per-user played state. This is a permanent platform limitation, not a pending sync."
     },
     "quality": {
       "all": "Alla",

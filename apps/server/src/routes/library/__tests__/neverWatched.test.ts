@@ -19,6 +19,14 @@ vi.mock('../../../db/client.js', () => ({
   },
 }));
 
+// Mock the played-state coverage helper (docs/architecture/emby-played-state-sync.md
+// §5.3/§7.3) - it runs its own db.select/leftJoin query, out of scope for this
+// file's execute-only db mock. Coverage computation itself is covered by
+// test/integration/playedStatePredicate.integration.test.ts against a real DB.
+vi.mock('../../../services/playedStateSync.js', () => ({
+  buildPlayedStateCoverage: vi.fn().mockResolvedValue({ servers: [], full: false }),
+}));
+
 // Mock server filtering utilities. resolveServerIds mirrors the real implementation,
 // including the ForbiddenError it throws for a non-owner's explicit unauthorized serverId.
 vi.mock('../../../utils/serverFiltering.js', async () => {

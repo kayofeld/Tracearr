@@ -11,7 +11,12 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { DataTable, type SortingState } from '@/components/ui/data-table';
-import { ErrorState, LibraryEmptyState, EmptyState } from '@/components/library';
+import {
+  ErrorState,
+  LibraryEmptyState,
+  EmptyState,
+  PlayedStateCoverageBanner,
+} from '@/components/library';
 import { NeverWatchedAgeChart } from '@/components/charts';
 import { ServerColumnCell } from '@/components/server';
 import {
@@ -176,6 +181,12 @@ export function LibraryNeverWatched() {
   // Aggregate stats (totals, breakdowns, age distribution) for the current filter
   const stats = useLibraryNeverWatched(selectedServerIds, null, mediaTypeFilter);
 
+  // Played-state coverage (ADR 0011, docs/architecture/emby-played-state-sync.md §7.7).
+  // Absent means "coverage unknown" (a cached pre-upgrade payload can omit it
+  // for up to one cache TTL) - never treated as "no coverage".
+  const coverage = stats.data?.playedStateCoverage;
+  const isNoDataMode = Boolean(coverage && !coverage.full);
+
   // Sourced only to read `configuredSources` - determines whether the
   // "Requested By" column needs a connector badge (both configured) or can
   // stay unlabeled (zero or one connector - the common case). Authenticated,
@@ -314,11 +325,19 @@ export function LibraryNeverWatched() {
 
   const maxLibraryCount = Math.max(...(stats.data?.byLibrary.map((r) => r.count) ?? []), 1);
 
-  // Header component (used in all states)
+  // Header component (used in all states). ADR 0011: once any in-scope server
+  // lacks played-state coverage, the page can only honestly say "no recorded
+  // plays", not "never watched".
   const header = (
     <div>
-      <h1 className="text-2xl font-bold">{t('library.neverWatched.title')}</h1>
-      <p className="text-muted-foreground text-sm">{t('library.neverWatched.description')}</p>
+      <h1 className="text-2xl font-bold">
+        {isNoDataMode ? t('library.neverWatched.titleNoData') : t('library.neverWatched.title')}
+      </h1>
+      <p className="text-muted-foreground text-sm">
+        {isNoDataMode
+          ? t('library.neverWatched.descriptionNoData')
+          : t('library.neverWatched.description')}
+      </p>
     </div>
   );
 
@@ -359,10 +378,19 @@ export function LibraryNeverWatched() {
     return (
       <div className="space-y-6">
         {header}
+        <PlayedStateCoverageBanner coverage={coverage} />
         <EmptyState
           icon={EyeOff}
-          title={t('library.neverWatched.emptyTitle')}
-          description={t('library.neverWatched.emptyDesc')}
+          title={
+            isNoDataMode
+              ? t('library.neverWatched.emptyTitleNoData')
+              : t('library.neverWatched.emptyTitle')
+          }
+          description={
+            isNoDataMode
+              ? t('library.neverWatched.emptyDescNoData')
+              : t('library.neverWatched.emptyDesc')
+          }
         />
       </div>
     );
@@ -370,6 +398,7 @@ export function LibraryNeverWatched() {
 
   return (
     <div className="space-y-6">
+      <PlayedStateCoverageBanner coverage={coverage} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         {header}
         <div className="flex flex-wrap items-center gap-4">

@@ -9,6 +9,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { RunningTask } from '@tracearr/shared';
 import { getAllActiveImports, getActiveImportProgress } from '../jobs/importQueue.js';
 import { getAllActiveLibrarySyncs } from '../jobs/librarySyncQueue.js';
+import { getAllActivePlayedStateSyncs } from '../jobs/playedStateSyncQueue.js';
 import { getAllActiveOmbiSyncs } from '../jobs/ombiSyncQueue.js';
 import { getAllActiveSeerrSyncs } from '../jobs/seerrSyncQueue.js';
 import { getMaintenanceProgress, getAllActiveMaintenanceJobs } from '../jobs/maintenanceQueue.js';
@@ -57,6 +58,32 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
         id: sync.jobId,
         type: 'library_sync',
         name: 'Library Sync',
+        status: isRunning ? 'running' : 'pending',
+        progress: sync.progress,
+        message: isRunning ? `Syncing ${serverName}...` : 'Waiting to start',
+        startedAt: new Date(sync.createdAt).toISOString(),
+        context: serverName,
+      });
+    }
+
+    // Get played-state sync tasks (docs/architecture/emby-played-state-sync.md §7.5 -
+    // this is the only file mapping the played-state-sync queue -> RunningTaskType).
+    const playedStateSyncs = await getAllActivePlayedStateSyncs();
+    for (const sync of playedStateSyncs) {
+      const isRunning = sync.state === 'active';
+      const isScheduled = sync.triggeredBy === 'scheduled';
+
+      // Skip scheduled jobs that are just queued - only show when running
+      if (isScheduled && !isRunning) {
+        continue;
+      }
+
+      // A manual "sync every capable server" job has no single serverId.
+      const serverName = sync.serverId ? await getServerName(sync.serverId) : 'all servers';
+      tasks.push({
+        id: sync.jobId,
+        type: 'played_state_sync',
+        name: 'Played-State Sync',
         status: isRunning ? 'running' : 'pending',
         progress: sync.progress,
         message: isRunning ? `Syncing ${serverName}...` : 'Waiting to start',

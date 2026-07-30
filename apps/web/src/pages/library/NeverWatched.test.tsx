@@ -708,4 +708,116 @@ describe('LibraryNeverWatched', () => {
       expect(screen.queryByText('library.neverWatched.sourceSeerr')).not.toBeInTheDocument();
     });
   });
+
+  describe('played-state coverage banner (ADR 0011)', () => {
+    it('renders no banner and the default "Never Watched" heading when playedStateCoverage is absent', () => {
+      // A cached pre-upgrade payload can omit the field for up to one TTL -
+      // this must never be treated as "no coverage".
+      renderPage();
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByText('library.neverWatched.title')).toBeInTheDocument();
+    });
+
+    it('renders no banner when coverage.full is true', () => {
+      mockUseLibraryNeverWatched.mockReturnValue(
+        neverWatchedStatsReturn({
+          data: {
+            totals: { count: 2, sizeBytes: 20_000_000_000, libraryCount: 50, pctOfLibrary: 4 },
+            byMediaType: [
+              { mediaType: 'movie', count: 1, sizeBytes: 10_000_000_000 },
+              { mediaType: 'show', count: 1, sizeBytes: 10_000_000_000 },
+            ],
+            byLibrary: [
+              {
+                serverId: 'srv-1',
+                serverName: 'Server A',
+                libraryId: 'lib-1',
+                libraryName: 'Movies',
+                count: 2,
+                sizeBytes: 20_000_000_000,
+              },
+            ],
+            ageDistribution: [
+              { bucket: 'lt30', count: 0, sizeBytes: 0 },
+              { bucket: 'd30to90', count: 0, sizeBytes: 0 },
+              { bucket: 'd90to180', count: 0, sizeBytes: 0 },
+              { bucket: 'd180to365', count: 1, sizeBytes: 10_000_000_000 },
+              { bucket: 'gt365', count: 1, sizeBytes: 10_000_000_000 },
+            ],
+            oldestAddedAt: '2023-01-01T00:00:00Z',
+            playedStateCoverage: {
+              full: true,
+              servers: [
+                {
+                  serverId: 'srv-1',
+                  serverName: 'Server A',
+                  capability: 'supported',
+                  lastSyncedAt: '2026-07-29T00:00:00Z',
+                },
+              ],
+            },
+          },
+        })
+      );
+
+      renderPage();
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByText('library.neverWatched.title')).toBeInTheDocument();
+    });
+
+    it('renders the banner and swaps the heading/empty-state copy to "no recorded plays" when full is false', () => {
+      mockUseLibraryNeverWatched.mockReturnValue(
+        neverWatchedStatsReturn({
+          data: {
+            totals: { count: 0, sizeBytes: 0, libraryCount: 50, pctOfLibrary: 0 },
+            byMediaType: [],
+            byLibrary: [],
+            ageDistribution: [
+              { bucket: 'lt30', count: 0, sizeBytes: 0 },
+              { bucket: 'd30to90', count: 0, sizeBytes: 0 },
+              { bucket: 'd90to180', count: 0, sizeBytes: 0 },
+              { bucket: 'd180to365', count: 0, sizeBytes: 0 },
+              { bucket: 'gt365', count: 0, sizeBytes: 0 },
+            ],
+            oldestAddedAt: null,
+            playedStateCoverage: {
+              full: false,
+              servers: [
+                {
+                  serverId: 'srv-plex',
+                  serverName: 'Plex Server',
+                  capability: 'unsupported',
+                  lastSyncedAt: null,
+                },
+              ],
+            },
+          },
+        })
+      );
+      mockUseLibraryStale.mockReturnValue(
+        staleItemsReturn({
+          data: {
+            items: [],
+            summary: {
+              neverWatched: { count: 0, sizeBytes: 0 },
+              stale: { count: 0, sizeBytes: 0 },
+              total: { count: 0, sizeBytes: 0 },
+              threshold: { days: 90 },
+            },
+            pagination: { page: 1, pageSize: 20, total: 0 },
+          },
+        })
+      );
+
+      renderPage();
+
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByText('library.neverWatched.titleNoData')).toBeInTheDocument();
+      expect(screen.queryByText('library.neverWatched.title')).not.toBeInTheDocument();
+      expect(screen.getByText('library.neverWatched.emptyTitleNoData')).toBeInTheDocument();
+      expect(screen.queryByText('library.neverWatched.emptyTitle')).not.toBeInTheDocument();
+    });
+  });
 });

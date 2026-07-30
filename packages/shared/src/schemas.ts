@@ -1132,6 +1132,12 @@ export const libraryNeverWatchedQuerySchema = z.object({
   mediaType: z.enum(['movie', 'show', 'all']).default('all'),
 });
 
+// Played-state sync (contract: docs/architecture/emby-played-state-sync.md)
+export const playedStateSyncTriggerSchema = z.object({
+  /** Omit to sync every capable server */
+  serverId: z.uuid().optional(),
+});
+
 // Ombi connector schemas (contract: docs/architecture/ombi-api-contract.md)
 export const ombiTestConnectionSchema = z.object({
   url: permissiveUrlSchema,
@@ -1260,6 +1266,7 @@ export type LibraryStorageQueryInput = z.infer<typeof libraryStorageQuerySchema>
 export type LibraryDuplicatesQueryInput = z.infer<typeof libraryDuplicatesQuerySchema>;
 export type LibraryStaleQueryInput = z.infer<typeof libraryStaleQuerySchema>;
 export type LibraryNeverWatchedQueryInput = z.infer<typeof libraryNeverWatchedQuerySchema>;
+export type PlayedStateSyncTriggerInput = z.infer<typeof playedStateSyncTriggerSchema>;
 export type OmbiTestConnectionInput = z.infer<typeof ombiTestConnectionSchema>;
 export type OmbiMappingUpsertInput = z.infer<typeof ombiMappingUpsertSchema>;
 export type SeerrTestConnectionInput = z.infer<typeof seerrTestConnectionSchema>;

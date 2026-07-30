@@ -95,6 +95,7 @@ export type {
   MediaLibrary,
   MediaLibraryItem,
   MediaWatchHistoryItem,
+  MediaPlayedItem,
 } from './types.js';
 
 // Clients (for static method access and direct instantiation)

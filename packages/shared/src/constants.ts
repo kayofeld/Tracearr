@@ -92,6 +92,8 @@ export const WS_EVENTS = {
   OMBI_SYNC_PROGRESS: 'ombi:sync:progress',
   /** Seerr request-mirror sync progress updates */
   SEERR_SYNC_PROGRESS: 'seerr:sync:progress',
+  /** Played-state (per-user watched flags) sync progress updates */
+  PLAYED_STATE_SYNC_PROGRESS: 'played-state:sync:progress',
   /** Unified running tasks updates */
   TASKS_UPDATED: 'tasks:updated',
   SUBSCRIBE_SESSIONS: 'subscribe:sessions',

@@ -100,6 +100,9 @@ import type {
   SeerrPurgeResponse,
   SeerrMappingsResponse,
   SeerrMappingUpsertRequest,
+  // Played-state sync types (docs/architecture/emby-played-state-sync.md §7)
+  PlayedStateSyncStatusResponse,
+  PlayedStateSyncTriggerResponse,
 } from '@tracearr/shared';
 // Telegram pairing types re-exported from @tracearr/shared via one isolated
 // module - see telegramPairingContract.ts.
@@ -1442,6 +1445,18 @@ class ApiClient {
       return this.request<Record<string, LibraryStatusResponse>>(
         `/library/status?${params.toString()}`
       );
+    },
+    // Played-state sync - per-server status card + manual trigger (owner/admin
+    // only server-side). Contract: docs/architecture/emby-played-state-sync.md §7.
+    playedState: {
+      status: () => this.request<PlayedStateSyncStatusResponse>('/library/played-state/status'),
+      // 202 -> { jobId }; the request() helper throws ApiError(409|400) for the
+      // "already running" / "unsupported or unknown server" cases per the contract.
+      sync: (serverId?: string) =>
+        this.request<PlayedStateSyncTriggerResponse>('/library/played-state/sync', {
+          method: 'POST',
+          body: JSON.stringify(serverId ? { serverId } : {}),
+        }),
     },
   };
 

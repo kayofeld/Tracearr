@@ -22,6 +22,11 @@ vi.mock('../../../db/client.js', () => ({
   },
 }));
 
+// Mock the played-state coverage helper - see neverWatched.test.ts for why.
+vi.mock('../../../services/playedStateSync.js', () => ({
+  buildPlayedStateCoverage: vi.fn().mockResolvedValue({ servers: [], full: false }),
+}));
+
 // Mirror the real resolveServerIds semantics (same mock as neverWatched.test.ts)
 vi.mock('../../../utils/serverFiltering.js', async () => {
   const { sql } = await import('drizzle-orm');
