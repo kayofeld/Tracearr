@@ -1,7 +1,7 @@
 import { createContext, useContext, useCallback, useMemo, useEffect, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AuthUser } from '@tracearr/shared';
-import { api, AUTH_STATE_CHANGE_EVENT, BASE_URL } from '@/lib/api';
+import { api, ApiError, AUTH_STATE_CHANGE_EVENT, BASE_URL } from '@/lib/api';
 import { authClient } from '@/lib/authClient';
 
 interface UserProfile extends AuthUser {
@@ -21,6 +21,11 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+// 401/403 means the server answered and there is no session. A network error,
+// proxy 5xx, or timeout means we never got an answer, so the last user stays.
+const isSignedOut = (error: unknown) =>
+  error instanceof ApiError && (error.status === 401 || error.status === 403);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -46,32 +51,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           hasPassword: user.hasPassword,
           hasPlexLinked: user.hasPlexLinked,
         };
-      } catch {
-        // No session cookie, an expired session, or a network error - either way
-        // there's no authenticated user to show right now.
-        return null;
+      } catch (error) {
+        if (isSignedOut(error)) return null;
+        // Thrown errors retry on the client defaults and keep the last user in place
+        throw error;
       }
-    },
-    // Retry configuration following AWS best practices:
-    // - 3 retries (industry standard)
-    // - Exponential backoff with full jitter to prevent thundering herd
-    // - Cap at 10s to prevent excessively long waits
-    // - Only retry on network errors, not on 4xx auth errors
-    retry: (failureCount, error) => {
-      // Don't retry on auth errors (4xx) - there's no session to recover
-      // Only retry on network errors (TypeError: fetch failed, etc.)
-      if (error instanceof Error && error.message.includes('401')) return false;
-      if (error instanceof Error && error.message.includes('403')) return false;
-      return failureCount < 3;
-    },
-    // Full jitter: random(0, min(cap, base * 2^attempt))
-    // This spreads out retries to prevent all clients hitting server at once
-    retryDelay: (attemptIndex) => {
-      const baseDelay = 1000;
-      const maxDelay = 10000;
-      const exponentialDelay = Math.min(maxDelay, baseDelay * 2 ** attemptIndex);
-      // Full jitter - random value between 0 and the exponential delay
-      return Math.random() * exponentialDelay;
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
     // Auto-refetch when network reconnects (handles stale tabs)

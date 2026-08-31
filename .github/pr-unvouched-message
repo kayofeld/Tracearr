@@ -1,0 +1,12 @@
+Hi @{author}, thanks for the PR.
+
+Tracearr only takes pull requests from vouched contributors, and your account isn't vouched yet, so this PR is being closed automatically. Nothing personal: two maintainers keep this project running, and this is how we keep review time for work that was agreed on first.
+
+Getting vouched takes one conversation:
+
+- Fixing a bug? File it with the bug report template (or find the existing issue) and say you'd like to fix it. If a maintainer confirms the bug they'll comment `!vouch` and label the issue.
+- Adding or changing a feature? Open a discussion in Feature Requests describing what and why, in your own words. A maintainer will scope it and comment `!vouch` if it's a fit.
+
+Once vouched you can reopen this PR or open a new one that links the issue or discussion.
+
+The full policy, including what we expect around AI-assisted code, is in https://github.com/{owner}/{repo}/blob/{default_branch}/CONTRIBUTING.md

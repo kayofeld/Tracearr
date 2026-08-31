@@ -11,7 +11,7 @@
  *   pnpm check                  # Check all languages against en
  *   pnpm check --strict         # Also report extra keys
  *   pnpm check --lang=de-DE     # Check only German
- *   pnpm check --fix            # Add missing keys using English defaults
+ *   pnpm check --fix            # Add absent keys as empty placeholders
  *   pnpm check --fix --dry-run  # Preview fixes without writing files
  */
 
@@ -30,6 +30,8 @@ interface TranslationObject {
 interface CheckResult {
   missingFiles: string[];
   missingKeys: { file: string; keys: string[] }[];
+  translated: number;
+  total: number;
   extraKeys: { file: string; keys: string[] }[];
 }
 
@@ -157,6 +159,8 @@ function checkLanguage(targetLang: string, strict: boolean): CheckResult {
     missingFiles: [],
     missingKeys: [],
     extraKeys: [],
+    translated: 0,
+    total: 0,
   };
 
   const baseNamespaces = getNamespaceFiles(BASE_LANG);
@@ -176,6 +180,12 @@ function checkLanguage(targetLang: string, strict: boolean): CheckResult {
 
     const baseKeys = getAllKeys(baseTranslations);
     const targetKeySet = new Set(getAllKeys(targetTranslations));
+
+    for (const key of baseKeys) {
+      result.total++;
+      const value = getValueAtPath(targetTranslations, key);
+      if (typeof value === 'string' && value !== '') result.translated++;
+    }
 
     // Find missing keys (O(n) with Set)
     const missingKeys = baseKeys.filter((key) => !targetKeySet.has(key));
@@ -233,7 +243,12 @@ function fixLanguage(targetLang: string, dryRun: boolean): FixResult {
 
     if (isNewFile) {
       // Create new file with all base translations
-      targetTranslations = JSON.parse(JSON.stringify(baseTranslations));
+      targetTranslations = {};
+      for (const key of getAllKeys(baseTranslations)) {
+        if (typeof getValueAtPath(baseTranslations, key) === 'string') {
+          setValueAtPath(targetTranslations, key, '');
+        }
+      }
       result.filesCreated.push(`${namespace}.json`);
     } else if (targetTranslations) {
       // Add missing keys to existing file
@@ -243,9 +258,11 @@ function fixLanguage(targetLang: string, dryRun: boolean): FixResult {
 
       if (missingKeys.length > 0) {
         for (const key of missingKeys) {
-          const value = getValueAtPath(baseTranslations, key);
-          if (value !== undefined) {
-            setValueAtPath(targetTranslations, key, value);
+          // Empty, never the English source. i18next runs with returnEmptyString: false
+          // and fallbackLng: 'en', so an empty value renders current English; copying the
+          // source freezes it instead, which is what filled every locale with English.
+          if (typeof getValueAtPath(baseTranslations, key) === 'string') {
+            setValueAtPath(targetTranslations, key, '');
           }
         }
         result.keysAdded.push({ file: `${namespace}.json`, count: missingKeys.length });
@@ -390,7 +407,13 @@ function main() {
   }
 
   let hasAnyIssues = false;
-  const summary: { lang: string; missing: number; extra: number }[] = [];
+  const summary: {
+    lang: string;
+    missing: number;
+    extra: number;
+    translated: number;
+    total: number;
+  }[] = [];
 
   for (const lang of languages) {
     console.log(`\n${'='.repeat(50)}`);
@@ -405,12 +428,18 @@ function main() {
       result.missingKeys.reduce((sum, { keys }) => sum + keys.length, 0);
     const extraCount = result.extraKeys.reduce((sum, { keys }) => sum + keys.length, 0);
 
-    summary.push({ lang, missing: missingCount, extra: extraCount });
+    summary.push({
+      lang,
+      missing: missingCount,
+      extra: extraCount,
+      translated: result.translated,
+      total: result.total,
+    });
 
     if (hasIssues) {
       hasAnyIssues = true;
     } else {
-      console.log('\n  All translations complete!');
+      console.log('\n  In sync with the source.');
     }
   }
 
@@ -419,9 +448,13 @@ function main() {
   console.log('Summary');
   console.log('='.repeat(50));
 
-  for (const { lang, missing, extra } of summary) {
-    const status = missing === 0 ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
-    let line = `${status} ${lang}: ${missing} missing`;
+  for (const { lang, missing, extra, translated, total } of summary) {
+    const pct = total > 0 ? Math.round((100 * translated) / total) : 0;
+    const status = missing === 0 ? '\x1b[32m✓\x1b[0m' : '\x1b[33m!\x1b[0m';
+    let line = `${status} ${lang}: ${String(pct).padStart(3)}% translated (${translated}/${total})`;
+    if (missing > 0) {
+      line += `, ${missing} key(s) absent`;
+    }
     if (strict && extra > 0) {
       line += `, ${extra} extra`;
     }
@@ -430,14 +463,13 @@ function main() {
 
   const totalMissing = summary.reduce((sum, { missing }) => sum + missing, 0);
 
+  // Untranslated strings are the normal state: Crowdin exports them empty and i18next
+  // falls back to English. Only a structural mismatch with the source fails the check.
   if (totalMissing > 0) {
-    console.log(`\n\x1b[31mFound ${totalMissing} missing translation(s)\x1b[0m`);
-    console.log(`\x1b[33mRun with --fix to add English defaults (use --dry-run to preview)\x1b[0m`);
-    process.exit(1);
-  } else {
-    console.log(`\n\x1b[32mAll translations complete!\x1b[0m`);
-    process.exit(0);
+    console.log(`\n\x1b[33m${totalMissing} key(s) absent from a locale file\x1b[0m`);
+    console.log(`\x1b[33mRun with --fix to add them as empty placeholders\x1b[0m`);
   }
+  process.exit(strict && summary.some((x) => x.extra > 0) ? 1 : 0);
 }
 
 main();

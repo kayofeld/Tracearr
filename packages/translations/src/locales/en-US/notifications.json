@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Failed to update agent",
       "apiKeyGenerateFailed": "Failed to generate API key",
       "authFailed": "Authentication failed",
+      "automationCreateFailed": "Failed to create automation",
+      "automationDeleteFailed": "Failed to delete automation",
+      "automationUpdateFailed": "Failed to update automation",
       "clipboardFailed": "Failed to copy to clipboard",
       "copyFailed": "Could not copy to clipboard",
+      "destinationDeleteFailed": "Failed to delete destination: {{error}}",
+      "destinationInUse": "Still used by: {{rules}}",
+      "destinationSaveFailed": "Failed to save destination: {{error}}",
+      "destinationTestFailed": "Test failed: {{error}}",
       "deviceRemoveFailed": "Failed to remove device",
       "deviceRenameFailed": "Failed to rename device",
       "dismissFailed": "Failed to dismiss violation",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "plex.direct URLs are relay addresses that cannot be used here. Please use a direct IP address or hostname instead.",
+      "plexReauthorizeFailed": "Failed to reauthorize Plex account",
       "plexUnlinkFailed": "Failed to unlink Plex account",
       "routingUpdateFailed": "Failed to update routing",
       "ruleCreateFailed": "Failed to create rule",
@@ -148,6 +156,18 @@
         "message": "Your new API key is ready to use",
         "title": "API Key Generated"
       },
+      "automationCreated": {
+        "title": "Automation Created",
+        "message": "The automation has been created successfully"
+      },
+      "automationDeleted": {
+        "title": "Automation Deleted",
+        "message": "The automation has been deleted successfully"
+      },
+      "automationUpdated": {
+        "title": "Automation Updated",
+        "message": "The automation has been updated successfully"
+      },
       "claimCodeValidated": {
         "message": "You can now proceed with setup",
         "title": "Claim code validated"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Copied to clipboard"
       },
+      "destinationDeleted": "Destination deleted",
+      "destinationSaved": "Destination saved",
+      "destinationTestSent": "Test notification sent",
       "deviceRemoved": {
         "message": "The device has been disconnected",
         "title": "Device Removed"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "You can now add servers from your Plex account",
         "title": "Plex Account Linked"
+      },
+      "plexAccountReauthorized": {
+        "title": "Plex Account Reauthorized",
+        "message_one": "{{count}} server reconnected",
+        "message_other": "{{count}} servers reconnected",
+        "messageNoServers": "Account token updated",
+        "partial": "Token updated, but {{names}} still refused it",
+        "unmatched": "Token updated, but {{names}} could not be re-linked"
       },
       "plexAccountUnlinked": {
         "message": "Your Plex account has been disconnected",
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "Kept target's version of: {{names}}",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },

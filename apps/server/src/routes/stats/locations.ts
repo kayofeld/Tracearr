@@ -147,9 +147,6 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
     if (userFragment) mediaFilterConditions.push(userFragment);
     const mediaFilterWhereClause = sql`WHERE ${sql.join(mediaFilterConditions, sql` AND `)} ${serverFragment}`;
 
-    // Cascading filters are always fetched fresh (no caching since they depend on current selections)
-    let availableFilters: LocationFilters | null = null;
-
     // Execute queries in parallel (2 instead of 4 sequential)
     const [mainResult, filtersResult] = await Promise.all([
       // Query 1: Main location data with CTE for per-server breakdown
@@ -284,7 +281,8 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
       identity_name: string | null;
       server_user_ids: string[] | null;
     }[];
-    availableFilters = {
+    // Cascading filters are always fetched fresh (no caching since they depend on current selections)
+    const availableFilters: LocationFilters = {
       users: filters
         .filter((f) => f.filter_type === 'user')
         .map((f) => ({
@@ -351,7 +349,7 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
         uniqueLocations,
         topCity,
       },
-      availableFilters: availableFilters ?? { users: [], servers: [], mediaTypes: [] },
+      availableFilters,
     };
   });
 };

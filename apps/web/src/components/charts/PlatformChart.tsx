@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import Highcharts from 'highcharts';
 import { HighchartsReact } from 'highcharts-react-official';
 import { ChartSkeleton } from '@/components/ui/skeleton';
+import { ChartEmpty } from './ChartEmpty';
 
 interface PlatformData {
   name: string;
@@ -113,14 +114,7 @@ export function PlatformChart({ data, isLoading, height = 200 }: PlatformChartPr
   }
 
   if (!data || data.length === 0) {
-    return (
-      <div
-        className="text-muted-foreground flex items-center justify-center rounded-lg border border-dashed"
-        style={{ height }}
-      >
-        No platform data available
-      </div>
-    );
+    return <ChartEmpty height={height} message="No platform data available" />;
   }
 
   return (

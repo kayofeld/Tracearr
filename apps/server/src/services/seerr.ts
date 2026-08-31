@@ -577,7 +577,7 @@ export class SeerrService {
     let skipped = 0;
     let skip = 0;
     let pagesFetched = 0;
-    let lastReportedTotal = 0;
+    let lastReportedTotal: number;
     let hitHardCap = false;
 
     for (;;) {

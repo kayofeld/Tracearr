@@ -53,7 +53,8 @@
     "viewProfile": "View Profile",
     "viewOnGithub": "View on GitHub",
     "later": "Later",
-    "previous": "Previous"
+    "previous": "Previous",
+    "reload": "Reload"
   },
   "states": {
     "loading": "Loading...",
@@ -89,6 +90,18 @@
     "low": "Low",
     "warning": "Warning",
     "high": "High"
+  },
+  "trust": {
+    "trusted": "Trusted",
+    "caution": "Caution",
+    "untrusted": "Untrusted"
+  },
+  "tasks": {
+    "title": "Running Tasks",
+    "running": "Running",
+    "waiting": "Waiting",
+    "queued": "Queued",
+    "startedAgo": "Started {{time}}"
   },
   "time": {
     "now": "Now",
@@ -177,7 +190,21 @@
   "table": {
     "selectAllOnPage": "Select all on page",
     "selectRow": "Select row",
-    "selectAllTotal": "Select all {{total}} items"
+    "pageOf": "Page {{page}} of {{total}}",
+    "pagination": "Pagination"
+  },
+  "filters": {
+    "clearAll": "Clear all",
+    "done": "Done",
+    "remove": "Remove {{label}} filter",
+    "clearSearch": "Clear search",
+    "anyDate": "Any date",
+    "dateAfter": "After {{date}}",
+    "dateBefore": "Before {{date}}",
+    "dateBetween": "{{from}} to {{to}}",
+    "clearDates": "Clear date range",
+    "clearStartDate": "Clear start date",
+    "clearEndDate": "Clear end date"
   },
   "media": {
     "movie": "Movie",
@@ -233,8 +260,8 @@
     "stream_other": "{{count}} streams",
     "server_one": "{{count}} server",
     "server_other": "{{count}} servers",
-    "rule_one": "{{count}} rule",
-    "rule_other": "{{count}} rules",
+    "automation_one": "{{count}} automation",
+    "automation_other": "{{count}} automations",
     "violation_one": "{{count}} violation",
     "violation_other": "{{count}} violations",
     "item_one": "{{count}} item",
@@ -304,5 +331,11 @@
     "unsavedChanges": "You have unsaved changes. Are you sure you want to leave?"
   },
   "beta": "beta",
-  "or": "or"
+  "or": "or",
+  "serverSelector": {
+    "all": "All servers",
+    "some": "{{count}} of {{total}} servers",
+    "search": "Search servers...",
+    "noMatches": "No servers found"
+  }
 }

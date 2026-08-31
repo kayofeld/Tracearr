@@ -6,14 +6,14 @@
  * endpoints on top of Better Auth; these tests MUST NOT be edited by that work
  * because they are the safety net proving the wire contract held.
  *
- * Fields consumed by the mobile app (do not remove or rename without a
- * coordinated mobile release):
- * - pair response: accessToken, refreshToken (apps/mobile/src/lib/authStateStore.ts)
+ * Fields consumed by the mobile app (Tracearr/Mobile-App repo; do not remove or
+ * rename without a coordinated mobile release):
+ * - pair response: accessToken, refreshToken (src/lib/authStateStore.ts)
  *   server.id, server.name, server.type (authStateStore.ts pairServer -> StoredServer)
  *   user.userId, user.username, user.role (authStateStore.ts pairServer -> UserInfo)
- *   apps/mobile/src/lib/api.ts also runtime-checks accessToken, refreshToken,
+ *   src/lib/api.ts also runtime-checks accessToken, refreshToken,
  *   server.id, and user.userId before trusting the response.
- * - refresh response: accessToken, refreshToken (apps/mobile/src/lib/api.ts performTokenRefresh)
+ * - refresh response: accessToken, refreshToken (src/lib/api.ts performTokenRefresh)
  *
  * Setup mirrors src/routes/__tests__/mobile.test.ts (mocked db/redis/jwt,
  * local buildTestApp) since routes/__tests__ tests run against a mocked

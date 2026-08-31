@@ -40,8 +40,7 @@ export type {
   TranscodeInfo,
   SubtitleInfo,
   StreamDetailFields,
-  // Rule
-  RuleType,
+  // V1 rule params, still read by the automation migration
   ImpossibleTravelParams,
   SimultaneousLocationsParams,
   DeviceVelocityParams,
@@ -50,41 +49,12 @@ export type {
   GeoRestrictionParams,
   AccountInactivityUnit,
   AccountInactivityParams,
-  RuleParams,
-  Rule,
-  // Rule V2
-  Operator,
-  ConditionField,
-  ConditionValue,
-  Condition,
-  ConditionGroup,
-  RuleConditions,
-  ActionType,
-  Action,
-  LogOnlyAction,
-  NotifyAction,
-  AdjustTrustAction,
-  SetTrustAction,
-  ResetTrustAction,
-  KillStreamAction,
-  MessageClientAction,
-  NotificationChannelV2,
-  RuleActions,
-  RuleV2,
-  ActionResult,
-  VideoResolution,
-  DeviceType,
-  Platform,
-  MediaTypeEnum,
-  TranscodingConditionValue,
+  EngineAutomation,
   // Violation
   ViolationSeverity,
   Violation,
   ViolationWithDetails,
   ViolationSessionInfo,
-  // Evidence
-  ConditionEvidence,
-  GroupEvidence,
   // Stats
   DashboardStats,
   PlayStats,
@@ -105,10 +75,14 @@ export type {
   // Server bandwidth stats
   ServerBandwidthDataPoint,
   ServerBandwidthStats,
+  BandwidthAccount,
+  BandwidthDevice,
+  BandwidthSample,
+  ServerLiveStats,
   // Settings
   Settings,
-  WebhookFormat,
   UnitSystem,
+  ImageCacheStatus,
   // Tailscale
   TailscaleStatus,
   TailscaleExitNode,
@@ -119,6 +93,9 @@ export type {
   // Jellystat import
   JellystatImportProgress,
   JellystatImportResult,
+  // Playback Reporting import
+  PlaybackReportingImportProgress,
+  PlaybackReportingImportResult,
   // Library sync
   LibrarySyncProgress,
   // Heavy ops coordination
@@ -146,7 +123,7 @@ export type {
   ServerFilterOption,
   CountryOption,
   HistoryFilterOptions,
-  RulesFilterOptions,
+  AutomationFilterOptions,
   // Mobile
   MobileToken,
   MobileSession,
@@ -159,8 +136,6 @@ export type {
   NotificationPreferences,
   RateLimitStatus,
   NotificationPreferencesWithStatus,
-  NotificationChannel,
-  NotificationChannelRouting,
   EncryptedPushPayload,
   PushNotificationPayload,
   // Telegram interactive pairing
@@ -174,8 +149,10 @@ export type {
   PlexActivityNotification,
   PlexStatusNotification,
   PlexTranscodeNotification,
+  PlexTimelineEntry,
   SSEConnectionStatus,
   ServerConnectionStatus,
+  PluginIssue,
   // Termination logs
   TerminationTrigger,
   TerminationLogWithDetails,
@@ -191,6 +168,9 @@ export type {
   LinkPlexAccountRequest,
   LinkPlexAccountResponse,
   UnlinkPlexAccountResponse,
+  ReauthorizePlexAccountResponse,
+  ReauthorizedServer,
+  ReauthorizedServerStatus,
   // Version
   VersionInfo,
   VersionUpdateCapability,
@@ -243,6 +223,7 @@ export type {
   LibraryStorageResponse,
   MatchType,
   DuplicateItem,
+  DuplicateItemVersion,
   DuplicateGroup,
   DuplicatesSummary,
   DuplicatesResponse,
@@ -296,6 +277,42 @@ export type {
   CompletionSummary,
   CompletionPaginationInfo,
   CompletionResponse,
+  WatchedState,
+  CatalogRowServerEntry,
+  CatalogRow,
+  CatalogResponseMeta,
+  CatalogResponse,
+  CatalogLetterBucket,
+  CatalogLettersResponse,
+  ShelfRow,
+  RecentlyAddedShelfRow,
+  MostPopularShelfRow,
+  DeadWeightRow,
+  ShelvesKpiWatchedInPeriod,
+  ShelvesKpiNewlyAdded,
+  ShelvesKpiDeadWeight,
+  ShelvesKpis,
+  ShelvesResponseMeta,
+  ShelvesResponse,
+  ShelvesPeriod,
+  GenreRow,
+  GenresResponse,
+  MediaVersionEntry,
+  MediaAvailabilityEntry,
+  MediaReplacedCopy,
+  MediaDetailResponse,
+  MediaChildEntry,
+  MediaChildrenResponse,
+  MediaStatsMeasures,
+  MediaStatsWindow,
+  MediaStatsResponse,
+  MediaWatcherEntry,
+  MediaWatchersResponse,
+  MediaPlatformBreakdownEntry,
+  MediaPlatformBreakdownResponse,
+  SeasonHeatEpisode,
+  SeasonHeatSeason,
+  MediaSeasonHeatResponse,
   BingeShow,
   HourlyDistribution,
   MonthlyTrend,
@@ -317,12 +334,142 @@ export type {
   ResolutionEntry,
   ResolutionBreakdown,
   LibraryResolutionResponse,
+  LibraryOption,
+  LibrariesResponse,
 } from './types.js';
+
+// Destination type exports
+export type {
+  DestinationKind,
+  DestinationFieldDescriptor,
+  DestinationDescriptor,
+  Destination,
+  CreateDestinationInput,
+  UpdateDestinationInput,
+  NotificationToast,
+} from './destinations.js';
+
+// Automation type exports
+export type {
+  AutomationKind,
+  TriggerContext,
+  TriggerGroup,
+  TriggerType,
+  TriggerNode,
+  RunOutcome,
+  Automation,
+  AutomationScopeRef,
+  AutomationTemplateRef,
+  AutomationOrigin,
+  AutomationRunSummary,
+  AutomationRun,
+  RunSubject,
+  RunSubjectKind,
+  RunSessionContext,
+  RunFinishedEvent,
+  CreateAutomationInput,
+  UpdateAutomationInput,
+  AutomationSortField,
+  AutomationSource,
+  AutomationListQuery,
+  RunSortField,
+  RunListQuery,
+  RunCounts,
+  NearMissReason,
+  NearMissEntry,
+  ConditionFieldDescriptor,
+  // Condition family
+  Operator,
+  ScopeField,
+  LibraryItemType,
+  ConditionField,
+  ConditionValue,
+  TranscodingConditionValue,
+  VideoResolution,
+  DeviceType,
+  Platform,
+  MediaTypeEnum,
+  NodeFields,
+  Condition,
+  ConditionGroup,
+  ConditionMatch,
+  AutomationConditions,
+  ConditionEvidence,
+  GroupEvidence,
+  ActionResult,
+  LeafActionType,
+  LeafAction,
+  IfAction,
+  TemplateInput,
+  TemplateDefinition,
+  TemplateEnvelope,
+  ShareCodeReason,
+  DryRunRequest,
+  DryRunSubject,
+  DryRunCondition,
+  DryRunAction,
+  DryRunSample,
+  DryRunResponse,
+} from './automations/index.js';
+
+// Automation constants and schemas
+export {
+  AUTOMATION_KINDS,
+  TRIGGERS,
+  TRIGGER_GROUPS,
+  TRIGGER_TYPES,
+  CONDITION_FIELDS,
+  operatorSchema,
+  conditionValueSchema,
+  conditionSchema,
+  ACTIONS,
+  ACTION_TYPES,
+  LEAF_ACTION_TYPES,
+  RUN_OUTCOMES,
+  RETENTION_DEFAULTS,
+  AUTOMATION_NAME_MAX,
+  AUTOMATION_DESCRIPTION_MAX,
+  AUTOMATION_SORT_FIELDS,
+  AUTOMATION_SOURCES,
+  RUN_SORT_FIELDS,
+  triggerNodeSchema,
+  heldForParamsSchema,
+  inactiveForParamsSchema,
+  conditionGroupSchema,
+  automationDefinitionSchema,
+  createAutomationSchema,
+  updateAutomationSchema,
+  automationListQuerySchema,
+  dryRunRequestSchema,
+  runListQuerySchema,
+  runCountsQuerySchema,
+  NEAR_MISS_REASONS,
+  nearMissEntrySchema,
+  contextOf,
+  contextSupplies,
+  fieldsAvailableFor,
+  TEMPLATE_GROUPS,
+  TEMPLATE_SCHEMA_VERSION,
+  TEMPLATE_MIN_SERVER_VERSION,
+  templateEnvelopeSchema,
+  materializeTemplate,
+  slotValueFor,
+  liftAutomation,
+  TemplateBindingError,
+  ShareCodeError,
+  assertShareDepth,
+  canonicalJson,
+  fingerprintOf,
+  encodeShareCode,
+  decodeShareCode,
+} from './automations/index.js';
 
 // Schema exports
 export {
   // Common
   uuidSchema,
+  serverIdsQuerySchema,
+  libraryKeySchema,
   paginationSchema,
   booleanStringSchema,
   // Auth
@@ -342,7 +489,10 @@ export {
   mergeUsersBodySchema,
   mergeUserParamSchema,
   splitServerUserParamSchema,
-  userSortFieldSchema,
+  USER_SORT_FIELDS,
+  userRosterFilterSchema,
+  userListQuerySchema,
+  bulkResetTrustBodySchema,
   // Session
   sessionQuerySchema,
   historyQuerySchema,
@@ -357,27 +507,31 @@ export {
   concurrentStreamsParamsSchema,
   geoRestrictionParamsSchema,
   accountInactivityParamsSchema,
-  ruleParamsSchema,
-  createRuleSchema,
-  updateRuleSchema,
-  ruleIdParamSchema,
   // Rule V2
-  createRuleV2Schema,
-  updateRuleV2Schema,
+  automationConditionsSchema,
+  actionTypeSchema,
+  actionSchema,
+  sendActionSchema,
+  trustActionSchema,
   hasAtMostOneScope,
-  RULE_SCOPE_ERROR_MESSAGE,
+  AUTOMATION_SCOPE_ERROR_MESSAGE,
+  scopeAllowsCrossServerEnforcement,
+  AUTOMATION_CROSS_SERVER_ENFORCEMENT_ERROR_MESSAGE,
   // Bulk operations
-  bulkUpdateRulesSchema,
-  bulkDeleteRulesSchema,
-  bulkMigrateRulesSchema,
+  bulkUpdateAutomationsSchema,
+  bulkDeleteAutomationsSchema,
   // Violation
-  violationSortFieldSchema,
+  VIOLATION_SORT_FIELDS,
+  violationRosterFilterSchema,
   violationQuerySchema,
+  violationBulkBodySchema,
   violationIdParamSchema,
   // Stats
   serverIdFilterSchema,
   dashboardQuerySchema,
   timezoneSchema,
+  statPeriodSchema,
+  dateValidationRefinements,
   statsQuerySchema,
   locationStatsQuerySchema,
   // Settings
@@ -396,6 +550,9 @@ export {
   jellystatBackupSchema,
   jellystatImportBodySchema,
   importJobStatusSchema,
+  // Playback Reporting import
+  playbackReportingImportSchema,
+  playbackReportingTestSchema,
   // Engagement tracking
   engagementTierSchema,
   userBehaviorTypeSchema,
@@ -421,9 +578,24 @@ export {
   libraryPatternsQuerySchema,
   libraryCompletionQuerySchema,
   topContentQuerySchema,
+  shelvesQuerySchema,
 } from './schemas.js';
 
+// Destination descriptors and schemas
+export {
+  DESTINATION_KINDS,
+  DESTINATION_TYPES,
+  NOTIFICATION_EVENT_TYPES,
+  SUBSCRIBABLE_EVENTS,
+  destinationConfigSchema,
+  notificationEventTypeSchema,
+  createDestinationSchema,
+  updateDestinationSchema,
+} from './destinations.js';
+
 // Schema input type exports
+export type { SubscribableEvent } from './destinations.js';
+
 export type {
   LoginInput,
   CallbackInput,
@@ -438,20 +610,17 @@ export type {
   HistoryQueryInput,
   HistoryAggregatesQueryInput,
   FilterOptionsQueryInput,
-  CreateRuleInput,
-  UpdateRuleInput,
-  // Rule V2 types
-  CreateRuleV2Input,
-  UpdateRuleV2Input,
   // Bulk operations types
-  BulkUpdateRulesInput,
-  BulkDeleteRulesInput,
-  BulkMigrateRulesInput,
-  ViolationQueryInput,
+  BulkUpdateAutomationsInput,
+  BulkDeleteAutomationsInput,
+  ViolationRosterFilters,
+  ViolationBulkBody,
   ViolationSortField,
   UserSortField,
+  UserRosterFilters,
   ServerIdFilterInput,
   DashboardQueryInput,
+  StatPeriod,
   StatsQueryInput,
   LocationStatsQueryInput,
   UpdateSettingsInput,
@@ -486,14 +655,21 @@ export type {
   LibraryPatternsQueryInput,
   LibraryCompletionQueryInput,
   TopContentQueryInput,
+  ShelvesQueryInput,
   // Session target type
   SessionTarget,
+  // Rule V2 action family
+  ActionType,
+  Action,
+  SendAction,
+  TrustAction,
+  KillStreamAction,
+  MessageClientAction,
+  AutomationActions,
 } from './schemas.js';
 
 // Constant exports
 export {
-  RULE_DEFAULTS,
-  RULE_DISPLAY_NAMES,
   IDENTITY_AWARE_CONDITION_FIELDS,
   SEVERITY_LEVELS,
   getSeverityPriority,
@@ -509,6 +685,8 @@ export {
   SIGN_UP_USERNAME_PATH,
   EMBY_SETUP_PATH,
   EMBY_LOGIN_PATH,
+  API_VERSION_V2,
+  API_V2_BASE_PATH,
   JWT_CONFIG,
   POLLING_INTERVALS,
   POLLER_CONFIG,
@@ -519,6 +697,7 @@ export {
   SESSION_LIMITS,
   SESSION_WRITE_RETRY,
   SERVER_STATS_CONFIG,
+  liveStatsRetentionSeconds,
   BANDWIDTH_STATS_CONFIG,
   // SSE
   SSE_CONFIG,
@@ -526,6 +705,7 @@ export {
   SSE_STATE,
   // Unit conversion
   UNIT_CONVERSION,
+  BYTES_PER_GB,
   kmToMiles,
   milesToKm,
   formatDistance,
@@ -548,6 +728,10 @@ export {
   // Timezone utilities
   getClientTimezone,
   isValidTimezone,
+  // Multi-version media
+  LEGACY_VERSION_SENTINEL,
+  // Poster cache
+  POSTER_IMAGE_SIZE,
 } from './constants.js';
 
 // Role helper exports
@@ -577,12 +761,43 @@ export {
 // Media display utilities
 export { formatEpisodeLabel, type FormatEpisodeLabelOptions } from './media.js';
 
+// Alphabet rail letters
+export { LETTER_RAIL_ALPHABET } from './catalogLetters.js';
+
+// List-query contract
+export { listSortSchema, listDateBoundSchema, listPageCount } from './listQuery.js';
+export type { ListMeta, ListResponse } from './listQuery.js';
+
 // Resolution classification
 export {
   RESOLUTION_TIERS,
   classifyByDimensions,
   normalizeResolutionLabel,
   resolutionTierRank,
+  resolutionBucket,
+  resolutionBucketSpellings,
+  resolutionAboveSdSpellings,
+  resolutionSpellingRanks,
   normalizeResolution,
   type ResolutionInput,
+  type ResolutionBucket,
 } from './resolution.js';
+
+// Dynamic range (HDR/SDR) classification
+export {
+  DYNAMIC_RANGE_SDR_TOKEN,
+  DYNAMIC_RANGE_TOKENS,
+  normalizeDynamicRange,
+  type DynamicRangeToken,
+} from './dynamicRange.js';
+
+// Server-scope selection (cache-key and query-param builders)
+export {
+  ALL_SERVERS,
+  serverScopeFromIds,
+  serverScopeKey,
+  serverScopeParamEntries,
+  type ServerScope,
+} from './serverScope.js';
+
+export { buildMediaServerItemUrl, type MediaServerItemLinkInput } from './mediaServerLinks.js';

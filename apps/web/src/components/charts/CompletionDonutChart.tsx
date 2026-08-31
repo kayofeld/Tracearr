@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import Highcharts from 'highcharts';
 import { HighchartsReact } from 'highcharts-react-official';
 import { ChartSkeleton } from '@/components/ui/skeleton';
-import { EmptyState } from '@/components/library';
+import { EmptyState } from '@/components/ui/empty-state';
 import { PieChart } from 'lucide-react';
 
 // Colorblind-friendly completion status colors

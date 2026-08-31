@@ -1,10 +1,16 @@
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Smartphone, Monitor, CheckCircle2, ArrowRightLeft, Users } from 'lucide-react';
 import { formatMediaTech } from '@tracearr/shared';
-import type { DeviceCompatibilityMatrix } from '@tracearr/shared';
+import type {
+  DeviceCompatibilityMatrix,
+  TopTranscodingUserRow,
+  TranscodeHotspotRow,
+} from '@tracearr/shared';
 import { Link } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { StatCard } from '@/components/ui/stat-card';
+import { EmptyState } from '@/components/ui/empty-state';
 import {
   Table,
   TableBody,
@@ -13,6 +19,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  createDataTableColumnHelper,
+  DataTableBody,
+  DataTableEmpty,
+  DataTableHeader,
+  DataTableRoot,
+  DataTableViewport,
+  useDataTable,
+} from '@/components/ui/data-table';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -52,11 +67,18 @@ function getProgressColor(pct: number): string {
   return 'bg-red-500';
 }
 
-function getProgressTextColor(pct: number): string {
-  if (pct >= 80) return 'text-green-600 dark:text-green-400';
-  if (pct >= 50) return 'text-yellow-600 dark:text-yellow-400';
-  return 'text-red-600 dark:text-red-400';
-}
+const hotspotColumn = createDataTableColumnHelper<TranscodeHotspotRow>();
+const transcodingUserColumn = createDataTableColumnHelper<TopTranscodingUserRow>();
+
+// The hotspots query groups by these four, so together they identify a row.
+const getHotspotRowId = (row: TranscodeHotspotRow) =>
+  `${row.serverId}-${row.device}-${row.videoCodec}-${row.audioCodec}`;
+
+const getTranscodingUserRowId = (row: TopTranscodingUserRow) =>
+  `${row.serverUserId}-${row.serverId}`;
+
+// Neither table renders a pager, so one page has to hold every row the endpoint returns.
+const UNPAGINATED_PAGE_SIZE = 100;
 
 // Inline matrix renderer driven by pre-fetched data (used by both single and per-server views).
 interface MatrixViewProps {
@@ -101,12 +123,7 @@ function MatrixView({ data, isLoading, error, onRetry }: MatrixViewProps) {
   }
 
   if (!data || sortedMatrixDevices.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed p-8 text-center">
-        <Monitor className="text-muted-foreground/50 mx-auto h-12 w-12" />
-        <p className="text-muted-foreground mt-2">{t('devices.noDeviceDataPeriod')}</p>
-      </div>
-    );
+    return <EmptyState icon={Monitor} title={t('devices.noDeviceDataPeriod')} className="py-8" />;
   }
 
   return (
@@ -205,8 +222,167 @@ export function StatsDevices() {
   const summary = compatibility.data?.summary;
 
   // Resolve a Server object by id from selectedServers; returns undefined when id is unknown.
-  const resolveServer = (serverId: string): Server | undefined =>
-    selectedServers.find((s) => s.id === serverId);
+  const resolveServer = useCallback(
+    (serverId: string): Server | undefined => selectedServers.find((s) => s.id === serverId),
+    [selectedServers]
+  );
+
+  const hotspotRows = useMemo(() => hotspots.data?.data.slice(0, 5), [hotspots.data]);
+
+  const hotspotColumns = useMemo(
+    () =>
+      hotspotColumn.columns([
+        hotspotColumn.accessor('device', {
+          header: t('devices.deviceAndCodec'),
+          enableSorting: false,
+          cell: ({ row }) => (
+            <>
+              <div className="font-medium">{row.original.device}</div>
+              <div className="text-muted-foreground text-xs">
+                {formatMediaTech(row.original.videoCodec)} +{' '}
+                {formatMediaTech(row.original.audioCodec)}
+              </div>
+            </>
+          ),
+        }),
+        ...(isMultiServer
+          ? [
+              hotspotColumn.display({
+                id: 'server',
+                header: t('common:labels.server'),
+                enableSorting: false,
+                cell: ({ row }) => {
+                  const server = resolveServer(row.original.serverId);
+                  return server ? <ServerColumnCell server={server} /> : null;
+                },
+              }),
+            ]
+          : []),
+        hotspotColumn.accessor('transcodeCount', {
+          header: t('devices.transcodes'),
+          enableSorting: false,
+          meta: { numeric: true, cellClassName: 'font-mono' },
+          cell: ({ row }) => row.original.transcodeCount.toLocaleString(),
+        }),
+        hotspotColumn.accessor('pctOfTotalTranscodes', {
+          header: t('devices.pctOfTotal'),
+          enableSorting: false,
+          meta: { numeric: true },
+          cell: ({ row }) => (
+            <Badge
+              variant="destructive"
+              className="border-orange-500/30 bg-orange-500/20 text-orange-600 dark:text-orange-400"
+            >
+              {row.original.pctOfTotalTranscodes}%
+            </Badge>
+          ),
+        }),
+      ]),
+    [t, isMultiServer, resolveServer]
+  );
+
+  const transcodingUserColumns = useMemo(
+    () =>
+      transcodingUserColumn.columns([
+        transcodingUserColumn.accessor('username', {
+          header: t('common:labels.user'),
+          enableSorting: false,
+          cell: ({ row }) => {
+            const user = row.original;
+            return (
+              <Link
+                to={`/users/${user.serverUserId}`}
+                className="flex items-center gap-3 hover:underline"
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarImage
+                    src={getAvatarUrl(user.serverId, user.avatar, 32) ?? undefined}
+                    alt={user.username}
+                  />
+                  <AvatarFallback>
+                    {(user.identityName ?? user.username).slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="font-medium">{user.identityName ?? user.username}</span>
+              </Link>
+            );
+          },
+        }),
+        ...(isMultiServer
+          ? [
+              transcodingUserColumn.display({
+                id: 'server',
+                header: t('common:labels.server'),
+                enableSorting: false,
+                cell: ({ row }) => {
+                  const server = resolveServer(row.original.serverId);
+                  return server ? <ServerColumnCell server={server} /> : null;
+                },
+              }),
+            ]
+          : []),
+        transcodingUserColumn.accessor('totalSessions', {
+          header: t('common:labels.sessions'),
+          enableSorting: false,
+          meta: { numeric: true, cellClassName: 'text-muted-foreground' },
+          cell: ({ row }) => row.original.totalSessions.toLocaleString(),
+        }),
+        transcodingUserColumn.accessor('directPlayPct', {
+          header: t('common:playback.directPlay'),
+          enableSorting: false,
+          meta: { numeric: true },
+          cell: ({ row }) => (
+            <Badge
+              variant="outline"
+              className={cn(
+                'border-transparent',
+                row.original.directPlayPct >= 80
+                  ? 'bg-green-500/20 text-green-600 dark:text-green-400'
+                  : row.original.directPlayPct >= 50
+                    ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400'
+                    : 'bg-red-500/20 text-red-600 dark:text-red-400'
+              )}
+            >
+              {row.original.directPlayPct}%
+            </Badge>
+          ),
+        }),
+        transcodingUserColumn.accessor('transcodeCount', {
+          header: t('devices.transcodes'),
+          enableSorting: false,
+          meta: { numeric: true, cellClassName: 'font-mono text-orange-600 dark:text-orange-400' },
+          cell: ({ row }) => row.original.transcodeCount.toLocaleString(),
+        }),
+        transcodingUserColumn.accessor('pctOfTotalTranscodes', {
+          header: t('devices.pctOfTotal'),
+          enableSorting: false,
+          meta: { numeric: true },
+          cell: ({ row }) => (
+            <Badge
+              variant="destructive"
+              className="border-orange-500/30 bg-orange-500/20 text-orange-600 dark:text-orange-400"
+            >
+              {row.original.pctOfTotalTranscodes}%
+            </Badge>
+          ),
+        }),
+      ]),
+    [t, isMultiServer, resolveServer]
+  );
+
+  const { table: hotspotsTable } = useDataTable<TranscodeHotspotRow>({
+    columns: hotspotColumns,
+    data: hotspotRows,
+    getRowId: getHotspotRowId,
+    pageSize: UNPAGINATED_PAGE_SIZE,
+  });
+
+  const { table: transcodingUsersTable } = useDataTable<TopTranscodingUserRow>({
+    columns: transcodingUserColumns,
+    data: topTranscodingUsers.data?.data,
+    getRowId: getTranscodingUserRowId,
+    pageSize: UNPAGINATED_PAGE_SIZE,
+  });
 
   return (
     <div className="space-y-6">
@@ -308,7 +484,7 @@ export function StatsDevices() {
                           <span
                             className={cn(
                               'font-semibold',
-                              getProgressTextColor(device.directPlayPct)
+                              getDirectPlayColor(device.directPlayPct)
                             )}
                           >
                             {device.directPlayPct}%
@@ -329,10 +505,7 @@ export function StatsDevices() {
                 })}
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed p-8 text-center">
-                <Monitor className="text-muted-foreground/50 mx-auto h-12 w-12" />
-                <p className="text-muted-foreground mt-2">{t('common:empty.noDeviceData')}</p>
-              </div>
+              <EmptyState icon={Monitor} title={t('common:empty.noDeviceData')} className="py-8" />
             )}
           </CardContent>
         </Card>
@@ -349,62 +522,24 @@ export function StatsDevices() {
                 message={hotspots.error?.message ?? t('common:errors.unexpectedError')}
                 onRetry={() => void hotspots.refetch()}
               />
-            ) : hotspots.isLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full" />
-                ))}
-              </div>
-            ) : hotspots.data && hotspots.data.data.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('devices.deviceAndCodec')}</TableHead>
-                    {isMultiServer && <TableHead>{t('common:labels.server')}</TableHead>}
-                    <TableHead className="text-right">{t('devices.transcodes')}</TableHead>
-                    <TableHead className="text-right">{t('devices.pctOfTotal')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {hotspots.data.data.slice(0, 5).map((hotspot, idx) => {
-                    const hotspotServer = resolveServer(hotspot.serverId);
-                    return (
-                      <TableRow
-                        key={`${hotspot.device}-${hotspot.videoCodec}-${hotspot.audioCodec}-${idx}`}
-                      >
-                        <TableCell>
-                          <div className="font-medium">{hotspot.device}</div>
-                          <div className="text-muted-foreground text-xs">
-                            {formatMediaTech(hotspot.videoCodec)} +{' '}
-                            {formatMediaTech(hotspot.audioCodec)}
-                          </div>
-                        </TableCell>
-                        {isMultiServer && (
-                          <TableCell>
-                            {hotspotServer && <ServerColumnCell server={hotspotServer} />}
-                          </TableCell>
-                        )}
-                        <TableCell className="text-right font-mono">
-                          {hotspot.transcodeCount.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge
-                            variant="destructive"
-                            className="border-orange-500/30 bg-orange-500/20 text-orange-600 dark:text-orange-400"
-                          >
-                            {hotspot.pctOfTotalTranscodes}%
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
             ) : (
-              <div className="rounded-xl border border-dashed p-8 text-center">
-                <CheckCircle2 className="mx-auto h-12 w-12 text-green-500/50" />
-                <p className="text-muted-foreground mt-2">{t('devices.noTranscodeHotspots')}</p>
-              </div>
+              <DataTableRoot density="compact">
+                <DataTableViewport>
+                  <DataTableHeader table={hotspotsTable} />
+                  <DataTableBody
+                    table={hotspotsTable}
+                    isLoading={hotspots.isLoading}
+                    loadingLabel={t('common:states.loading')}
+                    empty={
+                      <DataTableEmpty
+                        table={hotspotsTable}
+                        icon={CheckCircle2}
+                        title={t('devices.noTranscodeHotspots')}
+                      />
+                    }
+                  />
+                </DataTableViewport>
+              </DataTableRoot>
             )}
           </CardContent>
         </Card>
@@ -455,90 +590,24 @@ export function StatsDevices() {
               message={topTranscodingUsers.error?.message ?? t('common:errors.unexpectedError')}
               onRetry={() => void topTranscodingUsers.refetch()}
             />
-          ) : topTranscodingUsers.isLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : topTranscodingUsers.data && topTranscodingUsers.data.data.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('common:labels.user')}</TableHead>
-                  {isMultiServer && <TableHead>{t('common:labels.server')}</TableHead>}
-                  <TableHead className="text-right">{t('common:labels.sessions')}</TableHead>
-                  <TableHead className="text-right">{t('common:playback.directPlay')}</TableHead>
-                  <TableHead className="text-right">{t('devices.transcodes')}</TableHead>
-                  <TableHead className="text-right">{t('devices.pctOfTotal')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {topTranscodingUsers.data.data.map((user) => {
-                  const userServer = resolveServer(user.serverId);
-                  return (
-                    <TableRow key={`${user.serverUserId}-${user.serverId}`}>
-                      <TableCell>
-                        <Link
-                          to={`/users/${user.serverUserId}`}
-                          className="flex items-center gap-3 hover:underline"
-                        >
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage
-                              src={getAvatarUrl(user.serverId, user.avatar, 32) ?? undefined}
-                              alt={user.username}
-                            />
-                            <AvatarFallback>
-                              {(user.identityName ?? user.username).slice(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium">{user.identityName ?? user.username}</span>
-                        </Link>
-                      </TableCell>
-                      {isMultiServer && (
-                        <TableCell>
-                          {userServer && <ServerColumnCell server={userServer} />}
-                        </TableCell>
-                      )}
-                      <TableCell className="text-muted-foreground text-right">
-                        {user.totalSessions.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            'border-transparent',
-                            user.directPlayPct >= 80
-                              ? 'bg-green-500/20 text-green-600 dark:text-green-400'
-                              : user.directPlayPct >= 50
-                                ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400'
-                                : 'bg-red-500/20 text-red-600 dark:text-red-400'
-                          )}
-                        >
-                          {user.directPlayPct}%
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-orange-600 dark:text-orange-400">
-                        {user.transcodeCount.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Badge
-                          variant="destructive"
-                          className="border-orange-500/30 bg-orange-500/20 text-orange-600 dark:text-orange-400"
-                        >
-                          {user.pctOfTotalTranscodes}%
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
           ) : (
-            <div className="rounded-xl border border-dashed p-8 text-center">
-              <Users className="text-muted-foreground/50 mx-auto h-12 w-12" />
-              <p className="text-muted-foreground mt-2">{t('devices.noTranscodingUsers')}</p>
-            </div>
+            <DataTableRoot density="compact">
+              <DataTableViewport>
+                <DataTableHeader table={transcodingUsersTable} />
+                <DataTableBody
+                  table={transcodingUsersTable}
+                  isLoading={topTranscodingUsers.isLoading}
+                  loadingLabel={t('common:states.loading')}
+                  empty={
+                    <DataTableEmpty
+                      table={transcodingUsersTable}
+                      icon={Users}
+                      title={t('devices.noTranscodingUsers')}
+                    />
+                  }
+                />
+              </DataTableViewport>
+            </DataTableRoot>
           )}
         </CardContent>
       </Card>

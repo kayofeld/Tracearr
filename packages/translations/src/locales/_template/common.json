@@ -90,6 +90,18 @@
     "warning": "Warning",
     "high": "High"
   },
+  "trust": {
+    "trusted": "Trusted",
+    "caution": "Caution",
+    "untrusted": "Untrusted"
+  },
+  "tasks": {
+    "title": "Running Tasks",
+    "running": "Running",
+    "waiting": "Waiting",
+    "queued": "Queued",
+    "startedAgo": "Started {{time}}"
+  },
   "time": {
     "now": "Now",
     "today": "Today",
@@ -168,7 +180,21 @@
   "table": {
     "selectAllOnPage": "Select all on page",
     "selectRow": "Select row",
-    "selectAllTotal": "Select all {{total}} items"
+    "pageOf": "Page {{page}} of {{total}}",
+    "pagination": "Pagination"
+  },
+  "filters": {
+    "clearAll": "Clear all",
+    "done": "Done",
+    "remove": "Remove {{label}} filter",
+    "clearSearch": "Clear search",
+    "anyDate": "Any date",
+    "dateAfter": "After {{date}}",
+    "dateBefore": "Before {{date}}",
+    "dateBetween": "{{from}} to {{to}}",
+    "clearDates": "Clear date range",
+    "clearStartDate": "Clear start date",
+    "clearEndDate": "Clear end date"
   },
   "media": {
     "movie": "Movie",

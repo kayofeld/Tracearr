@@ -5,6 +5,7 @@
  * POST /plex/add-server - Add an additional Plex server
  * GET /plex/accounts - List linked Plex accounts
  * POST /plex/link-account - Link a new Plex account
+ * POST /plex/accounts/:id/reauthorize - Replace a linked account's Plex token
  * DELETE /plex/accounts/:id - Unlink a Plex account
  *
  * Plex login (initiate / check-pin / connect) lives in the Better Auth plugin
@@ -14,6 +15,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { eq, and, count, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { getPlexClientIdentifier } from '../../utils/http.js';
 import {
   REDIS_KEYS,
   type PlexAvailableServersResponse,
@@ -22,9 +24,14 @@ import {
   type PlexAccountsResponse,
   type LinkPlexAccountResponse,
   type UnlinkPlexAccountResponse,
+  type ReauthorizePlexAccountResponse,
+  type ReauthorizedServer,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { servers, serverUsers, plexAccounts } from '../../db/schema.js';
+import { invalidateServersCache } from '../../jobs/poller/database.js';
+import { reconcilePlexAccountToken } from '../../services/plexAccounts.js';
+import { sseManager } from '../../services/sseManager.js';
 import { PlexClient } from '../../services/mediaServer/index.js';
 import {
   testSingleConnection,
@@ -43,11 +50,11 @@ const plexAddServerSchema = z.object({
   accountId: z.uuid().optional(), // Which plex_account to use (optional for backwards compat)
 });
 
-const plexLinkAccountSchema = z.object({
+const plexPinBodySchema = z.object({
   pin: z.string().min(1),
 });
 
-const plexUnlinkAccountSchema = z.object({
+const plexAccountIdParamSchema = z.object({
   id: z.uuid(),
 });
 
@@ -57,6 +64,74 @@ const plexTestConnectionSchema = z.object({
   tempToken: z.string().optional(), // Set during signup before the user has a Tracearr account
   claimCode: z.string().optional(),
 });
+
+type PlexTokenSource =
+  | { kind: 'account'; token: string; accountRowId: string; plexTvAccountId: string }
+  | { kind: 'server'; token: string }
+  | { kind: 'account-not-found' }
+  | { kind: 'none' };
+
+/**
+ * Pick which Plex token to talk to plex.tv with.
+ *
+ * A linked account is preferred over a server's copy of a token: it is scoped
+ * to the user, it is the row that login and the refresh job keep current, and
+ * it carries the account ids a caller needs to attribute a new server. The
+ * server copy stays as a last resort for owners who log in with a password and
+ * added their servers by hand, who can legitimately have no linked account.
+ *
+ * Both fallbacks order by creation so the choice does not drift between calls.
+ */
+async function resolvePlexToken(userId: string, accountId?: string): Promise<PlexTokenSource> {
+  const accountColumns = {
+    id: plexAccounts.id,
+    plexToken: plexAccounts.plexToken,
+    plexAccountId: plexAccounts.plexAccountId,
+  };
+
+  if (accountId) {
+    const [account] = await db
+      .select(accountColumns)
+      .from(plexAccounts)
+      .where(and(eq(plexAccounts.id, accountId), eq(plexAccounts.userId, userId)))
+      .limit(1);
+
+    if (!account) return { kind: 'account-not-found' };
+    return {
+      kind: 'account',
+      token: account.plexToken,
+      accountRowId: account.id,
+      plexTvAccountId: account.plexAccountId,
+    };
+  }
+
+  const [oldestAccount] = await db
+    .select(accountColumns)
+    .from(plexAccounts)
+    .where(eq(plexAccounts.userId, userId))
+    .orderBy(plexAccounts.createdAt)
+    .limit(1);
+
+  if (oldestAccount) {
+    return {
+      kind: 'account',
+      token: oldestAccount.plexToken,
+      accountRowId: oldestAccount.id,
+      plexTvAccountId: oldestAccount.plexAccountId,
+    };
+  }
+
+  const [oldestServer] = await db
+    .select({ token: servers.token })
+    .from(servers)
+    .where(eq(servers.type, 'plex'))
+    .orderBy(servers.createdAt)
+    .limit(1);
+
+  if (oldestServer) return { kind: 'server', token: oldestServer.token };
+
+  return { kind: 'none' };
+}
 
 export const plexRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -68,7 +143,7 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
    *
    * Query params:
    * - accountId: Optional. If provided, uses the token from specified plex_account.
-   *              If not provided, falls back to first Plex server's token (legacy).
+   *              If not provided, resolvePlexToken picks one.
    */
   app.get(
     '/plex/available-servers',
@@ -88,44 +163,14 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
         return reply.unauthorized('User not found');
       }
 
-      let plexToken: string;
-
-      // If accountId provided, use that plex_account's token
-      if (accountId) {
-        const account = await db
-          .select({ plexToken: plexAccounts.plexToken })
-          .from(plexAccounts)
-          .where(and(eq(plexAccounts.id, accountId), eq(plexAccounts.userId, user.id)))
-          .limit(1);
-
-        if (account.length === 0) {
-          return reply.notFound('Plex account not found');
-        }
-        plexToken = account[0]!.plexToken;
-      } else {
-        // Legacy fallback: use first Plex server's token
-        const existingPlexServers = await db
-          .select({ token: servers.token })
-          .from(servers)
-          .where(eq(servers.type, 'plex'))
-          .limit(1);
-
-        if (existingPlexServers.length === 0) {
-          // No Plex servers connected - check if user has linked plex accounts
-          const userAccounts = await db
-            .select({ plexToken: plexAccounts.plexToken })
-            .from(plexAccounts)
-            .where(eq(plexAccounts.userId, user.id))
-            .limit(1);
-
-          if (userAccounts.length === 0) {
-            return { servers: [], hasPlexToken: false };
-          }
-          plexToken = userAccounts[0]!.plexToken;
-        } else {
-          plexToken = existingPlexServers[0]!.token;
-        }
+      const tokenSource = await resolvePlexToken(user.id, accountId);
+      if (tokenSource.kind === 'account-not-found') {
+        return reply.notFound('Plex account not found');
       }
+      if (tokenSource.kind === 'none') {
+        return { servers: [], hasPlexToken: false };
+      }
+      const plexToken = tokenSource.token;
 
       // Get all servers the user owns from plex.tv
       let allServers;
@@ -418,75 +463,24 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
       return reply.unauthorized('User not found');
     }
 
-    let plexToken: string;
-    let plexAccountId: string | undefined; // UUID of plex_accounts row
-    let plexTvAccountId: string | undefined; // Actual plex.tv account ID
-
-    // If accountId provided, use that plex_account's token
-    if (accountId) {
-      const account = await db
-        .select({
-          id: plexAccounts.id,
-          plexToken: plexAccounts.plexToken,
-          plexAccountId: plexAccounts.plexAccountId,
-        })
-        .from(plexAccounts)
-        .where(and(eq(plexAccounts.id, accountId), eq(plexAccounts.userId, user.id)))
-        .limit(1);
-
-      if (account.length === 0) {
-        return reply.notFound('Plex account not found');
-      }
-      plexToken = account[0]!.plexToken;
-      plexAccountId = account[0]!.id;
-      plexTvAccountId = account[0]!.plexAccountId;
-    } else {
-      // Legacy fallback: use first Plex server's token and account linkage
-      const existingPlexServer = await db
-        .select({ token: servers.token, plexAccountId: servers.plexAccountId })
-        .from(servers)
-        .where(eq(servers.type, 'plex'))
-        .limit(1);
-
-      if (existingPlexServer.length === 0) {
-        // Check if user has linked plex accounts
-        const userAccounts = await db
-          .select({
-            id: plexAccounts.id,
-            plexToken: plexAccounts.plexToken,
-            plexAccountId: plexAccounts.plexAccountId,
-          })
-          .from(plexAccounts)
-          .where(eq(plexAccounts.userId, user.id))
-          .limit(1);
-
-        if (userAccounts.length === 0) {
-          return reply.badRequest('No Plex accounts linked. Please link your Plex account first.');
-        }
-        plexToken = userAccounts[0]!.plexToken;
-        plexAccountId = userAccounts[0]!.id;
-        plexTvAccountId = userAccounts[0]!.plexAccountId;
-      } else {
-        plexToken = existingPlexServer[0]!.token;
-        // Also inherit the plexAccountId from the existing server if available
-        plexAccountId = existingPlexServer[0]!.plexAccountId ?? undefined;
-        // Get the plex.tv ID from the linked plex_account
-        if (plexAccountId) {
-          const linkedAccount = await db
-            .select({ plexAccountId: plexAccounts.plexAccountId })
-            .from(plexAccounts)
-            .where(eq(plexAccounts.id, plexAccountId))
-            .limit(1);
-          plexTvAccountId = linkedAccount[0]?.plexAccountId;
-        }
-      }
+    const tokenSource = await resolvePlexToken(user.id, accountId);
+    if (tokenSource.kind === 'account-not-found') {
+      return reply.notFound('Plex account not found');
     }
+    if (tokenSource.kind === 'none') {
+      return reply.badRequest('No Plex accounts linked. Please link your Plex account first.');
+    }
+
+    const plexToken = tokenSource.token;
+    const plexAccountId = tokenSource.kind === 'account' ? tokenSource.accountRowId : undefined;
+    const plexTvAccountId =
+      tokenSource.kind === 'account' ? tokenSource.plexTvAccountId : undefined;
 
     // Check if server already exists (by machineIdentifier or URL)
     const existing = await db
       .select({ id: servers.id })
       .from(servers)
-      .where(eq(servers.machineIdentifier, clientIdentifier))
+      .where(and(eq(servers.type, 'plex'), eq(servers.machineIdentifier, clientIdentifier)))
       .limit(1);
 
     if (existing.length > 0) {
@@ -527,6 +521,7 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
           plexAccountId: plexAccountId, // Link to plex_account if available
         })
         .returning();
+      invalidateServersCache();
 
       if (!newServer) {
         return reply.internalServerError('Failed to create server');
@@ -654,6 +649,7 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
                 .update(servers)
                 .set({ plexAccountId: matchingAccount.id })
                 .where(eq(servers.id, server.id));
+              invalidateServersCache();
               app.log.info(
                 { serverId: server.id, accountId: matchingAccount.id },
                 'Auto-linked orphaned Plex server to account'
@@ -701,6 +697,7 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
           serverCount: a.serverCount,
           createdAt: a.createdAt,
         })),
+        clientIdentifier: getPlexClientIdentifier(),
       };
     }
   );
@@ -715,7 +712,7 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
     '/plex/link-account',
     { preHandler: [app.authenticate] },
     async (request, reply): Promise<LinkPlexAccountResponse> => {
-      const body = plexLinkAccountSchema.safeParse(request.body);
+      const body = plexPinBodySchema.safeParse(request.body);
       if (!body.success) {
         return reply.badRequest('pin is required');
       }
@@ -799,6 +796,142 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
   );
 
   /**
+   * POST /plex/accounts/:id/reauthorize - Replace a linked account's Plex token
+   *
+   * A password change with "sign out of all devices" revokes every token, and
+   * before this the only way back was deleting the server and its history.
+   */
+  app.post(
+    '/plex/accounts/:id/reauthorize',
+    { preHandler: [app.authenticate] },
+    async (request, reply): Promise<ReauthorizePlexAccountResponse> => {
+      const params = plexAccountIdParamSchema.safeParse(request.params);
+      if (!params.success) {
+        return reply.badRequest('Invalid account ID');
+      }
+
+      const body = plexPinBodySchema.safeParse(request.body);
+      if (!body.success) {
+        return reply.badRequest('pin is required');
+      }
+
+      const { id } = params.data;
+      const { pin } = body.data;
+      const authUser = request.user;
+
+      if (authUser.role !== 'owner') {
+        return reply.forbidden('Only server owners can reauthorize Plex accounts');
+      }
+
+      const user = await getUserById(authUser.userId);
+      if (!user) {
+        return reply.unauthorized('User not found');
+      }
+
+      const [account] = await db
+        .select()
+        .from(plexAccounts)
+        .where(and(eq(plexAccounts.id, id), eq(plexAccounts.userId, user.id)))
+        .limit(1);
+
+      if (!account) {
+        return reply.notFound('Plex account not found');
+      }
+
+      let authResult;
+      try {
+        authResult = await PlexClient.checkOAuthPin(pin);
+      } catch (error) {
+        app.log.error({ err: error, accountId: id }, 'Plex PIN check failed during reauthorize');
+        return reply.internalServerError('Failed to reauthorize Plex account');
+      }
+
+      if (!authResult) {
+        return reply.badRequest('PIN not yet authorized or expired');
+      }
+
+      // Addressed by Tracearr id, so the unique constraint on plex_account_id
+      // never sees this write; without the check, a PIN authorized by any other
+      // Plex user would repoint the owner's servers at that user's token.
+      if (authResult.id !== account.plexAccountId) {
+        const expected = account.plexUsername ?? account.plexEmail ?? 'the linked account';
+        return reply.conflict(
+          `That Plex sign-in was for a different account. Sign in as ${expected} to reauthorize it.`
+        );
+      }
+
+      const { reconciled, unmatched } = await reconcilePlexAccountToken(account, authResult, {
+        debug: (obj, msg) => app.log.debug(obj, msg),
+        warn: (obj, msg) => app.log.warn(obj, msg),
+      });
+
+      // refresh() re-adds any connection whose stored token no longer matches,
+      // so it carries the new token in without dropping anything first.
+      if (reconciled.length > 0) {
+        sseManager.refresh().catch((error: unknown) => {
+          app.log.error({ err: error }, 'SSE refresh failed after Plex reauthorization');
+        });
+      }
+
+      const verified: ReauthorizedServer[] = await Promise.all(
+        reconciled.map(async (server) => {
+          let ok = false;
+          try {
+            const adminCheck = await PlexClient.verifyServerAdmin(authResult.token, server.url);
+            ok = adminCheck.success;
+          } catch (error) {
+            app.log.debug(
+              { err: error, serverId: server.id },
+              'Server verification failed after reauthorization'
+            );
+          }
+          return { id: server.id, name: server.name, status: server.status, ok };
+        })
+      );
+
+      const results: ReauthorizedServer[] = [
+        ...verified,
+        ...unmatched.map((s): ReauthorizedServer => ({
+          id: s.id,
+          name: s.name,
+          status: 'unmatched',
+          ok: false,
+        })),
+      ];
+
+      app.log.info(
+        {
+          userId: user.id,
+          accountId: account.id,
+          refreshed: verified.filter((s) => s.status === 'refreshed').length,
+          adopted: verified.filter((s) => s.status === 'adopted').length,
+          unmatched: unmatched.length,
+        },
+        'Plex account reauthorized'
+      );
+
+      const [serverCount] = await db
+        .select({ count: count() })
+        .from(servers)
+        .where(eq(servers.plexAccountId, account.id));
+
+      return {
+        account: {
+          id: account.id,
+          plexAccountId: account.plexAccountId,
+          plexUsername: authResult.username,
+          plexEmail: authResult.email,
+          plexThumbnail: authResult.thumb,
+          allowLogin: account.allowLogin,
+          serverCount: serverCount?.count ?? 0,
+          createdAt: account.createdAt,
+        },
+        servers: results,
+      };
+    }
+  );
+
+  /**
    * DELETE /plex/accounts/:id - Unlink a Plex account
    *
    * Removes a linked Plex account. Cannot unlink if:
@@ -809,7 +942,7 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
     '/plex/accounts/:id',
     { preHandler: [app.authenticate] },
     async (request, reply): Promise<UnlinkPlexAccountResponse> => {
-      const params = plexUnlinkAccountSchema.safeParse(request.params);
+      const params = plexAccountIdParamSchema.safeParse(request.params);
       if (!params.success) {
         return reply.badRequest('Invalid account ID');
       }

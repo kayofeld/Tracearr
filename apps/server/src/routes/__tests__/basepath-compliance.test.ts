@@ -88,47 +88,6 @@ describe('frontend: no hardcoded fetch URLs', () => {
 });
 
 // ==========================================================================
-// Frontend: notification agent imagePaths use BASE_URL
-// ==========================================================================
-describe('frontend: notification agent imagePaths use BASE_URL', () => {
-  const agentConfigPath = resolve(
-    WEB_SRC,
-    'components/settings/notification-agents/agent-config.ts'
-  );
-
-  it('agent-config.ts exists', () => {
-    expect(() => readFileSync(agentConfigPath, 'utf-8')).not.toThrow();
-  });
-
-  it('all imagePath values use BASE_URL prefix', () => {
-    const content = readFileSync(agentConfigPath, 'utf-8');
-
-    // Extract all imagePath assignments
-    const imagePathPattern = /imagePath:\s*(.+),/g;
-    const matches = [...content.matchAll(imagePathPattern)];
-
-    // There should be at least a few agents with images
-    expect(matches.length).toBeGreaterThanOrEqual(3);
-
-    const violations: string[] = [];
-    for (const match of matches) {
-      const value = match[1]!.trim();
-      // Must be a template literal using BASE_URL
-      if (!value.includes('BASE_URL')) {
-        violations.push(`imagePath value does not use BASE_URL: ${value}`);
-      }
-    }
-
-    expect(violations).toEqual([]);
-  });
-
-  it('imports BASE_URL from basePath module', () => {
-    const content = readFileSync(agentConfigPath, 'utf-8');
-    expect(content).toMatch(/import\s*\{[^}]*BASE_URL[^}]*\}\s*from\s*['"]@\/lib\/basePath['"]/);
-  });
-});
-
-// ==========================================================================
 // Frontend: BASE_URL usage must not add leading slash (causes // bug)
 // ==========================================================================
 describe('frontend: BASE_URL paths must not start with /', () => {

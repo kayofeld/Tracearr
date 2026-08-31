@@ -1,4 +1,5 @@
 import { Film, Tv, Music, Radio } from 'lucide-react';
+import { POSTER_IMAGE_SIZE } from '@tracearr/shared';
 import { cn } from '@/lib/utils';
 import { imageProxyUrl } from '@/lib/api';
 
@@ -37,8 +38,8 @@ function MediaIcon({ type, className }: { type: string; className?: string }) {
 function getImageUrl(
   serverId: string | null | undefined,
   thumbPath: string | null | undefined,
-  width = 150,
-  height = 225
+  width: number = POSTER_IMAGE_SIZE.width,
+  height: number = POSTER_IMAGE_SIZE.height
 ) {
   if (!serverId || !thumbPath) return null;
   return imageProxyUrl(serverId, thumbPath, width, height, 'poster');

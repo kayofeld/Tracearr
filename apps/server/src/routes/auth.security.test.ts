@@ -38,6 +38,8 @@ import {
   generateWrongSecretToken,
 } from '../test/helpers.js';
 
+const mockRedisGet = vi.fn<(key: string) => Promise<string | null>>().mockResolvedValue(null);
+
 describe('Auth Security', () => {
   let app: FastifyInstance;
 
@@ -45,6 +47,7 @@ describe('Auth Security', () => {
     app = Fastify({ logger: false });
     await app.register(sensible);
     await app.register(cookie, { secret: 'test-cookie-secret' });
+    app.decorate('redis', { get: mockRedisGet, set: vi.fn(), del: vi.fn() } as never);
     await app.register(authPlugin);
 
     // Add a protected test route that requires authentication
@@ -66,6 +69,8 @@ describe('Auth Security', () => {
     vi.mocked(getAuth).mockReturnValue({
       api: { getSession: vi.fn().mockResolvedValue(null) },
     } as unknown as ReturnType<typeof getAuth>);
+    mockRedisGet.mockReset();
+    mockRedisGet.mockResolvedValue(null);
   });
 
   afterAll(async () => {
@@ -275,6 +280,78 @@ describe('Auth Security', () => {
       expect(JSON.stringify(body)).not.toContain('at Object');
       expect(JSON.stringify(body)).not.toContain('.ts:');
       expect(JSON.stringify(body)).not.toContain('JWT_SECRET');
+    });
+  });
+
+  describe('Mobile Device Revocation', () => {
+    it('rejects a blacklisted device on an authenticate route', async () => {
+      mockRedisGet.mockImplementation((key: string) =>
+        Promise.resolve(key.includes('device-abc') ? '1' : null)
+      );
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/test/protected',
+        headers: {
+          Authorization: `Bearer ${generateTestToken(
+            app,
+            createOwnerPayload({ mobile: true, deviceId: 'device-abc' })
+          )}`,
+        },
+      });
+
+      expect(res.statusCode).toBe(401);
+      expect(res.json().message).toContain('revoked');
+    });
+
+    it('rejects a blacklisted device on an owner-only route', async () => {
+      mockRedisGet.mockImplementation((key: string) =>
+        Promise.resolve(key.includes('device-abc') ? '1' : null)
+      );
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/test/owner-only',
+        headers: {
+          Authorization: `Bearer ${generateTestToken(
+            app,
+            createOwnerPayload({ mobile: true, deviceId: 'device-abc' })
+          )}`,
+        },
+      });
+
+      expect(res.statusCode).toBe(401);
+      expect(res.json().message).toContain('revoked');
+    });
+
+    it('allows a mobile device that has not been revoked', async () => {
+      mockRedisGet.mockResolvedValue(null);
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/test/protected',
+        headers: {
+          Authorization: `Bearer ${generateTestToken(
+            app,
+            createOwnerPayload({ mobile: true, deviceId: 'device-ok' })
+          )}`,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('does not consult the blacklist for a non-mobile token', async () => {
+      mockRedisGet.mockResolvedValue(null);
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/test/protected',
+        headers: { Authorization: `Bearer ${generateTestToken(app, createOwnerPayload())}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(mockRedisGet).not.toHaveBeenCalled();
     });
   });
 });

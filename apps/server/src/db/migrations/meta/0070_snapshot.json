@@ -1,6 +1,6 @@
 {
-  "id": "f639ecde-a005-41fc-b435-5d95e9fffb04",
-  "prevId": "7730236f-3bfe-4b2a-8ca9-b16be420fe2d",
+  "id": "137f7ac4-a030-4ce6-bc1a-dd897e49d938",
+  "prevId": "1aadbe75-b923-436f-98fa-d9b3037897b1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -297,96 +297,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.libraries": {
-      "name": "libraries",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "server_id": {
-          "name": "server_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "library_id": {
-          "name": "library_id",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "libraries_server_library_unique": {
-          "name": "libraries_server_library_unique",
-          "columns": [
-            {
-              "expression": "server_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "library_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "libraries_server_id_servers_id_fk": {
-          "name": "libraries_server_id_servers_id_fk",
-          "tableFrom": "libraries",
-          "tableTo": "servers",
-          "columnsFrom": ["server_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.library_items": {
       "name": "library_items",
       "schema": "",
@@ -521,6 +431,36 @@
         "item_index": {
           "name": "item_index",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "media_id": {
+          "name": "media_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "genres": {
+          "name": "genres",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "removed_at": {
+          "name": "removed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "thumb_path": {
+          "name": "thumb_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dominant_color": {
+          "name": "dominant_color",
+          "type": "varchar(7)",
           "primaryKey": false,
           "notNull": false
         },
@@ -685,6 +625,97 @@
           "isUnique": false,
           "concurrently": false,
           "method": "gin",
+          "with": {}
+        },
+        "idx_library_items_media": {
+          "name": "idx_library_items_media",
+          "columns": [
+            {
+              "expression": "media_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_library_items_removed": {
+          "name": "idx_library_items_removed",
+          "columns": [
+            {
+              "expression": "removed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"library_items\".\"removed_at\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_library_items_added_active": {
+          "name": "idx_library_items_added_active",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"library_items\".\"removed_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_library_items_type_added_active": {
+          "name": "idx_library_items_type_added_active",
+          "columns": [
+            {
+              "expression": "media_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"library_items\".\"removed_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_library_items_resolution_active": {
+          "name": "idx_library_items_resolution_active",
+          "columns": [
+            {
+              "expression": "video_resolution",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"library_items\".\"removed_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
           "with": {}
         }
       },
@@ -868,7 +899,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -906,74 +937,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.media_request_user_mappings": {
-      "name": "media_request_user_mappings",
-      "schema": "",
-      "columns": {
-        "source": {
-          "name": "source",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_user_id": {
-          "name": "source_user_id",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_username": {
-          "name": "source_username",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "media_request_user_mappings_user_id_users_id_fk": {
-          "name": "media_request_user_mappings_user_id_users_id_fk",
-          "tableFrom": "media_request_user_mappings",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "media_request_user_mappings_pk": {
-          "name": "media_request_user_mappings_pk",
-          "columns": ["source", "source_user_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.media_requests": {
-      "name": "media_requests",
+    "public.media": {
+      "name": "media",
       "schema": "",
       "columns": {
         "id": {
@@ -983,41 +948,17 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "source": {
-          "name": "source",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_request_id": {
-          "name": "source_request_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_parent_request_id": {
-          "name": "source_parent_request_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "media_type": {
           "name": "media_type",
-          "type": "varchar(10)",
+          "type": "varchar(20)",
           "primaryKey": false,
           "notNull": true
         },
-        "title": {
-          "name": "title",
-          "type": "varchar(500)",
+        "match_key": {
+          "name": "match_key",
+          "type": "text",
           "primaryKey": false,
-          "notNull": false
-        },
-        "release_year": {
-          "name": "release_year",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "imdb_id": {
           "name": "imdb_id",
@@ -1037,78 +978,53 @@
           "primaryKey": false,
           "notNull": false
         },
-        "seasons": {
-          "name": "seasons",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_4k": {
-          "name": "is_4k",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "status": {
-          "name": "status",
-          "type": "varchar(20)",
+        "title": {
+          "name": "title",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "requested_at": {
-          "name": "requested_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "available_at": {
-          "name": "available_at",
-          "type": "timestamp with time zone",
+        "normalized_title": {
+          "name": "normalized_title",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "source_user_id": {
-          "name": "source_user_id",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_username": {
-          "name": "source_username",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_alias": {
-          "name": "source_alias",
-          "type": "varchar(255)",
+        "year": {
+          "name": "year",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
-        "source_external_user_id": {
-          "name": "source_external_user_id",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "user_id": {
-          "name": "user_id",
+        "parent_media_id": {
+          "name": "parent_media_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
-        "match_method": {
-          "name": "match_method",
-          "type": "varchar(20)",
+        "show_media_id": {
+          "name": "show_media_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
-        "synced_at": {
-          "name": "synced_at",
+        "genres": {
+          "name": "genres",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "merged_into_id": {
+          "name": "merged_into_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "latest_added_at": {
+          "name": "latest_added_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -1126,23 +1042,11 @@
         }
       },
       "indexes": {
-        "media_requests_source_media_type_request_id_unique": {
-          "name": "media_requests_source_media_type_request_id_unique",
+        "media_match_key_unique": {
+          "name": "media_match_key_unique",
           "columns": [
             {
-              "expression": "source",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "media_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "source_request_id",
+              "expression": "match_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1153,60 +1057,15 @@
           "method": "btree",
           "with": {}
         },
-        "media_requests_user_id_idx": {
-          "name": "media_requests_user_id_idx",
+        "idx_media_type_imdb": {
+          "name": "idx_media_type_imdb",
           "columns": [
             {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "media_requests_source_user_id_idx": {
-          "name": "media_requests_source_user_id_idx",
-          "columns": [
-            {
-              "expression": "source",
+              "expression": "media_type",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
-            {
-              "expression": "source_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "media_requests_requested_at_idx": {
-          "name": "media_requests_requested_at_idx",
-          "columns": [
-            {
-              "expression": "requested_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "media_requests_imdb_partial": {
-          "name": "media_requests_imdb_partial",
-          "columns": [
             {
               "expression": "imdb_id",
               "isExpression": false,
@@ -1215,14 +1074,20 @@
             }
           ],
           "isUnique": false,
-          "where": "\"media_requests\".\"imdb_id\" IS NOT NULL",
+          "where": "\"media\".\"imdb_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "media_requests_tmdb_partial": {
-          "name": "media_requests_tmdb_partial",
+        "idx_media_type_tmdb": {
+          "name": "idx_media_type_tmdb",
           "columns": [
+            {
+              "expression": "media_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "tmdb_id",
               "isExpression": false,
@@ -1231,14 +1096,20 @@
             }
           ],
           "isUnique": false,
-          "where": "\"media_requests\".\"tmdb_id\" IS NOT NULL",
+          "where": "\"media\".\"tmdb_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "media_requests_tvdb_partial": {
-          "name": "media_requests_tvdb_partial",
+        "idx_media_type_tvdb": {
+          "name": "idx_media_type_tvdb",
           "columns": [
+            {
+              "expression": "media_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "tvdb_id",
               "isExpression": false,
@@ -1247,23 +1118,157 @@
             }
           ],
           "isUnique": false,
-          "where": "\"media_requests\".\"tvdb_id\" IS NOT NULL",
+          "where": "\"media\".\"tvdb_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_media_type_title_year": {
+          "name": "idx_media_type_title_year",
+          "columns": [
+            {
+              "expression": "media_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "normalized_title",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "year",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_media_show": {
+          "name": "idx_media_show",
+          "columns": [
+            {
+              "expression": "show_media_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_media_parent": {
+          "name": "idx_media_parent",
+          "columns": [
+            {
+              "expression": "parent_media_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_media_merged_into": {
+          "name": "idx_media_merged_into",
+          "columns": [
+            {
+              "expression": "merged_into_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"media\".\"merged_into_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_media_type_added_active": {
+          "name": "idx_media_type_added_active",
+          "columns": [
+            {
+              "expression": "media_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "latest_added_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"media\".\"merged_into_id\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_media_title_trgm": {
+          "name": "idx_media_title_trgm",
+          "columns": [
+            {
+              "expression": "\"normalized_title\" gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "idx_media_type_title_id": {
+          "name": "idx_media_type_title_id",
+          "columns": [
+            {
+              "expression": "media_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "normalized_title",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"media\".\"merged_into_id\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
-      "foreignKeys": {
-        "media_requests_user_id_users_id_fk": {
-          "name": "media_requests_user_id_users_id_fk",
-          "tableFrom": "media_requests",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -2636,22 +2641,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "servers_single_emby": {
-          "name": "servers_single_emby",
-          "columns": [
-            {
-              "expression": "type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "type = 'emby'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {},
@@ -2747,6 +2736,48 @@
         "rating_key": {
           "name": "rating_key",
           "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_rating_key": {
+          "name": "parent_rating_key",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grandparent_rating_key": {
+          "name": "grandparent_rating_key",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "media_id": {
+          "name": "media_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "show_media_id": {
+          "name": "show_media_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "imdb_id": {
+          "name": "imdb_id",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tmdb_id": {
+          "name": "tmdb_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tvdb_id": {
+          "name": "tvdb_id",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -3405,6 +3436,48 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "sessions_media_idx": {
+          "name": "sessions_media_idx",
+          "columns": [
+            {
+              "expression": "media_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sessions_show_media_idx": {
+          "name": "sessions_show_media_idx",
+          "columns": [
+            {
+              "expression": "show_media_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -4015,22 +4088,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "users_single_owner": {
-          "name": "users_single_owner",
-          "columns": [
-            {
-              "expression": "role",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "role = 'owner'",
           "concurrently": false,
           "method": "btree",
           "with": {}

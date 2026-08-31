@@ -8,6 +8,11 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["scripts/cli.ts", "scripts/reset-password.ts", "scripts/lib/**/*"],
+  "include": [
+    "scripts/cli.ts",
+    "scripts/reset-password.ts",
+    "scripts/imageCacheSweepScale.ts",
+    "scripts/lib/**/*"
+  ],
   "exclude": ["node_modules", "dist", "scripts/__tests__"]
 }

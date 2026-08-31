@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Échec de la mise à jour de l'agent",
       "apiKeyGenerateFailed": "Échec de la génération de la clé API",
       "authFailed": "Échec de l'authentification",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
       "clipboardFailed": "Échec de la copie dans le presse-papiers",
       "copyFailed": "Impossible de copier dans le presse-papiers",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
       "deviceRemoveFailed": "Échec de la suppression de l'appareil",
       "deviceRenameFailed": "Échec du renommage de l'appareil",
       "dismissFailed": "Échec de l'ignorance de la violation",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "Les URL plex.direct sont des adresses de relai qui ne peuvent pas être utilisées ici. Veuillez utiliser une adresse IP directe ou un nom d’hôte à la place.",
+      "plexReauthorizeFailed": "",
       "plexUnlinkFailed": "Échec de la dissociation du compte Plex",
       "routingUpdateFailed": "Échec de la mise à jour du routage",
       "ruleCreateFailed": "Échec de la création de la règle",
@@ -93,7 +101,7 @@
       "serverSyncFailed": "Échec de la synchronisation du serveur",
       "serverUpdateFailed": "Échec de la mise à jour du serveur",
       "serverUrlUpdateFailed": "Échec de la mise à jour de l'URL du serveur",
-      "serverUserSplitFailed": "Failed to split account",
+      "serverUserSplitFailed": "Échec de la séparation du compte",
       "sessionsDeleteFailed": "Échec de la suppression des sessions",
       "sessionsRevokeFailed": "Échec de la révocation des sessions",
       "settingsUpdateFailed": "Échec de la mise à jour des réglages",
@@ -101,7 +109,7 @@
       "trustScoresResetFailed": "Échec de la réinitialisation des scores de confiance",
       "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
       "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
-      "userMergeFailed": "Failed to merge users",
+      "userMergeFailed": "Échec de la fusion des utilisateurs",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Échec du test du webhook"
     },
@@ -148,6 +156,18 @@
         "message": "Votre nouvelle clé API est prête à être utilisée",
         "title": "Clé API générée"
       },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
+      },
       "claimCodeValidated": {
         "message": "Vous pouvez maintenant procéder à la configuration",
         "title": "Code de réclamation validé"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Copié dans le presse-papiers"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
         "message": "L'appareil a bien été déconnecté",
         "title": "Appareil supprimé"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "Vous pouvez maintenant ajouter des serveurs depuis votre compte Plex",
         "title": "Compte Plex lié"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
         "message": "Votre compte Plex a été déconnecté",
@@ -245,7 +276,7 @@
         "title": "URL du serveur mise à jour"
       },
       "serverUserSplit": {
-        "title": "Account split into a separate user"
+        "title": "Compte séparé en un utilisateur distinct"
       },
       "sessionsDeleted": {
         "message_one": "{{count}} session supprimée",
@@ -283,8 +314,9 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
-        "title": "Users merged"
+        "title": "Utilisateurs fusionnés"
       },
       "usersRemoved": {
         "message_one": "{{count}} user removed from the roster",

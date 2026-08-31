@@ -143,11 +143,7 @@ function BackupCard({ onRestore }: { onRestore: (backup: BackupListItem) => void
               onClick={() => createMutation.mutate()}
               disabled={createMutation.isPending || uploadMutation.isPending}
             >
-              {createMutation.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Archive className="mr-2 h-4 w-4" />
-              )}
+              {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Archive />}
               {createMutation.isPending ? t('backup.creating') : t('backup.createBackup')}
             </Button>
 
@@ -164,7 +160,7 @@ function BackupCard({ onRestore }: { onRestore: (backup: BackupListItem) => void
               disabled={createMutation.isPending || uploadMutation.isPending}
             >
               {uploadMutation.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="animate-spin" />
               ) : (
                 <Upload className="mr-2 h-4 w-4" />
               )}
@@ -274,7 +270,7 @@ function BackupCard({ onRestore }: { onRestore: (backup: BackupListItem) => void
 // Restore Card — Shown when user selects a backup to restore
 // ============================================================================
 
-function RestoreCard({ backup, onClose }: { backup: BackupListItem; onClose: () => void }) {
+export function RestoreCard({ backup, onClose }: { backup: BackupListItem; onClose: () => void }) {
   const { t } = useTranslation(['settings', 'common']);
   const [confirmed, setConfirmed] = useState(false);
   const { restore: restoreProgress } = useMaintenanceMode();
@@ -347,8 +343,14 @@ function RestoreCard({ backup, onClose }: { backup: BackupListItem; onClose: () 
           <dd>{backup.metadata.counts.users.toLocaleString()}</dd>
           <dt className="text-muted-foreground">{t('backup.restore.servers')}</dt>
           <dd>{backup.metadata.counts.servers.toLocaleString()}</dd>
-          <dt className="text-muted-foreground">{t('backup.restore.rules')}</dt>
-          <dd>{backup.metadata.counts.rules.toLocaleString()}</dd>
+          <dt className="text-muted-foreground">{t('backup.restore.automations')}</dt>
+          <dd>
+            {(
+              backup.metadata.counts.automations ??
+              backup.metadata.counts.rules ??
+              0
+            ).toLocaleString()}
+          </dd>
           <dt className="text-muted-foreground">{t('backup.restore.libraryItems')}</dt>
           <dd>{backup.metadata.counts.libraryItems.toLocaleString()}</dd>
           <dt className="text-muted-foreground">{t('backup.restore.tables')}</dt>
@@ -472,7 +474,7 @@ function RestoreCard({ backup, onClose }: { backup: BackupListItem; onClose: () 
                 disabled={!confirmed || !canStartRestore || restoreMutation.isPending}
                 variant="destructive"
               >
-                {restoreMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {restoreMutation.isPending && <Loader2 className="animate-spin" />}
                 {t('backup.restore.confirm')}
               </Button>
               <Button variant="outline" onClick={onClose}>
@@ -698,7 +700,7 @@ export function BackupSettings() {
     return (
       <div className="space-y-6">
         <Button variant="ghost" size="sm" onClick={() => setRestoreTarget(null)}>
-          <ArrowLeft className="mr-1 h-4 w-4" />
+          <ArrowLeft />
           {t('backup.backToBackups')}
         </Button>
         <RestoreCard backup={restoreTarget} onClose={() => setRestoreTarget(null)} />

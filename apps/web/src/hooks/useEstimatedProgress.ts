@@ -4,8 +4,8 @@ import type { ActiveSession } from '@tracearr/shared';
 /**
  * Hook that estimates playback progress client-side for smooth UI updates.
  *
- * NOTE: This hook is duplicated in apps/mobile/src/hooks/useEstimatedProgress.ts
- * Keep both files in sync when making changes.
+ * NOTE: This hook is duplicated in the mobile repo (Tracearr/Mobile-App,
+ * src/hooks/useEstimatedProgress.ts). Keep both files in sync when making changes.
  *
  * When state is "playing", progress increments every second based on elapsed time.
  * When state is "paused" or "stopped", progress stays at last known value.

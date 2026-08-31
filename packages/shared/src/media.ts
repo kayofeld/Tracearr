@@ -7,6 +7,8 @@ export interface FormatEpisodeLabelOptions {
   mediaType?: string | null;
   /** Use "S01 E02" instead of the default "S01E02". */
   spaced?: boolean;
+  /** Sits between the halves, e.g. " · " for "S01 · E02". Wins over `spaced`. */
+  separator?: string;
 }
 
 /**
@@ -24,5 +26,6 @@ export function formatEpisodeLabel(
 
   const season = String(seasonNumber).padStart(2, '0');
   const episode = String(episodeNumber).padStart(2, '0');
-  return options.spaced ? `S${season} E${episode}` : `S${season}E${episode}`;
+  const gap = options.separator ?? (options.spaced ? ' ' : '');
+  return `S${season}${gap}E${episode}`;
 }

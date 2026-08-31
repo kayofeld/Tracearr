@@ -5,6 +5,7 @@
  * Use these to quickly set up test data without repetitive boilerplate.
  */
 
+import { createConcurrentStreamsAutomation } from '../factories/automation.js';
 import { executeRawSql } from './pool.js';
 
 export interface SeedResult {
@@ -127,12 +128,12 @@ export async function seedUserWithSessions(
 }
 
 /**
- * Seed a complete rule evaluation scenario
+ * Seed a complete automation evaluation scenario
  *
  * Creates:
  * - Owner user with server
- * - Active rule (concurrent_streams with max 2)
- * - 3 active sessions (triggers violation)
+ * - Active automation (concurrent streams above 2)
+ * - 3 active sessions (triggers a run)
  */
 export async function seedViolationScenario(): Promise<
   SeedResult & {
@@ -143,22 +144,11 @@ export async function seedViolationScenario(): Promise<
 > {
   const base = await seedUserWithSessions(3);
 
-  // Create concurrent streams rule
-  const ruleResult = await executeRawSql(`
-    INSERT INTO rules (name, type, params, is_active)
-    VALUES (
-      'Max 2 Streams',
-      'concurrent_streams',
-      '{"max_streams": 2}'::jsonb,
-      true
-    )
-    RETURNING id
-  `);
-  const ruleId = ruleResult.rows[0].id as string;
+  const automation = await createConcurrentStreamsAutomation(2, { name: 'Max 2 Streams' });
 
   return {
     ...base,
-    ruleId,
+    ruleId: automation.id,
   };
 }
 

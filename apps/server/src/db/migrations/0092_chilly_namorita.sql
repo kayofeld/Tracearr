@@ -1,0 +1,2 @@
+CREATE INDEX "automation_runs_violation_alias_idx" ON "automation_runs" USING btree ("created_at" DESC NULLS FIRST,"id") WHERE kind = 'policy' AND outcome = 'completed';--> statement-breakpoint
+CREATE INDEX "automation_runs_started_at_idx" ON "automation_runs" USING btree ("started_at" DESC NULLS LAST,"id");

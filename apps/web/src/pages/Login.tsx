@@ -483,11 +483,7 @@ export function Login() {
                 <p className="text-muted-foreground text-xs">{t('pages:login.claimCodeHint')}</p>
               </div>
               <Button type="submit" className="w-full" disabled={claimCodeLoading}>
-                {claimCodeLoading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <KeyRound className="mr-2 h-4 w-4" />
-                )}
+                {claimCodeLoading ? <Loader2 className="animate-spin" /> : <KeyRound />}
                 {t('pages:login.validateClaimCode')}
               </Button>
             </form>
@@ -943,7 +939,7 @@ export function Login() {
         <CardContent className="space-y-6">
           {oidcError && (
             <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
+              <AlertTriangle />
               <AlertDescription>{oidcError}</AlertDescription>
             </Alert>
           )}

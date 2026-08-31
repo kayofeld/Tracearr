@@ -297,7 +297,7 @@ export function PlexServerSelector({
                 <Button size="sm" onClick={() => handleQuickConnect(server)} disabled={connecting}>
                   {isConnecting ? (
                     <>
-                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                      <Loader2 className="animate-spin" />
                       {t('common:states.connecting')}
                     </>
                   ) : (
@@ -437,7 +437,7 @@ export function PlexServerSelector({
                   >
                     {testingCustomUrl ? (
                       <>
-                        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                        <Loader2 className="animate-spin" />
                         {t('common:states.connecting')}
                       </>
                     ) : (

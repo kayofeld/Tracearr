@@ -144,7 +144,9 @@ export async function waitForNoThrow(
       return;
     } catch (error) {
       if (Date.now() - startTime > timeout) {
-        throw new Error(`${message}: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`${message}: ${error instanceof Error ? error.message : String(error)}`, {
+          cause: error,
+        });
       }
       await wait(interval);
     }

@@ -945,13 +945,11 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
     // verify it via getSession (which also extends the session per updateAge)
     // and return it unrotated in both fields.
     if (sessionRow[0]!.betterAuthSessionId) {
-      let baSession = null;
-      try {
-        const headers = new Headers({ authorization: `Bearer ${refreshToken}` });
-        baSession = await getAuth().api.getSession({ headers });
-      } catch {
-        baSession = null; // fail closed on lookup errors
-      }
+      const headers = new Headers({ authorization: `Bearer ${refreshToken}` });
+      // fail closed on lookup errors
+      const baSession = await getAuth()
+        .api.getSession({ headers })
+        .catch(() => null);
       if (!baSession) {
         return reply.unauthorized('Invalid or expired refresh token');
       }

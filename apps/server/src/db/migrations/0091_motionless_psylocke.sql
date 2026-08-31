@@ -1,0 +1,1 @@
+CREATE INDEX "automation_runs_notification_gate_idx" ON "automation_runs" USING btree ("rule_id","subject_key") WHERE kind = 'notification' AND outcome = 'completed';

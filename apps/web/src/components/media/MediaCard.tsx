@@ -1,4 +1,5 @@
 import { Film, Tv, Music, Radio } from 'lucide-react';
+import { POSTER_IMAGE_SIZE } from '@tracearr/shared';
 import { cn } from '@/lib/utils';
 import { imageProxyUrl } from '@/lib/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -39,8 +40,8 @@ function MediaIcon({ type, className }: { type: string; className?: string }) {
 function getImageUrl(
   serverId: string | null | undefined,
   thumbPath: string | null | undefined,
-  width = 300,
-  height = 450
+  width: number = POSTER_IMAGE_SIZE.width,
+  height: number = POSTER_IMAGE_SIZE.height
 ) {
   if (!serverId || !thumbPath) return null;
   return imageProxyUrl(serverId, thumbPath, width, height, 'poster');
@@ -61,7 +62,7 @@ export function MediaCard({
   bingeScore,
   completionRate,
 }: MediaCardProps) {
-  const imageUrl = getImageUrl(serverId, thumbPath, 300, 450);
+  const imageUrl = getImageUrl(serverId, thumbPath);
   const bgImageUrl = getImageUrl(serverId, thumbPath, 800, 400);
   // For individual episodes: showTitle is series name, title is episode name
   // For aggregated shows: title is series name (no showTitle), episodeCount indicates it's aggregated

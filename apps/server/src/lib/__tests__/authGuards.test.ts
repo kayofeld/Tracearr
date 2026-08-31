@@ -187,9 +187,9 @@ describe('assertUserCanLogin', () => {
     await expect(assertUserCanLogin('u1')).resolves.toBeUndefined();
   });
 
-  it('allows role viewer', async () => {
+  it('throws for role viewer', async () => {
     mockDbSelectLimit([{ role: 'viewer' }]);
-    await expect(assertUserCanLogin('u1')).resolves.toBeUndefined();
+    await expect(assertUserCanLogin('u1')).rejects.toMatchObject({ status: 'FORBIDDEN' });
   });
 
   it('throws for role member', async () => {

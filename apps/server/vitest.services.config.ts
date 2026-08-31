@@ -2,7 +2,7 @@
  * Services Tests Configuration
  *
  * Business logic and background job tests:
- * - services/* (rules, cache, geoip, userService, tautulli)
+ * - services/* (automations, cache, geoip, userService, tautulli)
  * - jobs/* (aggregator, poller logic)
  *
  * May use mocks for external dependencies.

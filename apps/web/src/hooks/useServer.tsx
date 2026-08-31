@@ -64,14 +64,15 @@ export function ServerProvider({ children }: { children: ReactNode }) {
     return legacy ? [legacy] : [];
   });
 
-  // Fetch available servers (only when authenticated)
+  // Fetch available servers (only when authenticated). Same key as `useServers`,
+  // so adding or removing a server refreshes the scope everywhere at once.
   const {
     data: servers = [],
     isLoading,
     isFetching,
     refetch,
   } = useQuery({
-    queryKey: ['servers'],
+    queryKey: ['servers', 'list'],
     queryFn: () => api.servers.list(),
     enabled: isAuthenticated,
     staleTime: 1000 * 60 * 5, // 5 minutes

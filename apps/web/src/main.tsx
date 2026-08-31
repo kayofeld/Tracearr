@@ -1,13 +1,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter } from 'react-router';
 import { AuthProvider } from '@/hooks/useAuth';
 import { ServerProvider } from '@/hooks/useServer';
 import { SocketProvider } from '@/hooks/useSocket';
 import { MaintenanceProvider } from '@/hooks/useMaintenanceMode';
 import { ThemeProvider } from '@/components/theme-provider';
-import { BASE_URL } from '@/lib/basePath';
+import { installChunkReload } from '@/lib/chunkReload';
+import { installClientErrorCapture } from '@/lib/clientErrors';
 import { sweepLegacyTokens } from '@/lib/legacyTokenSweep';
 import { App } from './App';
 import { i18nReady } from './i18n';
@@ -15,6 +15,9 @@ import './styles/globals.css';
 
 // Run before anything else can read stale localStorage tokens from pre-cookie-session builds.
 sweepLegacyTokens();
+
+installClientErrorCapture();
+installChunkReload();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,6 +29,12 @@ const queryClient = new QueryClient({
       // Auto-refetch when reconnecting or window regains focus
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
+    },
+    mutations: {
+      // Queries pause while the server is unreachable (useMaintenanceMode). Mutations
+      // don't: a paused save or delete would run whenever the server came back,
+      // minutes after the user clicked.
+      networkMode: 'always',
     },
   },
 });
@@ -42,17 +51,15 @@ void i18nReady.then(() => {
     <StrictMode>
       <ThemeProvider defaultTheme="dark" storageKey="tracearr-theme">
         <QueryClientProvider client={queryClient}>
-          <BrowserRouter basename={BASE_URL}>
-            <MaintenanceProvider>
-              <AuthProvider>
-                <ServerProvider>
-                  <SocketProvider>
-                    <App />
-                  </SocketProvider>
-                </ServerProvider>
-              </AuthProvider>
-            </MaintenanceProvider>
-          </BrowserRouter>
+          <MaintenanceProvider>
+            <AuthProvider>
+              <ServerProvider>
+                <SocketProvider>
+                  <App />
+                </SocketProvider>
+              </ServerProvider>
+            </AuthProvider>
+          </MaintenanceProvider>
         </QueryClientProvider>
       </ThemeProvider>
     </StrictMode>

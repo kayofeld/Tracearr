@@ -1,7 +1,6 @@
 import { Zap } from 'lucide-react';
 import type { BingeShow } from '@tracearr/shared';
 import type { Server } from '@tracearr/shared';
-import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -11,23 +10,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ServerBadge } from '@/components/server';
-import { EmptyState } from '@/components/library';
+import { EmptyState } from '@/components/ui/empty-state';
+import { getBingeScoreBadge } from './badges';
 
 interface BingeHighlightsTableProps {
   data: BingeShow[] | undefined;
   isLoading?: boolean;
   selectedServers?: Server[];
   isMultiServer?: boolean;
-}
-
-/**
- * Get binge score badge based on score thresholds.
- */
-function getBingeScoreBadge(score: number) {
-  if (score >= 80) return <Badge variant="danger">Highly Addictive</Badge>;
-  if (score >= 60) return <Badge variant="warning">Addictive</Badge>;
-  if (score >= 40) return <Badge variant="secondary">Bingeable</Badge>;
-  return <Badge variant="outline">Casual Watch</Badge>;
 }
 
 /**

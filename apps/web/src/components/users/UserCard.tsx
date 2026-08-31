@@ -14,7 +14,6 @@ interface UserCardProps {
   trustScore: number;
   playCount: number;
   watchTimeHours: number;
-  topMediaType?: string | null;
   topContent?: string | null;
   identityServers?: IdentityServerMembership[];
   rank: 1 | 2 | 3;

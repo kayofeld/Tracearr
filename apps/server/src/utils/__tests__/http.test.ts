@@ -17,7 +17,7 @@
  * - Header helpers produce correct headers
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Import ACTUAL production functions - not local duplicates
 import {
@@ -29,6 +29,8 @@ import {
   jsonHeaders,
   plexHeaders,
   jellyfinEmbyHeaders,
+  setPlexClientIdentifier,
+  getPlexClientIdentifier,
 } from '../http.js';
 
 // Mock fetch globally
@@ -362,6 +364,27 @@ describe('Header helpers', () => {
       const headers = jsonHeaders('my-token');
 
       expect(headers['Authorization']).toBe('Bearer my-token');
+    });
+  });
+
+  describe('plex client identifier', () => {
+    afterEach(() => setPlexClientIdentifier('tracearr'));
+
+    it('falls back to the legacy constant before startup sets one', () => {
+      expect(plexHeaders()['X-Plex-Client-Identifier']).toBe('tracearr');
+    });
+
+    it('uses the per-install identifier once set', () => {
+      setPlexClientIdentifier('11112222-3333-4444-5555-666677778888');
+      expect(plexHeaders()['X-Plex-Client-Identifier']).toBe(
+        '11112222-3333-4444-5555-666677778888'
+      );
+    });
+
+    it('exposes the same value through the getter', () => {
+      setPlexClientIdentifier('abc-123');
+      expect(getPlexClientIdentifier()).toBe('abc-123');
+      expect(getPlexClientIdentifier()).toBe(plexHeaders()['X-Plex-Client-Identifier']);
     });
   });
 

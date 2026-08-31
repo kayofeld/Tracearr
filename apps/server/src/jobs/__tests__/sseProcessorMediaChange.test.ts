@@ -27,7 +27,7 @@ const {
   mockFindActiveSession,
   mockHandleMediaChangeAtomic,
   mockBuildActiveSession,
-  mockGetActiveRulesV2,
+  mockGetActiveAutomations,
   mockBatchGetRecentUserSessions,
   mockGetServerUserIdByExternalId,
   mockBroadcastViolations,
@@ -35,6 +35,8 @@ const {
   mockDb,
   mockLookupGeoIP,
   mockGetGeoIPSettings,
+  mockDispatch,
+  mockLoadEvaluationServerUser,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { EventEmitter: EE } = require('events');
@@ -44,7 +46,7 @@ const {
     mockFindActiveSession: vi.fn(),
     mockHandleMediaChangeAtomic: vi.fn(),
     mockBuildActiveSession: vi.fn(),
-    mockGetActiveRulesV2: vi.fn().mockResolvedValue([]),
+    mockGetActiveAutomations: vi.fn().mockResolvedValue([]),
     mockBatchGetRecentUserSessions: vi.fn().mockResolvedValue(new Map()),
     mockGetServerUserIdByExternalId: vi.fn().mockResolvedValue('server-user-1'),
     mockBroadcastViolations: vi.fn(),
@@ -57,6 +59,8 @@ const {
       .fn()
       .mockResolvedValue({ city: null, country: null, latitude: null, longitude: null }),
     mockGetGeoIPSettings: vi.fn().mockResolvedValue({ usePlexGeoip: false }),
+    mockDispatch: vi.fn().mockResolvedValue({ violations: [], outcomes: [] }),
+    mockLoadEvaluationServerUser: vi.fn().mockResolvedValue(null),
   };
 });
 
@@ -119,8 +123,9 @@ vi.mock('../poller/stateTracker.js', async () => {
 });
 
 vi.mock('../poller/database.js', () => ({
-  getActiveRulesV2: mockGetActiveRulesV2,
+  getActiveAutomations: mockGetActiveAutomations,
   batchGetRecentUserSessions: mockBatchGetRecentUserSessions,
+  batchGetLibraryItemIdentity: vi.fn().mockResolvedValue(new Map()),
   getServerUserIdByExternalId: mockGetServerUserIdByExternalId,
   mergeRecentSessionsForIdentity: (map: Map<string, unknown[]>, ids: string[]) =>
     ids.flatMap((id) => map.get(id) ?? []),
@@ -144,10 +149,25 @@ vi.mock('../poller/sessionLifecycle.js', async () => {
     findActiveSessionsAll: vi.fn().mockResolvedValue([]),
     buildActiveSession: mockBuildActiveSession,
     handleMediaChangeAtomic: mockHandleMediaChangeAtomic,
-    reEvaluateRulesOnTranscodeChange: vi.fn(),
     confirmAndPersistSession: vi.fn(),
   };
 });
+
+vi.mock('../../services/automations/events/dispatcher.js', () => ({
+  dispatch: (...args: unknown[]) => mockDispatch(...args),
+  subscribe: vi.fn(),
+}));
+vi.mock('../../services/automations/events/contextAssembly.js', () => ({
+  loadEvaluationContext: vi.fn().mockResolvedValue(null),
+  loadEvaluationServerUser: (...args: unknown[]) => mockLoadEvaluationServerUser(...args),
+  assembleEvaluationInputs: vi.fn().mockResolvedValue({
+    activeAutomations: [],
+    activeSessions: [],
+    recentSessions: [],
+    identityServerUserIds: [],
+  }),
+  setContextAssemblyDeps: vi.fn(),
+}));
 
 // ============================================================================
 // Import after mocking
@@ -229,7 +249,6 @@ const mockServerUser = {
   thumbUrl: null,
   identityName: 'Test User',
   trustScore: 100,
-  sessionCount: 5,
   lastActivityAt: new Date('2026-01-01'),
 };
 
@@ -320,19 +339,14 @@ function setupFetchFullSession(processed: Record<string, unknown> = mockProcesse
  * Set up mocks for the server user DB query inside handleMediaChange
  */
 function setupServerUserQuery() {
-  // After fetchFullSession completes, handleMediaChange also calls db.select()
-  // We need a more flexible mock chain for the inner join query
-  const limitFn = vi.fn().mockResolvedValue([mockServerUser]);
-  const whereFn = vi.fn().mockReturnValue({ limit: limitFn });
-  const innerJoinFn = vi.fn().mockReturnValue({ where: whereFn });
-  const fromFn = vi.fn().mockReturnValue({ innerJoin: innerJoinFn });
+  mockLoadEvaluationServerUser.mockResolvedValue(mockServerUser);
 
   // getIdentityServerUserIds: db.select({...}).from(serverUsers).where() (no join, no limit)
   const identityWhereFn = vi.fn().mockResolvedValue([mockServerUser]);
   const identityFromFn = vi.fn().mockReturnValue({ where: identityWhereFn });
 
-  // Track call count — first call is fetchFullSession (servers), second is
-  // handleMediaChange (serverUsers innerJoin), third is getIdentityServerUserIds
+  // Track call count — first call is fetchFullSession (servers), the rest is
+  // getIdentityServerUserIds
   let callCount = 0;
   const mockGetSessions = vi.fn().mockResolvedValue([mockProcessedSession]);
   mockCreateMediaServerClient.mockReturnValue({ getSessions: mockGetSessions });
@@ -345,10 +359,6 @@ function setupServerUserQuery() {
       const serverWhereFn = vi.fn().mockReturnValue({ limit: serverLimitFn });
       const serverFromFn = vi.fn().mockReturnValue({ where: serverWhereFn });
       return { from: serverFromFn };
-    }
-    if (callCount === 2) {
-      // handleMediaChange: db.select({...}).from(serverUsers).innerJoin().where().limit()
-      return { from: fromFn };
     }
     // getIdentityServerUserIds: db.select({...}).from(serverUsers).where()
     return { from: identityFromFn };
@@ -419,12 +429,8 @@ describe('SSE Processor - Media Change Detection', () => {
     // Should have broadcast start for new session
     expect(mockPubSubService.publish).toHaveBeenCalledWith('session:started', mockActiveSession);
 
-    // Should only enqueue session_started (no session_stopped — matches poller behavior)
-    expect(mockEnqueueNotification).toHaveBeenCalledTimes(1);
-    expect(mockEnqueueNotification).toHaveBeenCalledWith({
-      type: 'session_started',
-      payload: mockActiveSession,
-    });
+    // The automations own the notification now; the media change enqueues nothing.
+    expect(mockEnqueueNotification).not.toHaveBeenCalled();
   });
 
   it('does not trigger media change for same ratingKey', async () => {

@@ -145,9 +145,14 @@ function FieldDescription({ className, ...props }: React.ComponentProps<'p'>) {
 function FieldSeparator({
   children,
   className,
+  align = 'center',
+  surface = 'background',
   ...props
 }: React.ComponentProps<'div'> & {
   children?: React.ReactNode;
+  align?: 'center' | 'start';
+  /** The surface the label sits on, so it covers the line it is drawn over. */
+  surface?: 'background' | 'raised';
 }) {
   return (
     <div
@@ -162,7 +167,11 @@ function FieldSeparator({
       <Separator className="absolute inset-0 top-1/2" />
       {children && (
         <span
-          className="bg-background text-muted-foreground relative mx-auto block w-fit px-2"
+          className={cn(
+            'text-muted-foreground relative block w-fit',
+            align === 'start' ? 'pr-2' : 'mx-auto px-2',
+            surface === 'raised' ? 'bg-card-raised' : 'bg-background'
+          )}
           data-slot="field-separator-content"
         >
           {children}

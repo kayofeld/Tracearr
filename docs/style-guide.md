@@ -285,7 +285,7 @@ Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-se
 ### CSS Variables Location
 
 - **Web:** `apps/web/src/styles/globals.css`
-- **Mobile:** `apps/mobile/global.css`
+- **Mobile:** `global.css` in the [Mobile-App repo](https://github.com/Tracearr/Mobile-App)
 
 ### Theme Switching
 
@@ -303,7 +303,7 @@ The web app supports light/dark mode via the `.dark` class on the document root.
 
 All accent-derived colors will automatically update.
 
-**Mobile:** NativeWind processes `@theme` at build time, so mobile uses static HSL values (`hsl(187 80% 50%)` for cyan). To change the mobile accent color, update the hardcoded hue values in `apps/mobile/global.css`.
+**Mobile:** NativeWind processes `@theme` at build time, so mobile uses static HSL values (`hsl(187 80% 50%)` for cyan). To change the mobile accent color, update the hardcoded hue values in the mobile repo's `global.css`.
 
 ---
 

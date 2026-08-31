@@ -5,8 +5,8 @@
  * the settings table directly.
  */
 
-import { eq, inArray } from 'drizzle-orm';
-import type { Settings, WebhookFormat, UnitSystem, BackupScheduleType } from '@tracearr/shared';
+import { eq, inArray, sql } from 'drizzle-orm';
+import { SESSION_LIMITS, type Settings, type BackupScheduleType } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { settings } from '../db/schema.js';
 
@@ -15,15 +15,6 @@ const PUBLIC_DEFAULTS: Settings = {
   // Settings interface fields
   allowGuestAccess: false,
   unitSystem: 'metric',
-  discordWebhookUrl: null,
-  customWebhookUrl: null,
-  webhookFormat: null,
-  ntfyTopic: null,
-  ntfyAuthToken: null,
-  pushoverUserKey: null,
-  pushoverApiToken: null,
-  telegramBotToken: null,
-  telegramChatId: null,
   pollerEnabled: true,
   pollerIntervalMs: 15000,
   usePlexGeoip: false,
@@ -48,6 +39,14 @@ const PUBLIC_DEFAULTS: Settings = {
   backupRetentionCount: 7,
   pluginUpdateCheckEnabled: true,
   pluginManifestUrl: null,
+  serverUpdateCheckEnabled: true,
+  // Watch completion thresholds default to the shared industry-standard constant
+  watchedThresholdMovie: Math.round(SESSION_LIMITS.WATCH_COMPLETION_THRESHOLD * 100),
+  watchedThresholdTv: Math.round(SESSION_LIMITS.WATCH_COMPLETION_THRESHOLD * 100),
+  watchedThresholdMusic: Math.round(SESSION_LIMITS.WATCH_COMPLETION_THRESHOLD * 100),
+  publicApiRateLimitPerMinute: 240,
+  imagePrecacheEnabled: true,
+  preferredPosterServerId: null,
 };
 
 /**
@@ -111,6 +110,15 @@ const INTERNAL_DEFAULTS = {
   // SSRF check before persisting) but never read back through GET/PATCH
   // /settings, since it is excluded from PUBLIC_KEYS/getAllSettings().
   dockerRedeployWebhookUrl: null as string | null,
+  // ISO 8601 - set once when the last legacy:1 version sentinel clears; marks
+  // where storage history changes meaning (multi-version rollups)
+  mediaVersionsBackfilledAt: null as string | null,
+  // ISO 8601 - set once when pre-changeover snapshot history has been
+  // regenerated in multi-version semantics; retires the growth fit clamp
+  snapshotsNormalizedAt: null as string | null,
+  // Per-install Plex client identifier, generated on first boot. Scopes plex.tv
+  // PINs to this deployment. Served to the web UI, so it is public, not secret.
+  plexClientIdentifier: null as string | null,
 };
 
 type InternalSettings = typeof INTERNAL_DEFAULTS;
@@ -158,16 +166,32 @@ export async function getSetting<K extends SettingKey>(key: K): Promise<SettingT
 export async function getSettings<K extends SettingKey>(keys: K[]): Promise<Pick<SettingTypes, K>> {
   if (keys.length === 0) return {} as Pick<SettingTypes, K>;
 
-  const rows = await db
-    .select({ name: settings.name, value: settings.value })
-    .from(settings)
-    .where(inArray(settings.name, keys));
-
-  const found = new Map(rows.map((r) => [r.name, r.value]));
   const result = {} as Record<K, unknown>;
+  const misses: K[] = [];
+  const now = Date.now();
 
   for (const key of keys) {
-    result[key] = found.has(key) ? found.get(key) : ALL_DEFAULTS[key];
+    const cached = settingsCache.get(key);
+    if (cached && cached.expiresAt > now) {
+      result[key] = cached.value;
+    } else {
+      misses.push(key);
+    }
+  }
+
+  if (misses.length > 0) {
+    const rows = await db
+      .select({ name: settings.name, value: settings.value })
+      .from(settings)
+      .where(inArray(settings.name, misses));
+
+    const found = new Map(rows.map((r) => [r.name, r.value]));
+
+    for (const key of misses) {
+      const value = found.has(key) ? found.get(key) : ALL_DEFAULTS[key];
+      result[key] = value;
+      cacheSetting(key, value as SettingTypes[K]);
+    }
   }
 
   return result as Pick<SettingTypes, K>;
@@ -186,14 +210,16 @@ export async function setSettings(updates: Partial<SettingTypes>): Promise<void>
   const entries = Object.entries(updates);
   if (entries.length === 0) return;
 
-  await db.transaction(async (tx) => {
-    for (const [name, value] of entries) {
-      await tx.insert(settings).values({ name, value }).onConflictDoUpdate({
-        target: settings.name,
-        set: { value },
-      });
-    }
-  });
+  // Single atomic multi-row upsert: one statement acquires and releases its row
+  // locks in one shot, instead of a transaction that holds locks on each key
+  // across a round-trip per key until commit.
+  await db
+    .insert(settings)
+    .values(entries.map(([name, value]) => ({ name, value })))
+    .onConflictDoUpdate({
+      target: settings.name,
+      set: { value: sql`excluded.value` },
+    });
 
   for (const [name, value] of entries) {
     cacheSetting(name as SettingKey, value);
@@ -231,6 +257,18 @@ export async function getGeoIPSettings(): Promise<{ usePlexGeoip: boolean }> {
   return { usePlexGeoip: await getSetting('usePlexGeoip') };
 }
 
+/** Resolve the watch-completion threshold (0-1 fraction) for a given media type. */
+export async function getWatchedThreshold(mediaType: string): Promise<number> {
+  const key =
+    mediaType === 'episode'
+      ? 'watchedThresholdTv'
+      : mediaType === 'track'
+        ? 'watchedThresholdMusic'
+        : 'watchedThresholdMovie';
+  const pct = await getSetting(key);
+  return Math.min(100, Math.max(1, pct)) / 100;
+}
+
 export async function getNetworkSettings(): Promise<{
   externalUrl: string | null;
   trustProxy: boolean;
@@ -239,41 +277,6 @@ export async function getNetworkSettings(): Promise<{
   return {
     externalUrl: s.externalUrl,
     trustProxy: s.trustProxy,
-  };
-}
-
-export interface NotificationSettings {
-  discordWebhookUrl: string | null;
-  customWebhookUrl: string | null;
-  webhookFormat: WebhookFormat | null;
-  ntfyTopic: string | null;
-  ntfyAuthToken: string | null;
-  pushoverUserKey: string | null;
-  pushoverApiToken: string | null;
-  telegramBotToken: string | null;
-  telegramChatId: string | null;
-  webhookSecret: string | null;
-  mobileEnabled: boolean;
-  unitSystem: UnitSystem;
-}
-
-export async function getNotificationSettings(): Promise<NotificationSettings> {
-  const s = await getSettings([
-    'discordWebhookUrl',
-    'customWebhookUrl',
-    'webhookFormat',
-    'ntfyTopic',
-    'ntfyAuthToken',
-    'pushoverUserKey',
-    'pushoverApiToken',
-    'telegramBotToken',
-    'telegramChatId',
-    'mobileEnabled',
-    'unitSystem',
-  ]);
-  return {
-    ...s,
-    webhookSecret: null, // TODO: Phase 4
   };
 }
 

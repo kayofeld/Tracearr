@@ -6,32 +6,31 @@
  */
 
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-  statSync,
-  unlinkSync,
-  readdirSync,
-} from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { readFile, writeFile, rename, stat as fsStat, unlink, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { eq } from 'drizzle-orm';
-import { TIME_MS } from '@tracearr/shared';
+import { and, eq, isNull } from 'drizzle-orm';
+import { POSTER_IMAGE_SIZE, TIME_MS } from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { servers } from '../db/schema.js';
-import { registerService, unregisterService } from './serviceTracker.js';
+import { servers, libraryItems } from '../db/schema.js';
+import { assertSafeProbeUrl, SsrfBlockedError } from '../utils/ssrf.js';
+import { cacheWriteAllowed, noteCacheWrite } from './imageCacheGuard.js';
+
+// libvips defaults its thread pool to the core count, so one background
+// precache walk can own every core of a small box. Inputs are server-resized
+// thumbnails now; one thread is plenty and the poller keeps its CPU.
+sharp.concurrency(1);
 // Token encryption removed - tokens now stored in plain text (DB is localhost-only)
 
-// Cache directory (in project root/data/image-cache)
-const CACHE_DIR = join(process.cwd(), 'data', 'image-cache');
+// Cache directory (in project root/data/image-cache), sharded by the first two
+// hex chars of the cache key so no single directory holds every cached file.
+export const IMAGE_CACHE_DIR = join(process.cwd(), 'data', 'image-cache');
 const CACHE_TTL_MS = TIME_MS.DAY;
-const MAX_CACHE_SIZE_MB = 500; // Maximum cache size in MB
 
 // Ensure cache directory exists
-if (!existsSync(CACHE_DIR)) {
-  mkdirSync(CACHE_DIR, { recursive: true });
+if (!existsSync(IMAGE_CACHE_DIR)) {
+  mkdirSync(IMAGE_CACHE_DIR, { recursive: true });
 }
 
 // Fallback SVG placeholders
@@ -69,23 +68,68 @@ interface ProxyOptions {
   width?: number;
   height?: number;
   fallback?: FallbackType;
+  /** Cache-busting fingerprint from posterVersionFor; presence marks the cache entry immutable. */
+  version?: string;
+  /** Web grid only: race the miss against the LQIP placeholder after 2 s. Everything else waits for the real image. */
+  lqip?: boolean;
 }
 
 interface ProxyResult {
   data: Buffer;
   contentType: string;
   cached: boolean;
+  /** Overrides the caller's default Cache-Control (used for the LQIP degraded response). */
+  cacheControl?: string;
 }
 
 /**
- * Generate a cache key from the request parameters
+ * Neutral placeholder color used when no dominant color is known yet.
  */
-function getCacheKey(serverId: string, imagePath: string, width: number, height: number): string {
-  const hash = createHash('sha256')
+const NEUTRAL_PLACEHOLDER_COLOR = '#27272a';
+
+// A waiter stuck behind the fetch semaphore this long gets served the LQIP
+// placeholder instead; the real pipeline keeps running in the background.
+const SEMAPHORE_WAIT_TIMEOUT_MS = 2000;
+
+// Cache-Control for degraded responses (LQIP placeholder, error fallback SVG):
+// short-lived and never immutable, so a transient upstream failure or a slow
+// pipeline can't get pinned into a versioned request's normally-year-long cache.
+const DEGRADED_CACHE_CONTROL = 'public, max-age=15';
+
+interface CacheKeyInfo {
+  fileName: string;
+  shard: string;
+  versioned: boolean;
+}
+
+/**
+ * Build the sharded cache key/path info for a request. Versioned entries
+ * (a `v=` fingerprint was supplied) get a `:v<hash>` suffix on the filename
+ * so cleanup can tell them apart from unversioned entries at a glance.
+ */
+function buildCacheKeyInfo(
+  serverId: string,
+  imagePath: string,
+  width: number,
+  height: number,
+  version?: string
+): CacheKeyInfo {
+  const baseHash = createHash('sha256')
     .update(`${serverId}:${imagePath}:${width}:${height}`)
     .digest('hex')
     .slice(0, 16);
-  return `${hash}.webp`;
+  const shard = baseHash.slice(0, 2);
+  const versioned = Boolean(version);
+  const fileName = versioned ? `${baseHash}:v${version}.webp` : `${baseHash}.webp`;
+  return { fileName, shard, versioned };
+}
+
+export function isVersionedFileName(fileName: string): boolean {
+  // Orphaned tmp files from a failed write inherit the `:v<hash>` substring
+  // when the source entry was versioned, so `.tmp.` must win over that check
+  // or they'd be treated as immutable and never swept.
+  if (fileName.includes('.tmp.')) return false;
+  return fileName.includes(':v');
 }
 
 /**
@@ -110,173 +154,338 @@ function getFallbackImage(type: FallbackType, _width: number, _height: number): 
   return Buffer.from(svg);
 }
 
-/**
- * Clean up old cache files
- */
-async function cleanupCache(): Promise<void> {
+async function readFromCache(cachePath: string, versioned: boolean): Promise<ProxyResult | null> {
+  let stats;
   try {
-    const files = readdirSync(CACHE_DIR);
-    const now = Date.now();
-    let totalSize = 0;
-    const fileStats: Array<{ name: string; size: number; mtime: number }> = [];
-
-    for (const file of files) {
-      const filePath = join(CACHE_DIR, file);
-      try {
-        const stat = statSync(filePath);
-        totalSize += stat.size;
-        fileStats.push({ name: file, size: stat.size, mtime: stat.mtimeMs });
-
-        // Delete files older than TTL
-        if (now - stat.mtimeMs > CACHE_TTL_MS) {
-          unlinkSync(filePath);
-          totalSize -= stat.size;
-        }
-      } catch {
-        // Ignore errors for individual files
-      }
-    }
-
-    // If still over size limit, delete oldest files
-    const maxSizeBytes = MAX_CACHE_SIZE_MB * 1024 * 1024;
-    if (totalSize > maxSizeBytes) {
-      fileStats.sort((a, b) => a.mtime - b.mtime);
-      for (const file of fileStats) {
-        if (totalSize <= maxSizeBytes * 0.8) break; // Reduce to 80% of max
-        try {
-          unlinkSync(join(CACHE_DIR, file.name));
-          totalSize -= file.size;
-        } catch {
-          // Ignore
-        }
-      }
-    }
+    stats = await fsStat(cachePath);
   } catch {
-    // Ignore cleanup errors
+    return null;
+  }
+
+  const isFresh = versioned || Date.now() - stats.mtimeMs < CACHE_TTL_MS;
+  if (!isFresh) return null;
+
+  try {
+    const data = await readFile(cachePath);
+    return { data, contentType: 'image/webp', cached: true };
+  } catch {
+    return null;
   }
 }
 
-// Run cleanup periodically (every hour)
-let cleanupInterval: NodeJS.Timeout | null = setInterval(() => {
-  void cleanupCache();
-}, TIME_MS.HOUR);
-registerService('image-cache-cleanup', {
-  name: 'Image Cache Cleanup',
-  description: 'Cleans up expired cached images',
-  intervalMs: TIME_MS.HOUR,
-});
-
-// Also run on startup
-void cleanupCache();
-
-export function stopImageCacheCleanup(): void {
-  if (cleanupInterval) {
-    clearInterval(cleanupInterval);
-    cleanupInterval = null;
-    unregisterService('image-cache-cleanup');
+async function writeCacheAtomic(shardDir: string, cachePath: string, data: Buffer): Promise<void> {
+  if (!(await cacheWriteAllowed(data.length, IMAGE_CACHE_DIR))) return;
+  const tmpPath = `${cachePath}.tmp.${process.pid}`;
+  try {
+    await mkdir(shardDir, { recursive: true });
+    await writeFile(tmpPath, data);
+    await rename(tmpPath, cachePath);
+    noteCacheWrite(data.length);
+  } catch {
+    await unlink(tmpPath).catch(() => undefined);
   }
+}
+
+async function computeDominantColorHex(imageBuffer: Buffer): Promise<string> {
+  const { data, info } = await sharp(imageBuffer)
+    .resize(1, 1)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const r = data[0] ?? 0;
+  const g = info.channels > 1 ? (data[1] ?? r) : r;
+  const b = info.channels > 1 ? (data[2] ?? g) : g;
+  return `#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
 }
 
 /**
- * Append a client-supplied image path to a media server's base URL and REQUIRE
- * the parsed result to stay on the server's own origin.
+ * Persist the computed dominant color, but only when the row doesn't have
+ * one yet. This pipeline is the sole writer of dominant_color (library sync
+ * never touches it) - write-once by design, and a failed UPDATE here must
+ * never fail the image response itself.
  *
- * Concatenation preserves the original behavior (including reverse-proxy base
- * paths like https://host/jellyfin), but the concatenated string is then parsed
- * and its origin compared to the base's: a value like "@evil.com/x" parses to
- * host evil.com and is rejected, closing the token-exfiltration + off-origin
- * SSRF on the unauthenticated image-proxy route. A path that stays on-origin
- * (a leading "/…" or a harmless "/@evil.com/x") is allowed. Throws otherwise.
+ * The miss coalescing map is keyed per size, so one poster requested at
+ * 160/240/360 reaches here concurrently, and several rows can share a
+ * thumb_path - identical multi-row updates then deadlock on row order.
+ * Same-image persists share one in-flight attempt; a deadlock loser retries
+ * once, which the NULL guard turns into a no-op if another writer committed.
  */
-export function resolveSameOrigin(serverUrl: string, imagePath: string): URL {
-  const baseUrl = serverUrl.replace(/\/$/, '');
-  const baseOrigin = new URL(baseUrl).origin; // throws on a malformed configured URL
-  const target = new URL(`${baseUrl}${imagePath}`); // throws on a malformed path
-  if (target.origin !== baseOrigin) {
-    throw new Error('image path escapes server origin');
+const inFlightColorPersists = new Map<string, Promise<void>>();
+
+function isDeadlockError(err: unknown): boolean {
+  const code =
+    (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
+  return code === '40P01';
+}
+
+export async function persistDominantColorIfNeeded(
+  serverId: string,
+  imagePath: string,
+  imageBuffer: Buffer
+): Promise<void> {
+  const key = `${serverId}:${imagePath}`;
+  const inFlight = inFlightColorPersists.get(key);
+  if (inFlight) return inFlight;
+
+  const attempt = (async () => {
+    try {
+      const hex = await computeDominantColorHex(imageBuffer);
+      const write = () =>
+        db
+          .update(libraryItems)
+          .set({ dominantColor: hex })
+          .where(
+            and(
+              eq(libraryItems.serverId, serverId),
+              eq(libraryItems.thumbPath, imagePath),
+              isNull(libraryItems.dominantColor)
+            )
+          );
+      try {
+        await write();
+      } catch (err) {
+        if (!isDeadlockError(err)) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 50 + Math.random() * 150));
+        await write();
+      }
+    } catch (err) {
+      console.error('[ImageProxy] Failed to persist dominant color', err);
+    } finally {
+      inFlightColorPersists.delete(key);
+    }
+  })();
+
+  inFlightColorPersists.set(key, attempt);
+  return attempt;
+}
+
+async function getKnownDominantColor(serverId: string, imagePath: string): Promise<string | null> {
+  try {
+    const [row] = await db
+      .select({ dominantColor: libraryItems.dominantColor })
+      .from(libraryItems)
+      .where(and(eq(libraryItems.serverId, serverId), eq(libraryItems.thumbPath, imagePath)))
+      .limit(1);
+    return row?.dominantColor ?? null;
+  } catch {
+    return null;
   }
-  return target;
 }
 
 /**
- * Fetch and proxy an image from a media server
+ * Build a 1x1 WebP placeholder from a hex color (dominant color when known,
+ * else a neutral gray). Used when a request is stuck behind the fetch
+ * semaphore for too long.
  */
-export async function proxyImage(options: ProxyOptions): Promise<ProxyResult> {
-  const { serverId, imagePath, width = 300, height = 450, fallback = 'poster' } = options;
+export async function buildLqipPlaceholder(dominantColorHex?: string | null): Promise<Buffer> {
+  const hex = (dominantColorHex ?? NEUTRAL_PLACEHOLDER_COLOR).replace('#', '');
+  const r = parseInt(hex.slice(0, 2), 16) || 0;
+  const g = parseInt(hex.slice(2, 4), 16) || 0;
+  const b = parseInt(hex.slice(4, 6), 16) || 0;
+  return sharp(Buffer.from([r, g, b]), { raw: { width: 1, height: 1, channels: 3 } })
+    .webp({ quality: 20 })
+    .toBuffer();
+}
 
-  // Check cache first
-  const cacheKey = getCacheKey(serverId, imagePath, width, height);
-  const cachePath = join(CACHE_DIR, cacheKey);
+// Global semaphore bounding concurrent upstream fetch+decode+write work
+// across ALL requests, distinct keys included - inlined rather than adding
+// a dependency (the repo has no p-limit).
+const MAX_CONCURRENT_FETCHES = 6;
+let activeFetchSlots = 0;
+const fetchSlotQueue: Array<() => void> = [];
 
-  if (existsSync(cachePath)) {
-    try {
-      const stat = statSync(cachePath);
-      if (Date.now() - stat.mtimeMs < CACHE_TTL_MS) {
-        return {
-          data: readFileSync(cachePath),
-          contentType: 'image/webp',
-          cached: true,
-        };
-      }
-    } catch {
-      // Cache miss, continue to fetch
+function acquireFetchSlot(): Promise<() => void> {
+  return new Promise((resolve) => {
+    const grant = () => {
+      activeFetchSlots++;
+      resolve(() => {
+        activeFetchSlots--;
+        const next = fetchSlotQueue.shift();
+        if (next) next();
+      });
+    };
+    if (activeFetchSlots < MAX_CONCURRENT_FETCHES) {
+      grant();
+    } else {
+      fetchSlotQueue.push(grant);
     }
+  });
+}
+
+/**
+ * imagePath reaches here from the unauthenticated /images routes and is
+ * concatenated onto the server URL, so a suffix like ".attacker.example/x"
+ * moves the request to another host and takes the media-server token with it.
+ * Resolve it and require the origin to survive.
+ */
+function assertSameOrigin(baseUrl: string, imagePath: string): void {
+  let resolved: URL;
+  try {
+    resolved = new URL(`${baseUrl}${imagePath}`);
+  } catch {
+    throw new SsrfBlockedError(`Image path produced an unparseable URL: ${imagePath}`);
+  }
+  if (resolved.origin !== new URL(baseUrl).origin) {
+    throw new SsrfBlockedError(`Image path escapes the server origin: ${resolved.origin}`);
+  }
+  if (resolved.username || resolved.password) {
+    throw new SsrfBlockedError('Image path injected URL credentials');
+  }
+}
+
+export function buildUpstreamRequest(
+  server: typeof servers.$inferSelect,
+  imagePath: string,
+  resize?: { width: number; height: number }
+): { imageUrl: string; headers: Record<string, string> } {
+  const headers: Record<string, string> = { Accept: 'image/*' };
+  const baseUrl = server.url.replace(/\/$/, '');
+
+  // Origin pinning makes the configured server the only reachable host, so one
+  // check on the base URL covers every request shape built below.
+  assertSameOrigin(baseUrl, imagePath);
+  assertSafeProbeUrl(baseUrl);
+
+  if (server.type === 'plex') {
+    // Plex image URLs are relative paths like /library/metadata/123/thumb/456
+    if (resize) {
+      // Plex's photo transcoder resizes and caches server-side - a 240px
+      // poster arrives as ~20KB instead of the multi-MB original. upscale=0
+      // keeps small sources untouched; minSize=1 fills the requested box.
+      const params = new URLSearchParams({
+        width: String(resize.width),
+        height: String(resize.height),
+        minSize: '1',
+        upscale: '0',
+        url: imagePath,
+        'X-Plex-Token': server.token,
+      });
+      return { imageUrl: `${baseUrl}/photo/:/transcode?${params.toString()}`, headers };
+    }
+    const separator = imagePath.includes('?') ? '&' : '?';
+    return { imageUrl: `${baseUrl}${imagePath}${separator}X-Plex-Token=${server.token}`, headers };
   }
 
-  // Look up server
-  const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
-
-  if (!server) {
-    // Return fallback for missing server
-    const fallbackSvg = getFallbackImage(fallback, width, height);
+  // Jellyfin/Emby - imagePath should include the full endpoint
+  if (server.type === 'jellyfin') {
+    headers['Authorization'] = `MediaBrowser Token="${server.token}"`;
+  } else {
+    headers['X-Emby-Token'] = server.token;
+  }
+  if (resize) {
+    // Both accept max-dimension params on image endpoints and cache the
+    // result. Constrain only the target's long axis so the cover crop below
+    // always has enough pixels where it matters; sharp still normalizes to
+    // the exact box, but it decodes a thumbnail instead of the original.
+    const separator = imagePath.includes('?') ? '&' : '?';
+    const dimension =
+      resize.height >= resize.width ? `maxHeight=${resize.height}` : `maxWidth=${resize.width}`;
     return {
-      data: fallbackSvg,
+      imageUrl: `${baseUrl}${imagePath}${separator}${dimension}&quality=90`,
+      headers,
+    };
+  }
+  return { imageUrl: `${baseUrl}${imagePath}`, headers };
+}
+
+interface MissPipelineArgs {
+  serverId: string;
+  imagePath: string;
+  width: number;
+  height: number;
+  fallback: FallbackType;
+  cachePath: string;
+  shardDir: string;
+}
+
+/**
+ * The whole cache-miss pipeline: server lookup, upstream fetch (behind the
+ * global semaphore), resize/encode, atomic cache write, and the write-once
+ * dominant color persist. Wrapped by the coalescing map in proxyImage so
+ * concurrent misses for the same key run this exactly once.
+ */
+// Server rows change rarely (URL or token edits), and every cache miss needs
+// one - during a warm pass that's hundreds of identical point lookups. The
+// short TTL means a token rotation takes at most 30s to reach this path.
+const SERVER_ROW_TTL_MS = 30_000;
+const serverRowCache = new Map<string, { row: typeof servers.$inferSelect | null; at: number }>();
+
+export function _resetServerRowCacheForTests(): void {
+  serverRowCache.clear();
+}
+
+async function getServerRow(serverId: string): Promise<typeof servers.$inferSelect | null> {
+  const cached = serverRowCache.get(serverId);
+  if (cached && Date.now() - cached.at < SERVER_ROW_TTL_MS) return cached.row;
+  const [row] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
+  serverRowCache.set(serverId, { row: row ?? null, at: Date.now() });
+  return row ?? null;
+}
+
+async function runMissPipeline(args: MissPipelineArgs): Promise<ProxyResult> {
+  const { serverId, imagePath, width, height, fallback, cachePath, shardDir } = args;
+
+  const server = await getServerRow(serverId);
+  if (!server) {
+    return {
+      data: getFallbackImage(fallback, width, height),
       contentType: 'image/svg+xml',
       cached: false,
+      cacheControl: DEGRADED_CACHE_CONTROL,
     };
   }
 
-  const token = server.token;
-
-  // Build image URL based on server type. imagePath is a CLIENT-SUPPLIED value on
-  // an unauthenticated route, so it must resolve to the server's OWN origin — never
-  // string-concatenate it (a value like "@evil.com/x" would hijack the host and
-  // exfiltrate the token). resolveSameOrigin throws if the path escapes the origin.
-  let target: URL;
+  // Ask the media server for a pre-resized image first (all three types
+  // resize and cache server-side; a 240px poster is ~20-40KB against a
+  // multi-MB original). Fall back to the original path so a transcoder
+  // hiccup degrades to the old behavior instead of a broken image.
+  const release = await acquireFetchSlot();
   try {
-    target = resolveSameOrigin(server.url, imagePath);
-  } catch {
-    const fallbackSvg = getFallbackImage(fallback, width, height);
-    return { data: fallbackSvg, contentType: 'image/svg+xml', cached: false };
-  }
+    // Inside the try so a blocked path degrades to the fallback image like any
+    // other upstream failure, instead of escaping as a 500.
+    const candidates = [
+      buildUpstreamRequest(server, imagePath, { width, height }),
+      buildUpstreamRequest(server, imagePath),
+    ];
+    let imageBuffer: Buffer | null = null;
+    let lastError: unknown = null;
+    for (const { imageUrl, headers } of candidates) {
+      try {
+        // redirect:'error' so the media server cannot bounce this request (with
+        // the token) to another host via a 30x. assertSameOrigin only pins the
+        // first hop, and X-Plex-Token rides in the query string while
+        // X-Emby-Token is a custom header, so neither is stripped on a
+        // cross-origin redirect the way Authorization would be.
+        const response = await fetch(imageUrl, {
+          headers,
+          redirect: 'error',
+          signal: AbortSignal.timeout(10000), // 10 second timeout
+        });
 
-  const headers: Record<string, string> = { Accept: 'image/*' };
+        // Reject only clearly-non-image payloads (the Plex transcoder can
+        // return an XML error page with a 200). Anything else - image/*,
+        // octet-stream, or a missing header - proceeds; sharp is the final
+        // arbiter and its failure lands in the same fallback path.
+        const contentType = response.headers?.get('content-type') ?? '';
+        const clearlyNotImage = /^(text\/|application\/(json|xml|xhtml))/i.test(contentType);
+        if (!response.ok || clearlyNotImage) {
+          // Drain the body so undici releases the connection instead of
+          // holding it open until the socket times out.
+          await response.body?.cancel().catch(() => undefined);
+          throw new Error(`HTTP ${response.status} (${contentType || 'no content-type'})`);
+        }
 
-  if (server.type === 'plex') {
-    target.searchParams.set('X-Plex-Token', token);
-  } else if (server.type === 'jellyfin') {
-    headers['Authorization'] = `MediaBrowser Token="${token}"`;
-  } else {
-    headers['X-Emby-Token'] = token;
-  }
-
-  // Fetch image from server. redirect:'error' so the media server can't bounce us
-  // (with the token) off-origin via a 30x — the origin-lock only guards the first hop.
-  try {
-    const response = await fetch(target, {
-      headers,
-      redirect: 'error',
-      signal: AbortSignal.timeout(10000), // 10 second timeout
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+        imageBuffer = Buffer.from(await response.arrayBuffer());
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    if (!imageBuffer) {
+      throw lastError instanceof Error
+        ? lastError
+        : new Error(String(lastError ?? 'upstream fetch failed'));
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const imageBuffer = Buffer.from(arrayBuffer);
-
-    // Resize and convert to WebP using sharp
     const resized = await sharp(imageBuffer)
       .resize(width, height, {
         fit: 'cover',
@@ -285,27 +494,130 @@ export async function proxyImage(options: ProxyOptions): Promise<ProxyResult> {
       .webp({ quality: 80 })
       .toBuffer();
 
-    // Cache the result
-    try {
-      writeFileSync(cachePath, resized);
-    } catch {
-      // Cache write failure is non-fatal
-    }
+    await writeCacheAtomic(shardDir, cachePath, resized);
+    // Fire-and-forget: the write-once color persist already self-catches
+    // errors, so the response and semaphore release don't wait on a DB round-trip.
+    void persistDominantColorIfNeeded(serverId, imagePath, resized);
 
-    return {
-      data: resized,
-      contentType: 'image/webp',
-      cached: false,
-    };
+    return { data: resized, contentType: 'image/webp', cached: false };
   } catch {
-    // Return fallback on any error
-    const fallbackSvg = getFallbackImage(fallback, width, height);
+    // Return fallback on any error, capped at a short cache lifetime so an
+    // upstream blip (e.g. a Plex restart) can't pin "No Image" for a year.
     return {
-      data: fallbackSvg,
+      data: getFallbackImage(fallback, width, height),
       contentType: 'image/svg+xml',
       cached: false,
+      cacheControl: DEGRADED_CACHE_CONTROL,
     };
+  } finally {
+    release();
   }
+}
+
+// Coalesces concurrent misses for the same cache key into one pipeline run.
+const inFlightMisses = new Map<string, Promise<ProxyResult>>();
+
+/**
+ * If the shared pipeline promise hasn't settled within the semaphore wait
+ * timeout, resolve THIS caller with an LQIP placeholder instead of making it
+ * wait longer. The pipeline keeps running in the background (other callers,
+ * or a future request, still get the real image once it lands).
+ */
+function raceWithLqipFallback(
+  pipelinePromise: Promise<ProxyResult>,
+  serverId: string,
+  imagePath: string
+): Promise<ProxyResult> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      void (async () => {
+        const known = await getKnownDominantColor(serverId, imagePath);
+        const data = await buildLqipPlaceholder(known);
+        resolve({
+          data,
+          contentType: 'image/webp',
+          cached: false,
+          cacheControl: DEGRADED_CACHE_CONTROL,
+        });
+      })().catch(reject);
+    }, SEMAPHORE_WAIT_TIMEOUT_MS);
+
+    pipelinePromise.then(
+      (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    );
+  });
+}
+
+/**
+ * Fetch and proxy an image from a media server
+ */
+export async function proxyImage(options: ProxyOptions): Promise<ProxyResult> {
+  const {
+    serverId,
+    imagePath,
+    width = 300,
+    height = 450,
+    fallback = 'poster',
+    version,
+    lqip = false,
+  } = options;
+
+  // A 360x540 poster is always the one versioned entry, whether or not the URL
+  // said so: the fingerprint is the path's own, so every surface shares the file.
+  const isPoster =
+    fallback === 'poster' &&
+    width === POSTER_IMAGE_SIZE.width &&
+    height === POSTER_IMAGE_SIZE.height;
+  const effectiveVersion = isPoster ? posterVersionFor(imagePath) : version;
+
+  const { fileName, shard, versioned } = buildCacheKeyInfo(
+    serverId,
+    imagePath,
+    width,
+    height,
+    effectiveVersion
+  );
+  const shardDir = join(IMAGE_CACHE_DIR, shard);
+  const cachePath = join(shardDir, fileName);
+
+  const cached = await readFromCache(cachePath, versioned);
+  if (cached) {
+    return cached;
+  }
+
+  let pipelinePromise = inFlightMisses.get(fileName);
+  if (!pipelinePromise) {
+    pipelinePromise = runMissPipeline({
+      serverId,
+      imagePath,
+      width,
+      height,
+      fallback,
+      cachePath,
+      shardDir,
+    }).finally(() => {
+      inFlightMisses.delete(fileName);
+    });
+    inFlightMisses.set(fileName, pipelinePromise);
+  }
+
+  if (!lqip || !versioned) return pipelinePromise;
+  return raceWithLqipFallback(pipelinePromise, serverId, imagePath);
 }
 
 /**
@@ -324,19 +636,12 @@ export function getGravatarUrl(email: string | null | undefined, size: number = 
 // ============================================================================
 
 /**
- * Size presets optimized for different use cases.
- * Push notifications use smaller images to reduce bandwidth and load faster.
- * API responses use standard sizes for flexibility.
+ * Size presets for non-poster images (avatars, logo, cast/art thumbnails).
+ * Posters have exactly one size now: POSTER_IMAGE_SIZE.
  */
 export const IMAGE_SIZES = {
-  // Push notification sizes (smaller for fast loading)
-  pushPoster: { width: 200, height: 300 },
   pushAvatar: { width: 80, height: 80 },
   pushLogo: { width: 128, height: 128 },
-
-  // API response sizes (standard)
-  apiPoster: { width: 300, height: 450 },
-  apiPosterSmall: { width: 150, height: 225 },
   apiAvatar: { width: 100, height: 100 },
   apiArt: { width: 500, height: 280 },
 } as const;
@@ -347,6 +652,7 @@ export interface ProxyUrlOptions {
   width?: number;
   height?: number;
   fallback?: FallbackType;
+  version?: string;
 }
 
 /**
@@ -354,7 +660,7 @@ export interface ProxyUrlOptions {
  * Callers can prepend their known base URL.
  */
 export function buildProxyUrl(options: ProxyUrlOptions): string {
-  const { serverId, path, width = 300, height = 450, fallback = 'poster' } = options;
+  const { serverId, path, width = 300, height = 450, fallback = 'poster', version } = options;
   const params = new URLSearchParams({
     server: serverId,
     url: path,
@@ -362,6 +668,7 @@ export function buildProxyUrl(options: ProxyUrlOptions): string {
     height: String(height),
     fallback,
   });
+  if (version) params.set('v', version);
   return `/api/v1/images/proxy?${params}`;
 }
 
@@ -378,20 +685,54 @@ export function buildAbsoluteProxyUrl(
 }
 
 /**
+ * Short cache-busting fingerprint for a poster path (first 8 hex chars of its sha1).
+ */
+export function posterVersionFor(thumbPath: string): string {
+  return createHash('sha1').update(thumbPath).digest('hex').slice(0, 8);
+}
+
+/** File name and shard of a poster's one cache entry: 360x540 at the path's own fingerprint. */
+export function posterCacheFileName(
+  serverId: string,
+  thumbPath: string
+): { fileName: string; shard: string } {
+  const { fileName, shard } = buildCacheKeyInfo(
+    serverId,
+    thumbPath,
+    POSTER_IMAGE_SIZE.width,
+    POSTER_IMAGE_SIZE.height,
+    posterVersionFor(thumbPath)
+  );
+  return { fileName, shard };
+}
+
+export async function posterCacheEntryExists(
+  serverId: string,
+  thumbPath: string
+): Promise<boolean> {
+  const { fileName, shard } = posterCacheFileName(serverId, thumbPath);
+  try {
+    await fsStat(join(IMAGE_CACHE_DIR, shard, fileName));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Build a poster URL for API responses (relative).
  */
 export function buildPosterUrl(
   serverId: string | null | undefined,
-  thumbPath: string | null | undefined,
-  size: 'standard' | 'small' = 'standard'
+  thumbPath: string | null | undefined
 ): string | null {
   if (!serverId || !thumbPath) return null;
-  const dimensions = size === 'small' ? IMAGE_SIZES.apiPosterSmall : IMAGE_SIZES.apiPoster;
   return buildProxyUrl({
     serverId,
     path: thumbPath,
-    ...dimensions,
+    ...POSTER_IMAGE_SIZE,
     fallback: 'poster',
+    version: posterVersionFor(thumbPath),
   });
 }
 
@@ -429,8 +770,9 @@ export function buildPushPosterUrl(
   return buildAbsoluteProxyUrl(baseUrl, {
     serverId,
     path: thumbPath,
-    ...IMAGE_SIZES.pushPoster,
+    ...POSTER_IMAGE_SIZE,
     fallback: 'poster',
+    version: posterVersionFor(thumbPath),
   });
 }
 

@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Не удалось обновить агента",
       "apiKeyGenerateFailed": "Не удалось сгенерировать ключ API",
       "authFailed": "Аутентификация не удалась",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
       "clipboardFailed": "Не удалось скопировать в буфер обмена",
       "copyFailed": "Не удалось скопировать в буфер обмена",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
       "deviceRemoveFailed": "Не удалось удалить устройство",
       "deviceRenameFailed": "Не удалось переименовать устройство",
       "dismissFailed": "Не удалось уволить нарушение",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "URL-адреса plex.direct это адреса ретрансляции, которые не могут быть использованы здесь. Пожалуйста, используйте прямой IP адрес или имя хоста.",
+      "plexReauthorizeFailed": "",
       "plexUnlinkFailed": "Не удалось отвязать аккаунт Plex",
       "routingUpdateFailed": "Не удалось обновить маршрутизацию",
       "ruleCreateFailed": "Не удалось создать правило",
@@ -148,6 +156,18 @@
         "message": "Ваш новый ключ API готов к использованию",
         "title": "Ключ API создан"
       },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
+      },
       "claimCodeValidated": {
         "message": "Теперь вы можете продолжить установку",
         "title": "Код подтверждения подтвержден"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Скопировано в буфер обмена"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
         "message": "Устройство было отключено",
         "title": "Устройство удалено"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "Теперь вы можете добавить серверы из вашего аккаунта Plex",
         "title": "Аккаунт Plex привязан"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
         "message": "Ваша учетная запись Plex была отключена",
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },

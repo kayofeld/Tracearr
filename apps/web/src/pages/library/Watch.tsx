@@ -4,12 +4,8 @@ import type { Server } from '@tracearr/shared';
 import { StatCard, formatWatchTime } from '@/components/ui/stat-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import {
-  ErrorState,
-  EmptyState,
-  BingeHighlightsTable,
-  MostWatchedSection,
-} from '@/components/library';
+import { ErrorState, BingeHighlightsTable, MostWatchedSection } from '@/components/library';
+import { EmptyState } from '@/components/ui/empty-state';
 import {
   CompletionDonutChart,
   HourlyDistributionChart,

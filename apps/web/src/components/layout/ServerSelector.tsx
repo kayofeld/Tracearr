@@ -1,12 +1,15 @@
+import { useTranslation } from 'react-i18next';
+import { ChevronsUpDown, Server } from 'lucide-react';
 import { useServer } from '@/hooks/useServer';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
+import { MultiSelectList, type MultiSelectOption } from '@/components/ui/multi-select';
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar';
 import { MediaServerIcon } from '@/components/icons/MediaServerIcon';
-import { ChevronsUpDown } from 'lucide-react';
 
 export function ServerSelector() {
+  const { t } = useTranslation('common');
   const {
     servers,
     selectedServerIds,
@@ -18,92 +21,101 @@ export function ServerSelector() {
     isFetching,
   } = useServer();
 
-  // Show skeleton while loading initially or refetching with no cached data
   if (isLoading || (servers.length === 0 && isFetching)) {
     return (
-      <div className="px-4 py-2">
-        <Skeleton className="h-9 w-full" />
+      <div className="px-2 pb-2">
+        <Skeleton className="h-8 w-full" />
       </div>
     );
   }
 
-  // No servers available
-  if (servers.length === 0) {
+  const [firstServer] = servers;
+  if (!firstServer) {
     return null;
   }
 
-  // Only one server - show static label
   if (servers.length === 1) {
-    const server = servers[0]!;
+    const server = firstServer;
     return (
-      <div className="text-muted-foreground flex items-center gap-2 px-4 py-2 text-sm">
-        <MediaServerIcon type={server.type} className="h-4 w-4" />
-        <span className="truncate font-medium">{server.name}</span>
+      <div className="px-2 pb-2">
+        <div className="text-muted-foreground flex items-center gap-2 overflow-hidden p-2 text-sm group-data-[collapsible=icon]:justify-center">
+          <MediaServerIcon type={server.type} className="size-4 shrink-0" />
+          <span className="truncate font-medium group-data-[collapsible=icon]:hidden">
+            {server.name}
+          </span>
+        </div>
       </div>
     );
   }
 
-  // Resolve single selected server for trigger display
   const singleSelected =
     selectedServerIds.length === 1 ? servers.find((s) => s.id === selectedServerIds[0]) : undefined;
 
   const triggerLabel = isAllServersSelected
-    ? 'All servers'
-    : singleSelected
-      ? singleSelected.name
-      : `${selectedServerIds.length} of ${servers.length} servers`;
+    ? t('serverSelector.all')
+    : (singleSelected?.name ??
+      t('serverSelector.some', { count: selectedServerIds.length, total: servers.length }));
+
+  const options: MultiSelectOption[] = servers.map((server) => ({
+    value: server.id,
+    label: server.name,
+    accentColor: server.color,
+    icon: <MediaServerIcon type={server.type} className="size-4 shrink-0" />,
+  }));
+
+  const selectAllRow = (
+    <div className="border-b p-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="text-muted-foreground h-7 w-full justify-start text-xs font-normal"
+        onClick={() => {
+          // Selection can't be empty, so clearing collapses to the first server
+          if (isAllServersSelected) deselectAllExcept(firstServer.id);
+          else selectAllServers();
+        }}
+      >
+        {isAllServersSelected ? t('actions.deselectAll') : t('actions.selectAll')}
+      </Button>
+    </div>
+  );
 
   return (
-    <div className="px-4 py-2">
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            role="combobox"
-            className="h-9 w-full justify-between border-l-2 text-sm font-normal"
-            style={{ borderLeftColor: singleSelected?.color ?? 'transparent' }}
-          >
-            <span className="flex items-center gap-2 truncate">
-              {singleSelected && (
-                <MediaServerIcon type={singleSelected.type} className="h-4 w-4 shrink-0" />
-              )}
-              {triggerLabel}
-            </span>
-            <ChevronsUpDown className="text-muted-foreground ml-2 h-4 w-4 shrink-0" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-2" align="start">
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-foreground w-full px-2 py-1.5 text-left text-xs"
-            onClick={() => {
-              if (isAllServersSelected) {
-                // Selection can't be empty, so collapse to the first server
-                deselectAllExcept(servers[0]!.id);
-              } else {
-                selectAllServers();
-              }
-            }}
-          >
-            {isAllServersSelected ? 'Deselect all' : 'Select all'}
-          </button>
-          <div className="my-1 border-t" />
-          {servers.map((server) => {
-            const isSelected = selectedServerIds.includes(server.id);
-            return (
-              <label
-                key={server.id}
-                className="hover:bg-accent flex cursor-pointer items-center gap-2.5 rounded-sm border-l-2 px-2 py-1.5"
-                style={{ borderLeftColor: server.color ?? 'transparent' }}
+    <div className="px-2 pb-2">
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <Popover>
+            <PopoverTrigger asChild>
+              <SidebarMenuButton
+                className="border-l-2 group-data-[collapsible=icon]:border-l-0"
+                style={{ borderLeftColor: singleSelected?.color ?? 'transparent' }}
+                tooltip={triggerLabel}
               >
-                <Checkbox checked={isSelected} onCheckedChange={() => toggleServer(server.id)} />
-                <MediaServerIcon type={server.type} className="h-4 w-4 shrink-0" />
-                <span className="truncate text-sm">{server.name}</span>
-              </label>
-            );
-          })}
-        </PopoverContent>
-      </Popover>
+                {/* MediaServerIcon renders an <img>, which SidebarMenuButton's
+                    [&>svg]:size-4 rule cannot reach, so it must size itself. */}
+                {singleSelected ? (
+                  <MediaServerIcon type={singleSelected.type} className="size-4 shrink-0" />
+                ) : (
+                  <Server />
+                )}
+                <span className="truncate">{triggerLabel}</span>
+                <ChevronsUpDown className="ml-auto opacity-50 group-data-[collapsible=icon]:hidden" />
+              </SidebarMenuButton>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-0" align="start" side="right" sideOffset={8}>
+              <MultiSelectList
+                options={options}
+                value={selectedServerIds}
+                onToggle={toggleServer}
+                searchPlaceholder={t('serverSelector.search')}
+                emptyMessage={t('serverSelector.noMatches')}
+                header={selectAllRow}
+              />
+            </PopoverContent>
+          </Popover>
+        </SidebarMenuItem>
+      </SidebarMenu>
     </div>
   );
 }

@@ -1,3 +1,7 @@
+/* eslint-disable @eslint-react/static-components --
+ * The icon lookup returns a module-level component, so its reference is stable
+ * across renders and nothing remounts. The rule cannot see that through the call.
+ */
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';

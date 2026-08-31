@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Αποτυχία ενημέρωσης πράκτορα",
       "apiKeyGenerateFailed": "Αποτυχία δημιουργίας κλειδιού API",
       "authFailed": "Αποτυχία ταυτοποίησης",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
       "clipboardFailed": "Αποτυχία αντιγραφής στο πρόχειρο",
       "copyFailed": "Αδυναμία αντιγραφής στο πρόχειρο",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
       "deviceRemoveFailed": "Αποτυχία κατάργησης συσκευής",
       "deviceRenameFailed": "Αποτυχία μετονομασίας συσκευής",
       "dismissFailed": "Αποτυχία απόρριψης παραβίασης",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "Οι διευθύνσεις URL plex.direct είναι διευθύνσεις ρελέ που δεν μπορούν να χρησιμοποιηθούν εδώ. Παρακαλώ χρησιμοποιήστε μια άμεση διεύθυνση IP ή όνομα κεντρικού υπολογιστή.",
+      "plexReauthorizeFailed": "",
       "plexUnlinkFailed": "Αποτυχία αποσύνδεσης του λογαριασμού Plex",
       "routingUpdateFailed": "Αποτυχία ενημέρωσης δρομολόγησης",
       "ruleCreateFailed": "Αποτυχία δημιουργίας κανόνα",
@@ -148,6 +156,18 @@
         "message": "Το νέο κλειδί API είναι έτοιμο προς χρήση",
         "title": "Το Κλειδί Api Δημιουργήθηκε"
       },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
+      },
       "claimCodeValidated": {
         "message": "Τώρα μπορείτε να προχωρήσετε με την εγκατάσταση",
         "title": "Επικυρωμένος κωδικός αξίωσης"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Αντιγράφηκε στο πρόχειρο"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
         "message": "Η συσκευή έχει αποσυνδεθεί",
         "title": "Η Συσκευή Αφαιρέθηκε"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "Τώρα μπορείτε να προσθέσετε διακομιστές από το λογαριασμό σας στο Plex",
         "title": "Συνδεδεμένος Λογαριασμός Plex"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
         "message": "Ο λογαριασμός σας στο Plex έχει αποσυνδεθεί",
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },

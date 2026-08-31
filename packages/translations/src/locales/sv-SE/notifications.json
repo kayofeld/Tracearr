@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Det gick inte att uppdatera agent",
       "apiKeyGenerateFailed": "Det gick inte att generera API-nyckel",
       "authFailed": "Autentisering misslyckades",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
       "clipboardFailed": "Det gick inte att kopiera till urklipp",
       "copyFailed": "Kunde inte kopiera till urklipp",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
       "deviceRemoveFailed": "Det gick inte att ta bort enheten",
       "deviceRenameFailed": "Det gick inte att byta namn på enheten",
       "dismissFailed": "Misslyckades att avfärda brott",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "plex.direct URL:er är reläadresser som inte kan användas här. Använd en direkt IP-adress eller värdnamn istället.",
+      "plexReauthorizeFailed": "",
       "plexUnlinkFailed": "Det gick inte att koppla bort Plex-kontot",
       "routingUpdateFailed": "Det gick inte att uppdatera routing",
       "ruleCreateFailed": "Kunde inte skapa regel",
@@ -148,6 +156,18 @@
         "message": "Din nya API-nyckel är klar att användas",
         "title": "API-nyckel genererad"
       },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
+      },
       "claimCodeValidated": {
         "message": "Du kan nu fortsätta med installationen",
         "title": "Begär kod validerad"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Kopierad till urklipp"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
         "message": "Enheten har kopplats bort",
         "title": "Enhet borttagen"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "Du kan nu lägga till servrar från ditt Plex-konto",
         "title": "Plex konto länkat"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
         "message": "Ditt Plex-konto har kopplats bort",
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },

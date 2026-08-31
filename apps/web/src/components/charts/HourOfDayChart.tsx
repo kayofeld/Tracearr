@@ -3,6 +3,7 @@ import Highcharts from 'highcharts';
 import { HighchartsReact } from 'highcharts-react-official';
 import { getHour12 } from '@/lib/timeFormat';
 import { ChartSkeleton } from '@/components/ui/skeleton';
+import { ChartEmpty } from './ChartEmpty';
 
 interface HourOfDayData {
   hour: number;
@@ -133,14 +134,7 @@ export function HourOfDayChart({ data, isLoading, height = 250 }: HourOfDayChart
   }
 
   if (!data || data.length === 0) {
-    return (
-      <div
-        className="text-muted-foreground flex items-center justify-center rounded-lg border border-dashed"
-        style={{ height }}
-      >
-        No data available
-      </div>
-    );
+    return <ChartEmpty height={height} message="No data available" />;
   }
 
   return (

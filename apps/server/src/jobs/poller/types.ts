@@ -8,15 +8,15 @@
 import type {
   Session,
   SessionState,
-  Rule,
-  RuleParams,
-  RuleV2,
+  EngineAutomation,
   ActiveSession,
   StreamDetailFields,
 } from '@tracearr/shared';
 import type { sessions } from '../../db/schema.js';
+import type { SessionIdentity as MediaItemIdentity } from './database.js';
 import type { CacheService, PubSubService } from '../../services/cache.js';
 import type { GeoLocation } from '../../services/geoip.js';
+import type { SessionStopReason } from '../../services/automations/events/types.js';
 import type { ViolationInsertResult } from './violations.js';
 
 // ============================================================================
@@ -59,6 +59,8 @@ export interface SessionIdentity {
   sessionKey: string;
   /** When provided, validates the session has this ratingKey */
   ratingKey?: string | null;
+  /** When provided, only matches a row owned by this server user */
+  serverUserId?: string | null;
 }
 
 /** JF/Emby session identity: user+device+content (stable across session.Id changes). */
@@ -95,6 +97,8 @@ export interface ProcessedSession extends StreamDetailFields {
   plexSessionId?: string;
   /** Media item identifier (ratingKey for Plex, itemId for Jellyfin) */
   ratingKey: string;
+  /** Identifier of the file/version being played, when the server reports one */
+  serverVersionKey?: string | null;
 
   // User identification from media server
   /** External user ID from Plex/Jellyfin for lookup */
@@ -182,6 +186,9 @@ export interface ProcessedSession extends StreamDetailFields {
    * More accurate than tracking pause transitions via polling.
    */
   lastPausedDate?: Date;
+
+  /** Canonical media identity resolved from library_items, stamped at session insert. */
+  identity?: MediaItemIdentity | null;
 }
 
 // ============================================================================
@@ -287,7 +294,6 @@ export interface PendingSessionData {
     thumbUrl: string | null;
     identityName: string | null;
     trustScore: number;
-    sessionCount: number;
     lastActivityAt: Date | null;
     createdAt: Date;
     /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
@@ -354,7 +360,6 @@ export interface SessionCreationInput {
     thumbUrl: string | null;
     identityName: string | null;
     trustScore: number;
-    sessionCount: number;
     lastActivityAt: Date | null;
     createdAt: Date;
     /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
@@ -363,7 +368,7 @@ export interface SessionCreationInput {
   /** GeoIP location data */
   geo: GeoLocation;
   /** Active V2 rules to evaluate */
-  activeRulesV2: RuleV2[];
+  activeAutomations: EngineAutomation[];
   /** Active sessions for rule context (e.g., concurrent streams) */
   activeSessions: Session[];
   /** Recent sessions for rule evaluation context */
@@ -433,7 +438,7 @@ export interface ResolvePendingSessionInput {
   /** Server user info (matches SessionCreationInput.serverUser) */
   userDetail: SessionCreationInput['serverUser'];
   /** Active V2 rules to evaluate on confirmation */
-  activeRulesV2: RuleV2[];
+  activeAutomations: EngineAutomation[];
   /** Active sessions for rule context (e.g., concurrent streams) */
   activeSessions: ActiveSession[];
   /** Recent sessions for rule evaluation context */
@@ -462,6 +467,8 @@ export interface SessionStopInput {
    * Use for quality changes where playback continues in a new session.
    */
   preserveWatched?: boolean;
+  /** What ended the row; the two continuations fire no stream-ended trigger. Defaults to 'ended'. */
+  reason?: SessionStopReason;
 }
 
 /**
@@ -501,7 +508,6 @@ export interface MediaChangeInput {
     thumbUrl: string | null;
     identityName: string | null;
     trustScore: number;
-    sessionCount: number;
     lastActivityAt: Date | null;
     createdAt: Date;
     /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
@@ -510,7 +516,7 @@ export interface MediaChangeInput {
   /** GeoIP location data */
   geo: GeoLocation;
   /** Active V2 rules to evaluate */
-  activeRulesV2: RuleV2[];
+  activeAutomations: EngineAutomation[];
   /** Active sessions for rule context (e.g., concurrent streams) */
   activeSessions: Session[];
   /** Recent sessions for rule evaluation context */
@@ -537,77 +543,7 @@ export interface MediaChangeResult {
 }
 
 // ============================================================================
-// Transcode Re-evaluation Types
-// ============================================================================
-
-/**
- * Input for re-evaluating V2 rules when transcode state changes on an existing session.
- * Only rules with transcode-related conditions are evaluated to avoid false positives.
- */
-export interface TranscodeReEvalInput {
-  /** The existing session row (pre-update, used for identity fields) */
-  existingSession: typeof sessions.$inferSelect;
-  /** Updated processed data from the media server (has current transcode state) */
-  processed: ProcessedSession;
-  /** Server info */
-  server: { id: string; name: string; type: string };
-  /** Server user info */
-  serverUser: {
-    id: string;
-    /** Identity (users.id) this server_user belongs to */
-    userId: string;
-    username: string;
-    thumbUrl: string | null;
-    identityName: string | null;
-    trustScore: number;
-    sessionCount: number;
-    lastActivityAt: Date | null;
-    createdAt: Date;
-    /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
-    identityServerUserIds: string[];
-  };
-  /** Active V2 rules (will be filtered to transcode-related) */
-  activeRulesV2: RuleV2[];
-  /** Active sessions for rule context */
-  activeSessions: Session[];
-  /** Recent sessions for rule evaluation context */
-  recentSessions: Session[];
-}
-
-export interface PauseReEvalInput {
-  /** The existing session row (pre-update, used for identity fields) */
-  existingSession: typeof sessions.$inferSelect;
-  /** Updated processed data from the media server (has current state) */
-  processed: ProcessedSession;
-  /** Updated pause tracking fields (after calculatePauseAccumulation) */
-  pauseData: { lastPausedAt: Date | null; pausedDurationMs: number };
-  /** Server info */
-  server: { id: string; name: string; type: string };
-  /** Server user info */
-  serverUser: {
-    id: string;
-    /** Identity (users.id) this server_user belongs to */
-    userId: string;
-    username: string;
-    thumbUrl: string | null;
-    identityName: string | null;
-    trustScore: number;
-    sessionCount: number;
-    lastActivityAt: Date | null;
-    createdAt: Date;
-    /** All server_user ids belonging to the same identity, for cross-server rule aggregation */
-    identityServerUserIds: string[];
-  };
-  /** Active V2 rules (will be filtered to pause-related) */
-  activeRulesV2: RuleV2[];
-  /** Active sessions for rule context */
-  activeSessions: Session[];
-  /** Recent sessions for rule evaluation context */
-  recentSessions: Session[];
-}
-
-// ============================================================================
 // Re-exports for convenience
 // ============================================================================
 
-export type { Session, SessionState, Rule, RuleParams, RuleV2 };
+export type { Session, SessionState, EngineAutomation };

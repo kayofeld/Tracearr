@@ -10,13 +10,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockDbSelect = vi.fn();
-const { mockCreateMediaServerClient, mockGetActiveRulesV2 } = vi.hoisted(() => ({
+const { mockCreateMediaServerClient, mockGetActiveAutomations } = vi.hoisted(() => ({
   mockCreateMediaServerClient: vi.fn(),
-  mockGetActiveRulesV2: vi.fn().mockResolvedValue([]),
+  mockGetActiveAutomations: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../../../db/client.js', () => ({
   db: { select: (...args: unknown[]) => mockDbSelect(...args) },
+}));
+
+vi.mock('../../../services/leaderLease.js', () => ({
+  isLeader: () => true,
 }));
 
 vi.mock('../../../db/schema.js', async (importOriginal) => {
@@ -26,6 +30,10 @@ vi.mock('../../../db/schema.js', async (importOriginal) => {
 
 vi.mock('../../../routes/settings.js', () => ({
   getGeoIPSettings: vi.fn().mockResolvedValue({ usePlexGeoip: false }),
+}));
+
+vi.mock('../../../services/settings.js', () => ({
+  getWatchedThreshold: vi.fn().mockResolvedValue(0.85),
 }));
 
 vi.mock('../../../serverState.js', () => ({
@@ -57,8 +65,10 @@ vi.mock('../../notificationQueue.js', () => ({
 }));
 
 vi.mock('../database.js', () => ({
-  getActiveRulesV2: mockGetActiveRulesV2,
+  getCachedServers: () => mockDbSelect().from(),
+  getActiveAutomations: mockGetActiveAutomations,
   batchGetIdentityServerUserIds: vi.fn().mockResolvedValue(new Map()),
+  batchGetLibraryItemIdentity: vi.fn().mockResolvedValue(new Map()),
   batchGetRecentUserSessions: vi.fn().mockResolvedValue(new Map()),
   widenRecentSessionsForMergedIdentities: vi.fn(),
 }));
@@ -77,9 +87,13 @@ vi.mock('../sessionLifecycle.js', () => ({
   findActiveSessionByComposite: vi.fn(),
   handleMediaChangeAtomic: vi.fn(),
   processPollResults: vi.fn().mockResolvedValue(undefined),
-  reEvaluateRulesOnPauseState: vi.fn(),
-  reEvaluateRulesOnTranscodeChange: vi.fn(),
   stopSessionAtomic: vi.fn(),
+}));
+
+const mockDispatch = vi.fn().mockResolvedValue({ violations: [], outcomes: [] });
+vi.mock('../../../services/automations/events/dispatcher.js', () => ({
+  dispatch: (...args: unknown[]) => mockDispatch(...args),
+  subscribe: vi.fn(),
 }));
 
 vi.mock('../violations.js', () => ({
@@ -254,7 +268,7 @@ describe('cross-entry-point server lock', () => {
 
   it('releases the lock when a run throws, so a later run for the same server still executes', async () => {
     mockDbSelect.mockReturnValue({ from: () => chainResolving([serverRow1]) });
-    mockGetActiveRulesV2.mockRejectedValueOnce(new Error('boom'));
+    mockGetActiveAutomations.mockRejectedValueOnce(new Error('boom'));
 
     await triggerServerPoll('server-1');
     expect(mockDbSelect).toHaveBeenCalledTimes(1);

@@ -1,79 +1,43 @@
 /**
- * Notification Queue - BullMQ-based async notification dispatch
- *
- * Provides reliable, retryable notification delivery with dead letter support.
- * All notifications are enqueued here and processed asynchronously by workers.
+ * Notification Queue - one job per destination, delivered through the type registry.
  */
 
-import { Queue, Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { getRedisPrefix } from '@tracearr/shared';
-import type {
-  ViolationWithDetails,
-  ActiveSession,
-  NotificationEventType,
-  GroupEvidence,
-} from '@tracearr/shared';
+import { Queue, UnrecoverableError, Worker, type Job, type ConnectionOptions } from 'bullmq';
+import type { GroupEvidence } from '@tracearr/shared';
+import { getBullPrefix, queueConnectionOptions } from './queueConnection.js';
+import {
+  eventTypeOf,
+  type NotificationEvent,
+  type NotificationSource,
+} from '../services/notifications/events.js';
+import { DELIVER_TIMEOUT_MS } from '../services/notifications/destinations/fetch.js';
+import { getDestinationType } from '../services/notifications/destinations/registry.js';
+import {
+  findDestinationsForEvent,
+  getDestination,
+  markReencrypt,
+  readConfig,
+  rewrapConfig,
+  type DestinationRow,
+} from '../services/notifications/destinationStore.js';
 import { isMaintenance } from '../serverState.js';
-import { WS_EVENTS } from '@tracearr/shared';
-import { notificationManager } from '../services/notifications/index.js';
-import { pushNotificationService } from '../services/pushNotification.js';
-import { getNotificationSettings } from '../routes/settings.js';
-import { getChannelRouting } from '../routes/channelRouting.js';
-import { broadcastToAll } from '../websocket/index.js';
 
-/**
- * Map job types to notification event types for routing lookup
- */
-const JOB_TYPE_TO_EVENT_TYPE: Record<NotificationJobData['type'], NotificationEventType> = {
-  violation: 'violation_detected',
-  session_started: 'stream_started',
-  session_stopped: 'stream_stopped',
-  server_down: 'server_down',
-  server_up: 'server_up',
-  plugin_update_available: 'plugin_update_available',
-  app_update_available: 'app_update_available',
-};
+export interface NotificationJob {
+  destinationId: string;
+  source: NotificationSource;
+  event: NotificationEvent;
+}
 
-// Job type discriminated union for type-safe job handling
-export type NotificationJobData =
-  | { type: 'violation'; payload: ViolationWithDetails }
-  | { type: 'session_started'; payload: ActiveSession }
-  | { type: 'session_stopped'; payload: ActiveSession }
-  | { type: 'server_down'; payload: { serverName: string; serverId: string } }
-  | { type: 'server_up'; payload: { serverName: string; serverId: string } }
-  | {
-      type: 'plugin_update_available';
-      payload: {
-        serverId: string;
-        serverName: string;
-        serverType: string;
-        installedVersion: string | null;
-        latestVersion: string;
-        downloadUrl: string;
-      };
-    }
-  | {
-      type: 'app_update_available';
-      payload: {
-        currentVersion: string;
-        latestVersion: string;
-        releaseUrl: string;
-      };
-    };
-
-// Queue name constant
-const QUEUE_NAME = 'notifications';
-
-// Dead letter queue name for failed jobs that exceed retry attempts
-const DLQ_NAME = 'notifications-dlq';
+const QUEUE_NAME = 'notifications-v2';
+const DLQ_NAME = 'notifications-v2-dlq';
 
 // Connection options (will be set during initialization)
 let connectionOptions: ConnectionOptions | null = null;
 
 // Queue and worker instances
-let notificationQueue: Queue<NotificationJobData> | null = null;
-let notificationWorker: Worker<NotificationJobData> | null = null;
-let dlqQueue: Queue<NotificationJobData> | null = null;
+let notificationQueue: Queue<NotificationJob> | null = null;
+let notificationWorker: Worker<NotificationJob> | null = null;
+let dlqQueue: Queue<NotificationJob> | null = null;
 
 /**
  * Initialize the notification queue with Redis connection
@@ -84,12 +48,11 @@ export function initNotificationQueue(redisUrl: string): void {
     return;
   }
 
-  connectionOptions = { url: redisUrl };
+  connectionOptions = queueConnectionOptions(redisUrl);
 
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  const bullPrefix = getBullPrefix();
 
-  // Create the main notification queue
-  notificationQueue = new Queue<NotificationJobData>(QUEUE_NAME, {
+  notificationQueue = new Queue<NotificationJob>(QUEUE_NAME, {
     connection: connectionOptions,
     prefix: bullPrefix,
     defaultJobOptions: {
@@ -99,7 +62,7 @@ export function initNotificationQueue(redisUrl: string): void {
         delay: 1000, // 1s, 2s, 4s
       },
       removeOnComplete: {
-        count: 1000, // Keep last 1000 completed jobs for debugging
+        count: 10_000,
         age: 24 * 60 * 60, // Remove completed jobs older than 24h
       },
       removeOnFail: {
@@ -113,7 +76,7 @@ export function initNotificationQueue(redisUrl: string): void {
   });
 
   // Create dead letter queue for jobs that fail all retries
-  dlqQueue = new Queue<NotificationJobData>(DLQ_NAME, {
+  dlqQueue = new Queue<NotificationJob>(DLQ_NAME, {
     connection: connectionOptions,
     prefix: bullPrefix,
     defaultJobOptions: {
@@ -147,22 +110,24 @@ export function startNotificationWorker(): void {
     return;
   }
 
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  const bullPrefix = getBullPrefix();
 
-  notificationWorker = new Worker<NotificationJobData>(
+  notificationWorker = new Worker<NotificationJob>(
     QUEUE_NAME,
-    async (job: Job<NotificationJobData>) => {
+    async (job: Job<NotificationJob>) => {
       const startTime = Date.now();
 
       try {
-        await processNotificationJob(job);
+        await processJob(job);
 
         const duration = Date.now() - startTime;
-        console.log(`Notification job ${job.id} (${job.data.type}) processed in ${duration}ms`);
+        console.log(
+          `Notification job ${job.id} (${job.data.event.type}) processed in ${duration}ms`
+        );
       } catch (error) {
         const duration = Date.now() - startTime;
         console.error(
-          `Notification job ${job.id} (${job.data.type}) failed after ${duration}ms:`,
+          `Notification job ${job.id} (${job.data.event.type}) failed after ${duration}ms:`,
           error
         );
         throw error; // Re-throw to trigger retry
@@ -179,20 +144,17 @@ export function startNotificationWorker(): void {
     }
   );
 
-  // Handle failed jobs that exceed retry attempts - move to DLQ
   notificationWorker.on('failed', (job, error) => {
-    if (job && job.attemptsMade >= (job.opts.attempts || 3)) {
-      console.error(
-        `Notification job ${job.id} (${job.data.type}) exhausted retries, moving to DLQ:`,
-        error
-      );
+    if (!job) return;
+    const exhausted = job.attemptsMade >= (job.opts.attempts ?? 3);
+    if (!exhausted && !(error instanceof UnrecoverableError)) return;
 
-      // Move to dead letter queue for manual investigation
-      if (dlqQueue) {
-        void dlqQueue.add(`dlq-${job.data.type}`, job.data, {
-          jobId: `dlq-${job.id}`,
-        });
-      }
+    console.error(`Notification job ${job.id} (${job.data.event.type}) moving to DLQ:`, error);
+
+    if (dlqQueue) {
+      void dlqQueue.add(`dlq-${job.data.event.type}`, job.data, {
+        jobId: `dlq-${job.id}`,
+      });
     }
   });
 
@@ -203,236 +165,6 @@ export function startNotificationWorker(): void {
   console.log('Notification worker started');
 }
 
-/**
- * Process a rule notification directly to specified channels (bypasses routing).
- * When a rule action says "send notification to [channels]", we honor that directly.
- */
-async function processRuleNotification(
-  payload: ViolationWithDetails,
-  settings: Awaited<ReturnType<typeof getNotificationSettings>>
-): Promise<void> {
-  const data = payload.data as Record<string, unknown> | null;
-  const channels = (data?.channels as string[]) ?? [];
-  const customTitle = (data?.customTitle as string) ?? 'Rule Triggered';
-  const customMessage = (data?.customMessage as string) ?? 'A rule was triggered';
-
-  // Build a notification payload for the agents
-  const notificationPayload = {
-    event: 'violation_detected' as const,
-    title: customTitle,
-    message: customMessage,
-    severity: 'warning' as const,
-    timestamp: new Date().toISOString(),
-    context: { type: 'violation_detected' as const, violation: payload },
-  };
-
-  // Send to each specified channel
-  for (const channel of channels) {
-    switch (channel) {
-      case 'discord':
-        if (settings.discordWebhookUrl) {
-          const discordSettings = {
-            ...settings,
-            // Only Discord. Null webhookFormat so no webhook-family agent fires —
-            // ntfy/gotify/apprise/json gate on customWebhookUrl, but pushover and
-            // telegram gate on webhookFormat + their own keys, so nulling the URL
-            // alone is not enough to keep them from cross-firing.
-            webhookFormat: null,
-            customWebhookUrl: null,
-          };
-          await notificationManager.sendAll(notificationPayload, discordSettings);
-        }
-        break;
-
-      case 'webhook': {
-        // The webhook family now includes URL-less members (telegram, pushover),
-        // so a customWebhookUrl check would drop them. Fire when whichever
-        // format is selected is actually configured; shouldSend picks the agent.
-        const webhookConfigured =
-          !!settings.customWebhookUrl ||
-          (settings.webhookFormat === 'telegram' &&
-            !!settings.telegramBotToken &&
-            !!settings.telegramChatId) ||
-          (settings.webhookFormat === 'pushover' &&
-            !!settings.pushoverUserKey &&
-            !!settings.pushoverApiToken);
-        if (webhookConfigured) {
-          const webhookSettings = {
-            ...settings,
-            discordWebhookUrl: null, // Only the webhook family, not Discord.
-          };
-          await notificationManager.sendAll(notificationPayload, webhookSettings);
-        }
-        break;
-      }
-
-      case 'push':
-        // Use notifyRuleDirect to bypass user preference filters.
-        // Rule notifications are admin-configured and should reach all devices with push enabled.
-        await pushNotificationService.notifyRuleDirect(customTitle, customMessage, {
-          ruleId: payload.rule.id,
-          ruleName: payload.rule.name,
-        });
-        break;
-
-      // 'email' not implemented yet
-    }
-  }
-}
-
-/**
- * Process a single notification job
- */
-export async function processNotificationJob(job: Job<NotificationJobData>): Promise<void> {
-  const { type, payload } = job.data;
-
-  // Load current settings for each job (settings may change between enqueue and process)
-  const settings = await getNotificationSettings();
-
-  // Check if this is a rule-triggered notification that specifies channels directly
-  if (type === 'violation') {
-    const data = payload.data as Record<string, unknown> | null;
-    if (data?.ruleNotification === true && Array.isArray(data?.channels)) {
-      // Rule notifications bypass routing - they specify channels directly
-      await processRuleNotification(payload, settings);
-      return;
-    }
-  }
-
-  // Standard notifications use channel routing
-  const eventType = JOB_TYPE_TO_EVENT_TYPE[type];
-  const routing = await getChannelRouting(eventType);
-
-  // Build notification settings with routing-aware channel enablement
-  // The routing config controls which channels receive notifications
-  // webhookEnabled gates all webhook formats: json, ntfy, apprise, pushover
-  const notificationSettings = {
-    discordWebhookUrl: routing.discordEnabled ? settings.discordWebhookUrl : null,
-    customWebhookUrl: routing.webhookEnabled ? settings.customWebhookUrl : null,
-    webhookFormat: settings.webhookFormat,
-    ntfyTopic: routing.webhookEnabled ? settings.ntfyTopic : null,
-    ntfyAuthToken: routing.webhookEnabled ? settings.ntfyAuthToken : null,
-    pushoverUserKey: routing.webhookEnabled ? settings.pushoverUserKey : null,
-    pushoverApiToken: routing.webhookEnabled ? settings.pushoverApiToken : null,
-    telegramBotToken: routing.webhookEnabled ? settings.telegramBotToken : null,
-    telegramChatId: routing.webhookEnabled ? settings.telegramChatId : null,
-  };
-
-  switch (type) {
-    case 'violation': {
-      // Resolve display names for user_id array conditions once before dispatch
-      const rawEvidence = Array.isArray(payload.data?.evidence)
-        ? (payload.data.evidence as GroupEvidence[])
-        : [];
-      if (rawEvidence.length > 0) {
-        const userIdSet = new Set<string>();
-        for (const group of rawEvidence) {
-          for (const cond of group.conditions) {
-            // only threshold holds uuids; cond.actual is a display name, not an id
-            if (cond.field === 'user_id' && Array.isArray(cond.threshold)) {
-              for (const id of cond.threshold) {
-                if (typeof id === 'string') userIdSet.add(id);
-              }
-            }
-          }
-        }
-        if (userIdSet.size > 0) {
-          try {
-            const { getServerUserDisplayNames } = await import('../services/userService.js');
-            payload.userNames = await getServerUserDisplayNames([...userIdSet]);
-          } catch (err) {
-            console.error(
-              'failed to resolve user display names for violation notification',
-              payload.id,
-              err
-            );
-          }
-        }
-      }
-
-      // Send to Discord/webhooks (if routing allows)
-      if (routing.discordEnabled || routing.webhookEnabled) {
-        await notificationManager.notifyViolation(payload, notificationSettings);
-      }
-      // Send push notification to mobile devices (if routing allows)
-      if (routing.pushEnabled) {
-        await pushNotificationService.notifyViolation(payload);
-      }
-      break;
-    }
-
-    case 'session_started':
-      // Send to Discord/webhooks (if routing allows)
-      if (routing.discordEnabled || routing.webhookEnabled) {
-        await notificationManager.notifySessionStarted(payload, notificationSettings);
-      }
-      // Send push notification to mobile devices (if routing allows)
-      if (routing.pushEnabled) {
-        await pushNotificationService.notifySessionStarted(payload);
-      }
-      break;
-
-    case 'session_stopped':
-      // Send to Discord/webhooks (if routing allows)
-      if (routing.discordEnabled || routing.webhookEnabled) {
-        await notificationManager.notifySessionStopped(payload, notificationSettings);
-      }
-      // Send push notification to mobile devices (if routing allows)
-      if (routing.pushEnabled) {
-        await pushNotificationService.notifySessionStopped(payload);
-      }
-      break;
-
-    case 'server_down':
-      if (routing.discordEnabled || routing.webhookEnabled) {
-        await notificationManager.notifyServerDown(payload.serverName, notificationSettings);
-      }
-      if (routing.pushEnabled) {
-        await pushNotificationService.notifyServerDown(payload.serverName, payload.serverId);
-      }
-      if (routing.webToastEnabled) {
-        broadcastToAll(WS_EVENTS.SERVER_DOWN as 'server:down', {
-          serverId: payload.serverId,
-          serverName: payload.serverName,
-        });
-      }
-      break;
-
-    case 'server_up':
-      if (routing.discordEnabled || routing.webhookEnabled) {
-        await notificationManager.notifyServerUp(payload.serverName, notificationSettings);
-      }
-      if (routing.pushEnabled) {
-        await pushNotificationService.notifyServerUp(payload.serverName, payload.serverId);
-      }
-      if (routing.webToastEnabled) {
-        broadcastToAll(WS_EVENTS.SERVER_UP as 'server:up', {
-          serverId: payload.serverId,
-          serverName: payload.serverName,
-        });
-      }
-      break;
-
-    case 'plugin_update_available':
-      if (routing.discordEnabled || routing.webhookEnabled) {
-        await notificationManager.notifyPluginUpdateAvailable(payload, notificationSettings);
-      }
-      break;
-
-    case 'app_update_available':
-      if (routing.discordEnabled || routing.webhookEnabled) {
-        await notificationManager.notifyAppUpdateAvailable(payload, notificationSettings);
-      }
-      break;
-
-    default: {
-      // TypeScript exhaustiveness check
-      const _exhaustive: never = type;
-      throw new Error(`Unknown notification type: ${_exhaustive}`);
-    }
-  }
-}
-
 /** Deduplication window in milliseconds (5 minutes) */
 const DEDUP_WINDOW_MS = 5 * 60 * 1000;
 
@@ -441,79 +173,161 @@ function getTimeBucket(): number {
 }
 
 /** Generate dedup key (5-min window). BullMQ rejects duplicate jobIds. */
-function getDedupeKey(data: NotificationJobData): string | undefined {
-  const timeBucket = getTimeBucket();
+function dedupeKey(
+  destinationId: string,
+  event: NotificationEvent,
+  source: NotificationSource
+): string | undefined {
+  const bucket = getTimeBucket();
+  // Two automations sending the same event are separate sends; without the id they
+  // share a jobId and BullMQ drops the second.
+  const automation = source.kind === 'automation' ? `${source.automationId}-` : '';
+  let tail: string;
 
-  switch (data.type) {
+  switch (event.type) {
     case 'violation': {
-      return `violation-${data.payload.serverUserId}-${data.payload.rule.type}-${timeBucket}`;
+      // Key on rule id, not rule type: every v2 rule has type null, so a
+      // type-based key would dedupe unrelated rules against each other.
+      const ruleKey = event.payload.rule.id || event.payload.rule.type;
+      if (!ruleKey) return undefined;
+      // A send and the routed violation are separate sends; without the kind
+      // they share a jobId and BullMQ drops the second.
+      const kind =
+        source.kind === 'automation'
+          ? source.automationId
+          : source.kind === 'rule'
+            ? 'notify'
+            : 'auto';
+      tail = `violation-${event.payload.serverUserId}-${ruleKey}-${kind}-${bucket}`;
+      break;
     }
     case 'session_started':
     case 'session_stopped': {
       // Use internal id, not sessionKey (Emby reuses sessionKeys)
-      const sessionId = data.payload.id;
+      const sessionId = event.payload.id;
       if (!sessionId) {
-        console.warn(`Session ${data.type} missing id, skipping deduplication`);
+        console.warn(`Session ${event.type} missing id, skipping deduplication`);
         return undefined;
       }
-      return `${data.type}-${sessionId}-${timeBucket}`;
+      tail = `${event.type}-${sessionId}-${automation}${bucket}`;
+      break;
     }
-    case 'server_down':
-    case 'server_up':
-    case 'plugin_update_available': {
-      return `${data.type}-${data.payload.serverId}-${timeBucket}`;
+    case 'media_added':
+    case 'media_upgraded': {
+      // The default arm keys on the server, which would collapse a whole batch into one job.
+      tail = `${event.type}-${event.payload.libraryItemId}-${automation}${bucket}`;
+      break;
     }
-    case 'app_update_available': {
-      // versionCheckQueue's persisted lastNotifiedAppUpdateVersion is the real
-      // dedup mechanism (survives restarts); this is just the usual BullMQ
-      // same-window guard, keyed by version rather than a serverId.
-      return `${data.type}-${data.payload.latestVersion}-${timeBucket}`;
+    case 'new_device': {
+      // The default arm keys on the server, which would collapse two accounts into one job.
+      tail = `${event.type}-${event.payload.sessionId}-${automation}${bucket}`;
+      break;
+    }
+    case 'trust_score_changed': {
+      // Per account: two moves on one account inside a bucket are meant to collapse.
+      tail = `${event.type}-${event.payload.serverUserId}-${automation}${bucket}`;
+      break;
     }
     default: {
-      const _exhaustive: never = data;
-      void _exhaustive;
-      return undefined;
+      // The tracearr release is about the install, not a server.
+      const serverId = 'serverId' in event.payload ? event.payload.serverId : 'install';
+      tail = `${event.type}-${serverId}-${automation}${bucket}`;
     }
+  }
+
+  // BullMQ rejects custom ids containing ':' unless they have exactly three segments
+  return `${destinationId}|${tail}`;
+}
+
+/** Threshold arrays hold uuids; cond.actual is a display name, not an id. */
+async function resolveUserNames(event: NotificationEvent): Promise<void> {
+  if (event.type !== 'violation') return;
+  const payload = event.payload;
+  const rawEvidence = Array.isArray(payload.data?.evidence)
+    ? (payload.data.evidence as GroupEvidence[])
+    : [];
+  if (rawEvidence.length === 0) return;
+
+  const userIdSet = new Set<string>();
+  for (const group of rawEvidence) {
+    for (const cond of group.conditions) {
+      if (cond.field === 'user_id' && Array.isArray(cond.threshold)) {
+        for (const id of cond.threshold) {
+          if (typeof id === 'string') userIdSet.add(id);
+        }
+      }
+    }
+  }
+  if (userIdSet.size === 0) return;
+
+  try {
+    const { getServerUserDisplayNames } = await import('../services/userService.js');
+    payload.userNames = await getServerUserDisplayNames([...userIdSet]);
+  } catch (err) {
+    console.error(
+      'failed to resolve user display names for violation notification',
+      payload.id,
+      err
+    );
   }
 }
 
-/**
- * Enqueue a notification for async processing.
- * Returns the job ID if enqueued, or undefined if deduplicated/dropped.
- */
+/** Returns how many destinations the event fanned out to (0 when nothing is subscribed or every target is disabled/reencrypt). */
 export async function enqueueNotification(
-  data: NotificationJobData,
-  options?: { priority?: number; delay?: number }
-): Promise<string | undefined> {
+  event: NotificationEvent,
+  opts: { to?: string[]; source?: NotificationSource } = {}
+): Promise<number> {
   if (!notificationQueue) {
-    console.error('Notification queue not initialized, dropping notification:', data.type);
-    return undefined;
+    console.error('Notification queue not initialized, dropping notification:', event.type);
+    return 0;
   }
 
-  const jobId = getDedupeKey(data);
+  const source = opts.source ?? { kind: 'system' };
+  const targets = opts.to
+    ? (await Promise.all(opts.to.map((id) => getDestination(id)))).filter(
+        (d): d is DestinationRow => d !== null && d.enabled && d.configStatus === 'ok'
+      )
+    : await findDestinationsForEvent(eventTypeOf(event));
+  if (targets.length === 0) return 0;
 
-  try {
-    const job = await notificationQueue.add(data.type, data, {
-      jobId,
-      priority: options?.priority,
-      delay: options?.delay,
-    });
+  await resolveUserNames(event);
 
-    return job.id;
-  } catch (error) {
-    if (error instanceof Error) {
-      const msg = error.message.toLowerCase();
-      const isDuplicateError =
-        msg.includes('job with id') || msg.includes('already exists') || msg.includes('duplicate');
+  await notificationQueue.addBulk(
+    targets.map((d) => ({
+      name: event.type,
+      data: { destinationId: d.id, source, event } satisfies NotificationJob,
+      opts: { jobId: dedupeKey(d.id, event, source) },
+    }))
+  );
 
-      if (isDuplicateError) {
-        console.debug(`Deduplicated ${data.type} notification (jobId: ${jobId})`);
-        return undefined;
-      }
-    }
-    // Re-throw unexpected errors
-    throw error;
+  return targets.length;
+}
+
+async function processJob(job: Job<NotificationJob>): Promise<void> {
+  const { destinationId, source, event } = job.data;
+  const destination = await getDestination(destinationId);
+  if (!destination || !destination.enabled || destination.configStatus !== 'ok') {
+    console.log(
+      `[Notifications] job ${job.id}: destination ${destinationId} missing, disabled or awaiting re-entry; skipped`
+    );
+    return;
   }
+
+  const opened = readConfig(destination);
+  if (!opened.ok) {
+    console.warn(`[Notifications] ${destination.name}: config ${opened.reason}`);
+    if (opened.reason === 'bad_key') await markReencrypt(destination.id);
+    return;
+  }
+  if (opened.rewrap) await rewrapConfig(destination.id, opened.config);
+
+  const type = getDestinationType(destination.type);
+  const ref = { id: destination.id, name: destination.name };
+  const rendered = await type.render(event, opened.config, { destination: ref, source });
+  await type.deliver(rendered, opened.config, {
+    destination: ref,
+    signal: AbortSignal.timeout(DELIVER_TIMEOUT_MS),
+  });
 }
 
 /**
@@ -572,26 +386,4 @@ export async function shutdownNotificationQueue(): Promise<void> {
   }
 
   console.log('Notification queue shutdown complete');
-}
-
-/**
- * Retry all jobs in the dead letter queue
- */
-export async function retryDlqJobs(): Promise<number> {
-  if (!dlqQueue || !notificationQueue) {
-    return 0;
-  }
-
-  const jobs = await dlqQueue.getJobs(['waiting', 'delayed']);
-  let retried = 0;
-
-  for (const job of jobs) {
-    // Re-enqueue to main queue
-    await notificationQueue.add(job.data.type, job.data);
-    await job.remove();
-    retried++;
-  }
-
-  console.log(`Retried ${retried} jobs from DLQ`);
-  return retried;
 }

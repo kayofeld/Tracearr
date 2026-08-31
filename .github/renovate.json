@@ -8,13 +8,19 @@
   // Lockfile already pins effective versions, so pinning in package.json is just noise.
   "ignorePresets": [":pinDevDependencies"],
 
+  // Later syntax is deprecated upstream, cron only.
   "timezone": "UTC",
-  "schedule": ["before 6am on monday"],
+  "schedule": ["* 0-5 * * 1"],
 
-  "prConcurrentLimit": 5,
-  "prHourlyLimit": 2,
-  "branchConcurrentLimit": 5,
-  "rebaseWhen": "behind-base-branch",
+  "prConcurrentLimit": 10,
+  "prHourlyLimit": 0,
+
+  // behind-base-branch rebased every open PR on every push to main.
+  "rebaseWhen": "conflicted",
+
+  // The main ruleset has no required checks, so platform automerge would merge
+  // before CI. Renovate-side merge waits for green.
+  "platformAutomerge": false,
 
   // CLAUDE.md: no commit prefixes, no emojis, no attribution.
   "semanticCommits": "disabled",
@@ -25,9 +31,6 @@
 
   // One PR per major instead of jumping to latest.
   "separateMultipleMajor": true,
-
-  // Split patch and minor inside groups. Patches automerge, minors hit the dashboard.
-  "separateMinorPatch": true,
 
   "dependencyDashboard": true,
   "dependencyDashboardOSVVulnerabilitySummary": "unresolved",
@@ -41,14 +44,14 @@
 
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 6am on monday"],
+    "schedule": ["* 0-5 * * 1"],
     "commitMessageAction": "Refresh",
     "commitMessageTopic": "pnpm lockfile"
   },
   "postUpdateOptions": ["pnpmDedupe"],
 
-  // Floor cooldown. Runtime deps bumped to 7d in a rule below.
-  "minimumReleaseAge": "3 days",
+  // No global minimumReleaseAge: best-practices gives npm 3d, and a floor on
+  // Docker digests resets on every tag re-push so the group never clears.
 
   "packageRules": [
     // ----- hard blocks -----
@@ -59,6 +62,16 @@
       "matchUpdateTypes": ["major"],
       "enabled": false,
       "description": "Pin @types/node major to match Node 24 runtime in Dockerfiles"
+    },
+
+    // typescript-eslint peers typescript ">=4.8.4 <6.1.0" and the lint parser
+    // resolves the root copy. 6.1 is a minor, so blocking majors misses it, and
+    // typescript is a devDependency everywhere so it would automerge.
+    {
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<6.1.0",
+      "description": "typescript-eslint peers typescript below 6.1; the lint parser resolves the root copy"
     },
 
     // Postgres/TimescaleDB majors require a schema migration.
@@ -99,66 +112,21 @@
     // ----- supply-chain hardening -----
 
     // 7d cooldown for runtime deps. 3d for dev tooling is fine; prod gets longer
-    // after the axios npm attack.
+    // after the axios npm attack. Only runtime deps split minor/patch: patch
+    // automerges, minor waits.
     {
       "matchManagers": ["npm"],
       "matchDepTypes": ["dependencies"],
       "minimumReleaseAge": "7 days",
+      "separateMinorPatch": true,
       "description": "Longer cooldown for runtime deps after axios March 2026"
     },
 
-    // ----- mobile workspace -----
-
-    // Expo SDK controls too many transitive pins to trust automerge here.
-    // Prefix branches so they're easy to find.
+    // Actions automerge, so they keep the 3d cooldown.
     {
-      "matchFileNames": ["apps/mobile/**"],
-      "additionalBranchPrefix": "mobile-",
-      "labels": ["dep-mobile"],
-      "automerge": false
-    },
-
-    // RN-locked libs. expo-server-sdk lives in apps/server and isn't part of
-    // the mobile build, so it's excluded from the group.
-    {
-      "matchManagers": ["npm"],
-      "matchPackageNames": [
-        "expo",
-        "expo-*",
-        "@expo/*",
-        "react-native",
-        "react-native-*",
-        "@react-native/*",
-        "@react-native-*/*",
-        "@react-navigation/*",
-        "@gorhom/bottom-sheet",
-        "@shopify/react-native-skia",
-        "nativewind",
-        "victory-native",
-        "lucide-react-native",
-        "!expo-server-sdk"
-      ],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "Expo and React Native"
-    },
-
-    // Gate Expo SDK majors behind dashboard approval.
-    {
-      "matchManagers": ["npm"],
-      "matchPackageNames": [
-        "expo",
-        "expo-*",
-        "@expo/*",
-        "react-native",
-        "react-native-*",
-        "@react-native/*",
-        "@react-native-*/*",
-        "@react-navigation/*",
-        "!expo-server-sdk"
-      ],
-      "matchUpdateTypes": ["major"],
-      "dependencyDashboardApproval": true,
-      "labels": ["dep-mobile", "dep-major"]
+      "matchDatasources": ["github-tags"],
+      "minimumReleaseAge": "3 days",
+      "description": "3d cooldown for GitHub Actions"
     },
 
     // ----- ecosystem groups, minor + patch only -----
@@ -362,15 +330,10 @@
     },
 
     // ----- native modules: manual review on majors -----
-    // bcrypt and sharp have rebuild risk. Native crypto powers the mobile pair flow.
+    // bcrypt and sharp have rebuild risk.
     {
       "matchManagers": ["npm"],
-      "matchPackageNames": [
-        "bcrypt",
-        "sharp",
-        "react-native-quick-crypto",
-        "react-native-nitro-modules"
-      ],
+      "matchPackageNames": ["bcrypt", "sharp"],
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true,
       "description": "Native modules: rebuild risk, review by hand"
@@ -414,14 +377,14 @@
       "automerge": true
     },
 
-    // ----- docker, compose, helm -----
+    // ----- docker images -----
 
-    // Generic base images. The Postgres/Timescale rule below runs after this and
-    // overrides those packages out into their own group, so this must stay first.
+    // Every docker-datasource image across managers, so one image bump is one PR.
+    // The Postgres/Timescale rule below overrides those out; this must stay first.
     {
-      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchDatasources": ["docker"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
-      "groupName": "Docker base images",
+      "groupName": "Docker images",
       "labels": ["dep-docker"]
     },
 
@@ -439,9 +402,11 @@
     },
 
     // ----- github actions -----
-    // Action majors get reviewed by hand.
+    // Excludes docker so CI service containers stay in the group above; this rule
+    // runs later and would win. Action majors get reviewed by hand.
     {
       "matchManagers": ["github-actions"],
+      "matchDatasources": ["!docker"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "GitHub Actions",
       "automerge": true,
@@ -449,14 +414,9 @@
     },
 
     // ----- helm chart -----
-    {
-      "matchManagers": ["helm-values", "helmv3"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "Helm chart",
-      "labels": ["dep-deploy"]
-    },
+    // No group: Chart.yaml has no deps and values.yaml images are docker-datasource.
 
-    // The chart's own image tracks .Chart.AppVersion by leaving tag empty —
+    // The chart's own image tracks .Chart.AppVersion by leaving tag empty:
     // never let Renovate pin it to a frozen digest.
     {
       "matchManagers": ["helm-values"],

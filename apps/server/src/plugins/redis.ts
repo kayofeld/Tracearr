@@ -10,6 +10,7 @@ import fp from 'fastify-plugin';
 import { Redis } from 'ioredis';
 import { setRedisPrefix } from '@tracearr/shared';
 import { isMaintenance } from '../serverState.js';
+import { setSharedRedis } from '../lib/redisShared.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -54,6 +55,9 @@ const redisPlugin: FastifyPluginAsync = async (app) => {
   });
 
   app.decorate('redis', redis);
+  // Better Auth and the Plex plugin resolve their client through this, so they
+  // inherit the retry policy and the maintenance-aware error handler above.
+  setSharedRedis(redis);
 
   app.addHook('onClose', async () => {
     if (redis.status === 'ready' || redis.status === 'connecting') {

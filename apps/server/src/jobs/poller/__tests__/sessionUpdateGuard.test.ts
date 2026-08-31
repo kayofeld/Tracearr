@@ -50,7 +50,6 @@ const {
     thumbUrl: null,
     isServerAdmin: false,
     trustScore: 100,
-    sessionCount: 5,
     lastActivityAt: new Date(),
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -71,7 +70,11 @@ const {
       select: vi.fn((columns?: unknown) => ({
         from: vi.fn(() => {
           if (columns === undefined) return chainResolving([mockServerRow]);
-          const obj: Record<string, unknown> = { where: () => obj, limit: () => obj };
+          const obj: Record<string, unknown> = {
+            where: () => obj,
+            orderBy: () => obj,
+            limit: () => obj,
+          };
           obj.innerJoin = () => chainResolving([mockServerUserRow]);
           obj.then = (resolve: (v: unknown[]) => void, reject?: (e: unknown) => void) =>
             Promise.resolve([]).then(resolve, reject);
@@ -86,6 +89,14 @@ const {
     },
   };
 });
+
+const { mockDispatch } = vi.hoisted(() => ({
+  mockDispatch: vi.fn().mockResolvedValue({ violations: [], outcomes: [] }),
+}));
+
+vi.mock('../../../services/leaderLease.js', () => ({
+  isLeader: () => true,
+}));
 
 vi.mock('../../../db/client.js', () => ({ db: mockDb }));
 vi.mock('../../../routes/settings.js', () => ({
@@ -107,9 +118,11 @@ vi.mock('../../../services/sseManager.js', () => ({
 }));
 vi.mock('../../notificationQueue.js', () => ({ enqueueNotification: vi.fn() }));
 vi.mock('../database.js', () => ({
-  getActiveRulesV2: vi.fn().mockResolvedValue([]),
+  onActiveAutomationsRefill: vi.fn(),
+  getActiveAutomations: vi.fn().mockResolvedValue([]),
   batchGetIdentityServerUserIds: vi.fn().mockResolvedValue(new Map()),
   batchGetRecentUserSessions: vi.fn().mockResolvedValue(new Map()),
+  batchGetLibraryItemIdentity: vi.fn().mockResolvedValue(new Map()),
   widenRecentSessionsForMergedIdentities: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../pendingConfirmation.js', () => ({ updatePendingSession: vi.fn() }));
@@ -123,19 +136,20 @@ vi.mock('../sessionLifecycle.js', () => ({
   findActiveSessionByComposite: vi.fn().mockResolvedValue(null),
   handleMediaChangeAtomic: vi.fn(),
   processPollResults: mockProcessPollResults,
-  reEvaluateRulesOnPauseState: vi.fn(),
-  reEvaluateRulesOnTranscodeChange: vi.fn(),
   stopSessionAtomic: vi.fn(),
 }));
-vi.mock('../sessionMapper.js', () => ({
+vi.mock('../../../services/automations/events/dispatcher.js', () => ({
+  dispatch: mockDispatch,
+  subscribe: vi.fn(),
+}));
+vi.mock('../sessionMapper.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   mapMediaSession: mockMapMediaSession,
-  pickStreamDetailFields: vi.fn().mockImplementation((s: unknown) => s),
 }));
 vi.mock('../violations.js', () => ({ broadcastViolations: vi.fn() }));
 
 import { initializePoller, triggerServerPoll } from '../processor.js';
-import { reEvaluateRulesOnTranscodeChange } from '../sessionLifecycle.js';
-import { getActiveRulesV2 } from '../database.js';
+import { getActiveAutomations } from '../database.js';
 
 const EXISTING_SESSION_ID = 'session-1';
 
@@ -269,8 +283,8 @@ describe('poller session update guard against stop races', () => {
 
   it('does not re-evaluate transcode rules when the update raced a concurrent stop', async () => {
     mockUpdateWhere.mockResolvedValue([]); // update raced a concurrent stop
-    vi.mocked(getActiveRulesV2).mockResolvedValue([{ id: 'rule-1' }] as unknown as Awaited<
-      ReturnType<typeof getActiveRulesV2>
+    vi.mocked(getActiveAutomations).mockResolvedValue([{ id: 'rule-1' }] as unknown as Awaited<
+      ReturnType<typeof getActiveAutomations>
     >);
     mockMapMediaSession.mockReturnValue(
       processedSession({ state: 'playing', videoDecision: 'transcode', isTranscode: true })
@@ -279,13 +293,13 @@ describe('poller session update guard against stop races', () => {
     await triggerServerPoll('server-1');
 
     expect(mockDb.update).toHaveBeenCalledTimes(1);
-    expect(reEvaluateRulesOnTranscodeChange).not.toHaveBeenCalled();
+    expect(mockDispatch).not.toHaveBeenCalled();
   });
 
   it('re-evaluates transcode rules when the update affects a row', async () => {
     mockUpdateWhere.mockResolvedValue([{ id: EXISTING_SESSION_ID }]);
-    vi.mocked(getActiveRulesV2).mockResolvedValue([{ id: 'rule-1' }] as unknown as Awaited<
-      ReturnType<typeof getActiveRulesV2>
+    vi.mocked(getActiveAutomations).mockResolvedValue([{ id: 'rule-1' }] as unknown as Awaited<
+      ReturnType<typeof getActiveAutomations>
     >);
     mockMapMediaSession.mockReturnValue(
       processedSession({ state: 'playing', videoDecision: 'transcode', isTranscode: true })
@@ -294,7 +308,8 @@ describe('poller session update guard against stop races', () => {
     await triggerServerPoll('server-1');
 
     expect(mockDb.update).toHaveBeenCalledTimes(1);
-    expect(reEvaluateRulesOnTranscodeChange).toHaveBeenCalledTimes(1);
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
+    expect(mockDispatch.mock.calls[0]?.[0]).toMatchObject({ type: 'session.transcode_changed' });
   });
 });
 

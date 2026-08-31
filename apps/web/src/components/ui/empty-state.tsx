@@ -1,4 +1,12 @@
 import type { LucideIcon } from 'lucide-react';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { cn } from '@/lib/utils';
 
 interface EmptyStateProps {
@@ -9,6 +17,7 @@ interface EmptyStateProps {
   className?: string;
 }
 
+/** The app's one empty placeholder: the Empty primitives behind a flat title/description API. */
 export function EmptyState({
   icon: Icon,
   title,
@@ -17,15 +26,21 @@ export function EmptyState({
   className,
 }: EmptyStateProps) {
   return (
-    <div className={cn('flex flex-col items-center justify-center py-12 text-center', className)}>
-      {Icon && (
-        <div className="bg-muted rounded-full p-4">
-          <Icon className="text-muted-foreground h-8 w-8" />
-        </div>
-      )}
-      <h3 className="mt-4 text-lg font-semibold">{title}</h3>
-      {description && <p className="text-muted-foreground mt-2 max-w-md text-sm">{description}</p>}
-      {children && <div className="mt-6">{children}</div>}
-    </div>
+    // Split at md: a bare md:p-* lands after py-12 in the sheet and flattens the block padding.
+    <Empty className={cn('p-6 py-12 md:px-6 md:py-12', className)}>
+      <EmptyHeader>
+        {Icon && (
+          <EmptyMedia variant="icon" className="text-muted-foreground size-16 rounded-full">
+            <Icon className="size-8" />
+          </EmptyMedia>
+        )}
+        {/* EmptyTitle renders a div; the role keeps the heading this has always exposed. */}
+        <EmptyTitle role="heading" aria-level={3}>
+          {title}
+        </EmptyTitle>
+        {description && <EmptyDescription>{description}</EmptyDescription>}
+      </EmptyHeader>
+      {children && <EmptyContent>{children}</EmptyContent>}
+    </Empty>
   );
 }

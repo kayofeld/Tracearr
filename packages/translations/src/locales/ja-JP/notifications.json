@@ -51,8 +51,15 @@
       "agentUpdateFailed": "エージェントの更新に失敗しました",
       "apiKeyGenerateFailed": "API キーの生成に失敗しました",
       "authFailed": "認証に失敗しました",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
       "clipboardFailed": "クリップボードにコピーできませんでした",
       "copyFailed": "クリップボードにコピーできませんでした",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
       "deviceRemoveFailed": "デバイスの削除に失敗しました",
       "deviceRenameFailed": "端末の名前を変更できませんでした",
       "dismissFailed": "違反を解除できませんでした",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "plex.directのURLはここでは使用できないリレーアドレスです。代わりにIPアドレスまたはホスト名を使用してください。",
+      "plexReauthorizeFailed": "",
       "plexUnlinkFailed": "プレックスアカウントのリンクを解除できませんでした",
       "routingUpdateFailed": "ルーティングの更新に失敗しました",
       "ruleCreateFailed": "ルールの作成に失敗しました",
@@ -148,6 +156,18 @@
         "message": "新しいAPIキーを使用する準備ができました",
         "title": "APIキーを生成しました"
       },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
+      },
       "claimCodeValidated": {
         "message": "セットアップを続けることができます",
         "title": "請求コードが検証されました"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "クリップボードにコピーしました"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
         "message": "デバイスが切断されました",
         "title": "デバイスが削除されました"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "プレックスアカウントからサーバーを追加できるようになりました",
         "title": "プレックスアカウントがリンクされています"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
         "message": "プレックスアカウントが切断されました",
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },

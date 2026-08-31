@@ -18,6 +18,7 @@ const {
   mockCalculatePauseAccumulation,
   mockDb,
   mockUpdateReturning,
+  mockDispatch,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { EventEmitter: EE } = require('events');
@@ -31,6 +32,7 @@ const {
     mockCreateMediaServerClient: vi.fn(),
     mockCalculatePauseAccumulation: vi.fn(),
     mockUpdateReturning: updateReturning,
+    mockDispatch: vi.fn().mockResolvedValue({ violations: [], outcomes: [] }),
     mockDb: {
       select: vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
@@ -92,7 +94,11 @@ vi.mock('../poller/stateTracker.js', () => ({
   updateConfirmationState: vi.fn().mockImplementation((state) => state),
 }));
 vi.mock('../poller/database.js', () => ({
-  getActiveRulesV2: vi.fn().mockResolvedValue([]),
+  getActiveAutomations: vi.fn().mockResolvedValue([]),
+  // Matches the existing row's serverUserId so the paused-event cross-user
+  // guard lets these updates through.
+  getServerUserIdByExternalId: vi.fn().mockResolvedValue('server-user-1'),
+  batchGetLibraryItemIdentity: vi.fn().mockResolvedValue(new Map()),
   batchGetRecentUserSessions: vi.fn().mockResolvedValue(new Map()),
   mergeRecentSessionsForIdentity: vi.fn().mockReturnValue([]),
 }));
@@ -110,9 +116,21 @@ vi.mock('../poller/sessionLifecycle.js', () => ({
   buildPendingActiveSession: vi.fn(),
   handleMediaChangeAtomic: vi.fn(),
   handleQualityChangeFallout: vi.fn(),
-  reEvaluateRulesOnPauseState: vi.fn(),
-  reEvaluateRulesOnTranscodeChange: vi.fn(),
   confirmAndPersistSession: vi.fn(),
+}));
+vi.mock('../../services/automations/events/dispatcher.js', () => ({
+  dispatch: (...args: unknown[]) => mockDispatch(...args),
+  subscribe: vi.fn(),
+}));
+vi.mock('../../services/automations/events/contextAssembly.js', () => ({
+  loadEvaluationContext: vi.fn().mockResolvedValue(null),
+  assembleEvaluationInputs: vi.fn().mockResolvedValue({
+    activeAutomations: [],
+    activeSessions: [],
+    recentSessions: [],
+    identityServerUserIds: [],
+  }),
+  setContextAssemblyDeps: vi.fn(),
 }));
 vi.mock('../../services/serviceTracker.js', () => ({
   registerService: vi.fn(),
@@ -210,6 +228,7 @@ describe('SSE Processor - updateExistingSession guard against stop races', () =>
 
     expect(mockDb.update).toHaveBeenCalledTimes(1);
     expect(mockCacheService.updateActiveSession).not.toHaveBeenCalled();
+    expect(mockDispatch).not.toHaveBeenCalled();
     expect(mockPubSubService.publish).not.toHaveBeenCalledWith(
       'session:updated',
       expect.anything()

@@ -1,163 +1,178 @@
 {
-  "actionsExecuted": "Actions Executed",
-  "activity": {
-    "concurrentStreams": "Concurrent Streams",
-    "platforms": "Platforms",
-    "playbackQuality": "Playback Quality",
-    "playsOverTime": "Plays Over Time"
-  },
-  "alerts": {
-    "clearFilters": "Clear Filters",
-    "done": "Done"
-  },
-  "dashboard": {
-    "hrs": "hrs",
-    "today": "TODAY"
+  "pair": {
+    "welcome": "Vítejte v Tracearr",
+    "addServer": "Přidat server",
+    "connectToServer": "Připojit k serveru",
+    "enterServerDetails": "Zadejte URL serveru Tracearr a mobilní přístupový token",
+    "serverUrl": "URL serveru",
+    "accessToken": "Přístupový token",
+    "scanQrCodeInstead": "Namísto skenování QR kódu",
+    "enterManually": "Zadejte URL a Token ručně",
+    "cameraPermissionRequired": "Pro skenování QR kódů je vyžadováno oprávnění fotoaparátu",
+    "scanQrInstructions": "Otevřete nastavení → Mobilní aplikace ve vaší nástěnce Tracearr a naskenujte QR kód",
+    "urlPlaceholder": "",
+    "tokenPlaceholder": "",
+    "missingToken": "",
+    "pleaseEnterToken": ""
   },
   "errors": {
-    "componentStack": "Component Stack:",
-    "connectionLost": "Connection lost",
-    "errorDetails": "Error Details:",
-    "failedToLoadSession": "Failed to load session",
+    "missingFields": "Chybějící pole",
+    "pleaseEnterBothFields": "Zadejte URL adresu serveru a token",
+    "invalidUrl": "Neplatná URL",
+    "serverUrlMustStartWith": "Adresa URL serveru musí začínat http:// nebo https:////",
+    "pleaseEnterValidUrl": "Zadejte prosím platnou adresu URL serveru",
+    "pairingFailed": "Párování se nezdařilo",
+    "unableToPair": "",
+    "invalidQrCode": "",
+    "invalidQrCodeMissingData": "Neplatný QR kód: chybí data o párování",
+    "invalidQrCodeFormat": "Neplatný formát QR kódu. Vygenerujte prosím nový kód.",
+    "invalidQrCodeMissingUrl": "Neplatný QR kód: chybí URL serveru",
+    "invalidQrCodeMissingToken": "Neplatný QR kód: chybí párovací token",
+    "invalidServerUrlInQr": "Neplatná URL adresa serveru v QR kódu",
+    "tooManyPairingAttempts": "Příliš mnoho pokusů o párování. Počkejte prosím několik minut.",
     "invalidOrExpiredToken": "Neplatný nebo vypršela platnost tokenu.",
     "invalidPairingRequest": "Neplatný požadavek na párování. Zkontrolujte token.",
-    "invalidQrCode": "Invalid QR code",
-    "invalidQrCodeFormat": "Neplatný formát QR kódu. Vygenerujte prosím nový kód.",
-    "invalidQrCodeMissingData": "Neplatný QR kód: chybí data o párování",
-    "invalidQrCodeMissingToken": "Neplatný QR kód: chybí párovací token",
-    "invalidQrCodeMissingUrl": "Neplatný QR kód: chybí URL serveru",
-    "invalidServerUrlInQr": "Neplatná URL adresa serveru v QR kódu",
-    "invalidUrl": "Neplatná URL",
-    "missingFields": "Chybějící pole",
-    "pairingFailed": "Párování se nezdařilo",
-    "pleaseEnterBothFields": "Zadejte URL adresu serveru a token",
-    "pleaseEnterValidUrl": "Zadejte prosím platnou adresu URL serveru",
-    "serverUrlMustStartWith": "Adresa URL serveru musí začínat http:// nebo https:////",
-    "tooManyPairingAttempts": "Příliš mnoho pokusů o párování. Počkejte prosím několik minut.",
-    "unableToPair": "Unable to pair with server"
-  },
-  "history": {
-    "adjustFilters": "Try adjusting your filters",
-    "historyWillAppear": "Session history will appear here once users start streaming",
-    "noHistoryFound": "No History Found"
-  },
-  "navigation": {
-    "home": "Home",
-    "navigation": "Navigation",
-    "selectServer": "Vybrat server",
-    "server": "Server"
-  },
-  "notifications": {
-    "allViolationTypes": "All Violation Types",
-    "criticalOverrideDescription": "High-severity violations still notify during quiet hours",
-    "endTime": "End Time",
-    "exceededStreamLimit": "User exceeded stream limit",
-    "failedToSendTest": "Nepodařilo se odeslat testovací oznámení",
-    "loadingPreferences": "Načítání nastavení...",
-    "newDeviceDetected": "New device detected for user",
-    "newPlaybackBegan": "New playback began",
-    "notifyForEveryRule": "Notify for every rule type",
-    "playbackEnded": "Playback ended",
-    "quietHoursDescription": "Pause non-critical notifications during set hours",
-    "rateLimitDescription": "Rate limits prevent notification spam. Current limits: {{perMinute}}/min, {{perHour}}/hour.",
-    "receiveAlerts": "Receive alerts on this device",
-    "ruleViolationTriggered": "Rule violation triggered",
-    "sendTestNotification": "Send Test Notification",
-    "serverBackOnline": "Media server back online",
-    "serverUnreachable": "Media server unreachable",
-    "severityDescription": "Only notify for violations at or above this severity level",
-    "startTime": "Start Time",
-    "testDescription": "Verify that push notifications are working correctly",
-    "testFailed": "Test se nezdařil",
-    "testSent": "Test odeslán",
-    "timezoneLabel": "Timezone: {{timezone}}",
-    "to": "to",
-    "trustScoreDegraded": "User trust score degraded",
-    "unableToLoadPreferences": "Nelze načíst předvolby"
-  },
-  "pair": {
-    "accessToken": "Přístupový token",
-    "addServer": "Přidat server",
-    "cameraPermissionRequired": "Pro skenování QR kódů je vyžadováno oprávnění fotoaparátu",
-    "connectToServer": "Připojit k serveru",
-    "enterManually": "Zadejte URL a Token ručně",
-    "enterServerDetails": "Zadejte URL serveru Tracearr a mobilní přístupový token",
-    "missingToken": "Missing Token",
-    "pleaseEnterToken": "Please enter your access token",
-    "scanQrCodeInstead": "Namísto skenování QR kódu",
-    "scanQrInstructions": "Otevřete nastavení → Mobilní aplikace ve vaší nástěnce Tracearr a naskenujte QR kód",
-    "serverUrl": "URL serveru",
-    "tokenPlaceholder": "trr_mob_...",
-    "urlPlaceholder": "https://tracearr.example.com",
-    "welcome": "Vítejte v Tracearr"
-  },
-  "reconnected": "Reconnected",
-  "resources": {
-    "cpu": "CPU",
-    "ram": "RAM"
-  },
-  "serverSelector": {
-    "selectServers": "Select Servers",
-    "servers": "Servers",
-    "serversSelected": "{{selected}} of {{total}} servers selected"
-  },
-  "session": {
-    "failedToTerminate": "Failed to Terminate",
-    "sessionStopped": "The playback session has been stopped.",
-    "streamTerminated": "Stream Terminated"
+    "errorDetails": "",
+    "componentStack": "",
+    "connectionLost": "",
+    "failedToLoadSession": ""
   },
   "settings": {
-    "account": "Účet",
-    "build": "Build {{build}}",
+    "preferences": "Předvolby",
+    "notifications": "",
+    "configureNotifications": "",
+    "language": "",
     "community": "Komunita",
-    "configureNotifications": "Configure push notification preferences",
-    "currentlyConnected": "Aktuálně připojeno k {{serverName}}",
-    "disconnect": "Disconnect",
+    "discord": "",
+    "joinCommunity": "Připojit se ke komunitě",
+    "docs": "",
+    "readDocs": "",
+    "website": "",
+    "visitWebsite": "",
+    "github": "",
+    "viewSourceCode": "Zobrazit zdrojový kód",
+    "sponsor": "",
+    "supportDevelopment": "",
+    "account": "Účet",
+    "disconnect": "",
+    "disconnectServer": "Odpojit server",
     "disconnectConfirm": "Jste si jisti, že se chcete odpojit od \"{{serverName}}\"? Budete muset znovu spárovat pro použití aplikace.",
     "disconnectConfirmGeneric": "Jste si jisti, že se chcete odpojit? Budete muset znovu spárovat s použitím aplikace.",
-    "disconnectServer": "Odpojit server",
-    "discord": "Discord",
-    "docs": "Docs",
-    "github": "GitHub",
-    "joinCommunity": "Připojit se ke komunitě",
-    "language": "Language",
-    "notifications": "Notifications",
-    "preferences": "Předvolby",
-    "readDocs": "Read the documentation",
-    "sponsor": "Sponsor",
-    "supportDevelopment": "Support development",
-    "version": "Version {{version}}",
-    "viewSourceCode": "Zobrazit zdrojový kód",
-    "visitWebsite": "Visit tracearr.com",
-    "website": "Website"
+    "currentlyConnected": "Aktuálně připojeno k {{serverName}}",
+    "version": "",
+    "build": ""
   },
-  "unauthenticated": {
-    "accessRevoked": "Your access to {{serverName}} was revoked. Ask the server owner for a new pairing code.",
-    "connectionLost": "Connection Lost",
-    "scanQrCode": "Scan QR Code"
+  "navigation": {
+    "home": "",
+    "selectServer": "Vybrat server",
+    "server": "",
+    "navigation": ""
+  },
+  "resources": {
+    "cpu": "",
+    "ram": ""
+  },
+  "notifications": {
+    "testSent": "Test odeslán",
+    "testFailed": "Test se nezdařil",
+    "failedToSendTest": "Nepodařilo se odeslat testovací oznámení",
+    "loadingPreferences": "Načítání nastavení...",
+    "unableToLoadPreferences": "Nelze načíst předvolby",
+    "receiveAlerts": "",
+    "ruleViolationTriggered": "",
+    "newPlaybackBegan": "",
+    "playbackEnded": "",
+    "exceededStreamLimit": "",
+    "newDeviceDetected": "",
+    "trustScoreDegraded": "",
+    "serverUnreachable": "",
+    "serverBackOnline": "",
+    "allViolationTypes": "",
+    "notifyForEveryRule": "",
+    "severityDescription": "",
+    "quietHoursDescription": "",
+    "startTime": "",
+    "endTime": "",
+    "to": "",
+    "timezoneLabel": "",
+    "criticalOverrideDescription": "",
+    "rateLimitDescription": "",
+    "sendTestNotification": "",
+    "testDescription": ""
+  },
+  "dashboard": {
+    "today": "",
+    "hrs": ""
+  },
+  "session": {
+    "streamTerminated": "",
+    "sessionStopped": "",
+    "failedToTerminate": ""
   },
   "userDetail": {
-    "moreDevices": "+{{count}} more devices",
-    "moreLocations": "+{{count}} more locations",
-    "noDevicesRecorded": "No devices recorded",
-    "noLocationsRecorded": "No locations recorded",
-    "noTerminations": "No stream terminations",
-    "noViolations": "No violations",
-    "trustHigh": "High",
-    "trustLow": "Low",
-    "trustMedium": "Medium",
-    "userMayBeRemoved": "This user may have been removed."
-  },
-  "users": {
-    "noUsers": "No Users",
-    "noUsersMatch": "No users match \"{{query}}\"",
-    "owner": "Owner",
-    "usersWillAppear": "Users will appear here after syncing with your media server"
+    "userMayBeRemoved": "",
+    "noLocationsRecorded": "",
+    "noDevicesRecorded": "",
+    "moreLocations": "",
+    "moreDevices": "",
+    "noViolations": "",
+    "noTerminations": "",
+    "trustLow": "",
+    "trustMedium": "",
+    "trustHigh": ""
   },
   "violation": {
-    "customRule": "Custom Rule",
-    "ips": "IPs",
-    "streamComparison": "Stream Comparison",
-    "violationNotFoundDesc": "This violation may have been dismissed or is no longer available."
+    "violationNotFoundDesc": "",
+    "customRule": "",
+    "streamComparison": "",
+    "ips": ""
+  },
+  "alerts": {
+    "done": "",
+    "clearFilters": ""
+  },
+  "history": {
+    "noHistoryFound": "",
+    "adjustFilters": "",
+    "historyWillAppear": ""
+  },
+  "users": {
+    "owner": "",
+    "noUsers": "",
+    "usersWillAppear": "",
+    "noUsersMatch": ""
+  },
+  "activity": {
+    "playsOverTime": "Přehrávání v průběhu času",
+    "concurrentStreams": "Souběžné streamy",
+    "platforms": "Platformy",
+    "playbackQuality": ""
+  },
+  "unauthenticated": {
+    "connectionLost": "",
+    "accessRevoked": "",
+    "scanQrCode": ""
+  },
+  "serverSelector": {
+    "servers": "",
+    "selectServers": "",
+    "serversSelected": "",
+    "allServers": ""
+  },
+  "reconnected": "",
+  "actionsExecuted": "",
+  "serverScope": {
+    "single": ""
+  },
+  "a11y": {
+    "selectServer": "",
+    "alerts": "",
+    "alertsCount": "",
+    "settings": "",
+    "trustScore": ""
+  },
+  "map": {
+    "noData": "",
+    "unavailable": ""
   }
 }

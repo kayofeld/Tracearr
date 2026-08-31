@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
@@ -7,26 +8,29 @@ interface TrustScoreBadgeProps {
   className?: string;
 }
 
-function getTrustLevel(score: number): {
+interface TrustLevel {
   variant: 'success' | 'warning' | 'danger';
-  label: string;
-} {
+  labelKey: 'trust.trusted' | 'trust.caution' | 'trust.untrusted';
+}
+
+function getTrustLevel(score: number): TrustLevel {
   if (score >= 80) {
-    return { variant: 'success', label: 'Trusted' };
+    return { variant: 'success', labelKey: 'trust.trusted' };
   }
   if (score >= 50) {
-    return { variant: 'warning', label: 'Caution' };
+    return { variant: 'warning', labelKey: 'trust.caution' };
   }
-  return { variant: 'danger', label: 'Untrusted' };
+  return { variant: 'danger', labelKey: 'trust.untrusted' };
 }
 
 export function TrustScoreBadge({ score, showLabel = false, className }: TrustScoreBadgeProps) {
-  const { variant, label } = getTrustLevel(score);
+  const { t } = useTranslation('common');
+  const { variant, labelKey } = getTrustLevel(score);
 
   return (
     <Badge variant={variant} className={cn('gap-1', className)}>
       <span className="font-mono">{score}</span>
-      {showLabel && <span>· {label}</span>}
+      {showLabel && <span>· {t(labelKey)}</span>}
     </Badge>
   );
 }

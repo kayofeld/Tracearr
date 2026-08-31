@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Actualizarea agentului a eșuat",
       "apiKeyGenerateFailed": "Generarea cheii API a eșuat",
       "authFailed": "Autentificare eșuată",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
       "clipboardFailed": "Copierea în clipboard a eșuat",
       "copyFailed": "Nu s-a putut copia în clipboard",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
       "deviceRemoveFailed": "Ștergerea dispozitivului a eșuat",
       "deviceRenameFailed": "Eroare la redenumirea dispozitivului",
       "dismissFailed": "Eroare la respingerea încălcării",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "URL-urile plex.direct sunt adrese de releu care nu pot fi folosite aici. Vă rugăm să folosiți o adresă IP directă sau numele gazdei.",
+      "plexReauthorizeFailed": "",
       "plexUnlinkFailed": "Deconectarea contului Plex a eșuat",
       "routingUpdateFailed": "Nu s-a reușit actualizarea rutării",
       "ruleCreateFailed": "Crearea regulii a eșuat",
@@ -148,6 +156,18 @@
         "message": "Noua ta cheie API este gata de utilizare",
         "title": "Cheie API generată"
       },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
+      },
       "claimCodeValidated": {
         "message": "Acum puteţi continua cu configurarea",
         "title": "Solicitare cod validat"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Copiat în clipboard"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
         "message": "Dispozitivul a fost deconectat",
         "title": "Dispozitiv eliminat"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "Acum poți adăuga servere din contul tău Plex",
         "title": "Cont Plex legat"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
         "message": "Contul tău Plex a fost deconectat",
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },

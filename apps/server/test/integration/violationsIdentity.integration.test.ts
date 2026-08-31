@@ -20,12 +20,12 @@ import {
   createTestServer,
   createTestServerUser,
   createTestSession,
-  createTestRule,
-  createTestViolation,
+  createConcurrentStreamsAutomation,
+  createTestRun,
 } from '@tracearr/test-utils/factories';
 import { db } from '../../src/db/client.js';
 import { violationRoutes } from '../../src/routes/violations.js';
-import { users, serverUsers, violations, rules } from '../../src/db/schema.js';
+import { users, serverUsers, automationRuns, automations } from '../../src/db/schema.js';
 import { mergeUsers } from '../../src/services/mergeService.js';
 import * as userService from '../../src/services/userService.js';
 
@@ -67,7 +67,7 @@ describe('POST /violations/bulk/acknowledge - person filter', () => {
     const personB = await createTestUser({ role: 'member' });
     const personBSu = await createTestServerUser({ userId: personB.id, serverId: serverA.id });
 
-    const rule = await createTestRule({ type: 'concurrent_streams', params: { max_streams: 2 } });
+    const rule = await createConcurrentStreamsAutomation(2);
 
     const sessionA1 = await createTestSession({
       serverId: serverA.id,
@@ -79,18 +79,18 @@ describe('POST /violations/bulk/acknowledge - person filter', () => {
     });
     const sessionB = await createTestSession({ serverId: serverA.id, serverUserId: personBSu.id });
 
-    const violationA1 = await createTestViolation({
-      ruleId: rule.id,
+    const violationA1 = await createTestRun({
+      automationId: rule.id,
       serverUserId: personASu1.id,
       sessionId: sessionA1.id,
     });
-    const violationA2 = await createTestViolation({
-      ruleId: rule.id,
+    const violationA2 = await createTestRun({
+      automationId: rule.id,
       serverUserId: personASu2.id,
       sessionId: sessionA2.id,
     });
-    const violationB = await createTestViolation({
-      ruleId: rule.id,
+    const violationB = await createTestRun({
+      automationId: rule.id,
       serverUserId: personBSu.id,
       sessionId: sessionB.id,
     });
@@ -112,9 +112,18 @@ describe('POST /violations/bulk/acknowledge - person filter', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ success: true, acknowledged: 2 });
 
-    const [rowA1] = await db.select().from(violations).where(eq(violations.id, violationA1.id));
-    const [rowA2] = await db.select().from(violations).where(eq(violations.id, violationA2.id));
-    const [rowB] = await db.select().from(violations).where(eq(violations.id, violationB.id));
+    const [rowA1] = await db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, violationA1.id));
+    const [rowA2] = await db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, violationA2.id));
+    const [rowB] = await db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, violationB.id));
 
     expect(rowA1?.acknowledgedAt).not.toBeNull();
     expect(rowA2?.acknowledgedAt).not.toBeNull();
@@ -126,10 +135,10 @@ describe('POST /violations/bulk/acknowledge - person filter', () => {
     const server = await createTestServer({ type: 'plex' });
     const person = await createTestUser({ role: 'member' });
     const su = await createTestServerUser({ userId: person.id, serverId: server.id });
-    const rule = await createTestRule({ type: 'concurrent_streams', params: { max_streams: 2 } });
+    const rule = await createConcurrentStreamsAutomation(2);
     const session = await createTestSession({ serverId: server.id, serverUserId: su.id });
-    const violation = await createTestViolation({
-      ruleId: rule.id,
+    const violation = await createTestRun({
+      automationId: rule.id,
       serverUserId: su.id,
       sessionId: session.id,
     });
@@ -149,7 +158,7 @@ describe('POST /violations/bulk/acknowledge - person filter', () => {
     await app.close();
 
     expect(response.statusCode).toBe(403);
-    const [row] = await db.select().from(violations).where(eq(violations.id, violation.id));
+    const [row] = await db.select().from(automationRuns).where(eq(automationRuns.id, violation.id));
     expect(row?.acknowledgedAt).toBeNull();
   });
 });
@@ -175,7 +184,7 @@ describe('DELETE /violations/bulk - person filter', () => {
     const personB = await createTestUser({ role: 'member' });
     const personBSu = await createTestServerUser({ userId: personB.id, serverId: serverA.id });
 
-    const rule = await createTestRule({ type: 'concurrent_streams', params: { max_streams: 2 } });
+    const rule = await createConcurrentStreamsAutomation(2);
 
     const sessionA1 = await createTestSession({
       serverId: serverA.id,
@@ -187,18 +196,18 @@ describe('DELETE /violations/bulk - person filter', () => {
     });
     const sessionB = await createTestSession({ serverId: serverA.id, serverUserId: personBSu.id });
 
-    const violationA1 = await createTestViolation({
-      ruleId: rule.id,
+    const violationA1 = await createTestRun({
+      automationId: rule.id,
       serverUserId: personASu1.id,
       sessionId: sessionA1.id,
     });
-    const violationA2 = await createTestViolation({
-      ruleId: rule.id,
+    const violationA2 = await createTestRun({
+      automationId: rule.id,
       serverUserId: personASu2.id,
       sessionId: sessionA2.id,
     });
-    const violationB = await createTestViolation({
-      ruleId: rule.id,
+    const violationB = await createTestRun({
+      automationId: rule.id,
       serverUserId: personBSu.id,
       sessionId: sessionB.id,
     });
@@ -220,12 +229,14 @@ describe('DELETE /violations/bulk - person filter', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ success: true, dismissed: 2 });
 
-    const remaining = await db.select().from(violations);
-    const remainingIds = remaining.map((v) => v.id);
-    expect(remainingIds).not.toContain(violationA1.id);
-    expect(remainingIds).not.toContain(violationA2.id);
+    // Dismiss is a soft delete: rows survive with dismissedAt stamped so
+    // dedup keeps blocking re-creation.
+    const rows = await db.select().from(automationRuns);
+    const dismissedById = new Map(rows.map((v) => [v.id, v.dismissedAt]));
+    expect(dismissedById.get(violationA1.id)).toBeInstanceOf(Date);
+    expect(dismissedById.get(violationA2.id)).toBeInstanceOf(Date);
     // Person B's violation must survive person A's select-all dismiss.
-    expect(remainingIds).toContain(violationB.id);
+    expect(dismissedById.get(violationB.id)).toBeNull();
   });
 
   it('recomputes the merged person aggregate trust once after dismissing reversible violations on both of their accounts', async () => {
@@ -239,46 +250,44 @@ describe('DELETE /violations/bulk - person filter', () => {
       userId: target.id,
       serverId: serverA.id,
       trustScore: 90,
-      sessionCount: 10,
     });
     const sourceSu = await createTestServerUser({
       userId: source.id,
       serverId: serverB.id,
       trustScore: 90,
-      sessionCount: 30,
     });
     await mergeUsers(source.id, target.id, admin.id);
 
     // Seed a correct baseline rollup the way a prior trust-affecting write would
     // have left it, matching the pattern used elsewhere for this recompute:
-    // (90*10 + 90*30) / 40 = 90.
-    await userService.recalculateAggregateTrustScore(target.id);
+    // both accounts at 90, so the worst-account rollup is 90.
+    await userService.recomputeIdentityAggregates(target.id);
     const [before] = await db.select().from(users).where(eq(users.id, target.id));
     expect(before?.aggregateTrustScore).toBe(90);
 
-    const rule = await createTestRule({ type: 'concurrent_streams', params: { max_streams: 2 } });
+    const rule = await createConcurrentStreamsAutomation(2);
     await db
-      .update(rules)
-      .set({ actions: { actions: [{ type: 'adjust_trust', amount: -20 }] } })
-      .where(eq(rules.id, rule.id));
+      .update(automations)
+      .set({ actions: { actions: [{ type: 'trust', mode: 'adjust', amount: -20 }] } })
+      .where(eq(automations.id, rule.id));
 
     const sessionA = await createTestSession({ serverId: serverA.id, serverUserId: targetSu.id });
     const sessionB = await createTestSession({ serverId: serverB.id, serverUserId: sourceSu.id });
     await db.update(serverUsers).set({ trustScore: 70 }).where(eq(serverUsers.id, targetSu.id));
     await db.update(serverUsers).set({ trustScore: 70 }).where(eq(serverUsers.id, sourceSu.id));
 
-    const violationA = await createTestViolation({
-      ruleId: rule.id,
+    const violationA = await createTestRun({
+      automationId: rule.id,
       serverUserId: targetSu.id,
       sessionId: sessionA.id,
     });
-    const violationB = await createTestViolation({
-      ruleId: rule.id,
+    const violationB = await createTestRun({
+      automationId: rule.id,
       serverUserId: sourceSu.id,
       sessionId: sessionB.id,
     });
 
-    const recomputeSpy = vi.spyOn(userService, 'recalculateAggregateTrustScore');
+    const recomputeSpy = vi.spyOn(userService, 'recomputeIdentityAggregates');
 
     const app = await buildApp({
       userId: admin.id,
@@ -328,9 +337,9 @@ describe('GET /violations - user.userId identity field', () => {
     const server = await createTestServer({ type: 'plex' });
     const person = await createTestUser({ role: 'member' });
     const su = await createTestServerUser({ userId: person.id, serverId: server.id });
-    const rule = await createTestRule({ type: 'concurrent_streams', params: { max_streams: 2 } });
+    const rule = await createConcurrentStreamsAutomation(2);
     const session = await createTestSession({ serverId: server.id, serverUserId: su.id });
-    await createTestViolation({ ruleId: rule.id, serverUserId: su.id, sessionId: session.id });
+    await createTestRun({ automationId: rule.id, serverUserId: su.id, sessionId: session.id });
 
     const app = await buildApp({
       userId: admin.id,
@@ -359,24 +368,24 @@ describe('bulk endpoints - people (userIds) multiselect filter', () => {
     const suA = await createTestServerUser({ userId: personA.id, serverId: server.id });
     const suB = await createTestServerUser({ userId: personB.id, serverId: server.id });
     const suC = await createTestServerUser({ userId: personC.id, serverId: server.id });
-    const rule = await createTestRule({ type: 'concurrent_streams', params: { max_streams: 2 } });
+    const rule = await createConcurrentStreamsAutomation(2);
 
     const sessionA = await createTestSession({ serverId: server.id, serverUserId: suA.id });
     const sessionB = await createTestSession({ serverId: server.id, serverUserId: suB.id });
     const sessionC = await createTestSession({ serverId: server.id, serverUserId: suC.id });
 
-    const violationA = await createTestViolation({
-      ruleId: rule.id,
+    const violationA = await createTestRun({
+      automationId: rule.id,
       serverUserId: suA.id,
       sessionId: sessionA.id,
     });
-    const violationB = await createTestViolation({
-      ruleId: rule.id,
+    const violationB = await createTestRun({
+      automationId: rule.id,
       serverUserId: suB.id,
       sessionId: sessionB.id,
     });
-    const violationC = await createTestViolation({
-      ruleId: rule.id,
+    const violationC = await createTestRun({
+      automationId: rule.id,
       serverUserId: suC.id,
       sessionId: sessionC.id,
     });
@@ -403,9 +412,18 @@ describe('bulk endpoints - people (userIds) multiselect filter', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ success: true, acknowledged: 2 });
 
-    const [rowA] = await db.select().from(violations).where(eq(violations.id, violationA.id));
-    const [rowB] = await db.select().from(violations).where(eq(violations.id, violationB.id));
-    const [rowC] = await db.select().from(violations).where(eq(violations.id, violationC.id));
+    const [rowA] = await db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, violationA.id));
+    const [rowB] = await db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, violationB.id));
+    const [rowC] = await db
+      .select()
+      .from(automationRuns)
+      .where(eq(automationRuns.id, violationC.id));
 
     expect(rowA?.acknowledgedAt).not.toBeNull();
     expect(rowB?.acknowledgedAt).not.toBeNull();
@@ -432,11 +450,11 @@ describe('bulk endpoints - people (userIds) multiselect filter', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ success: true, dismissed: 2 });
 
-    const remaining = await db.select().from(violations);
-    const remainingIds = remaining.map((v) => v.id);
-    expect(remainingIds).not.toContain(violationA.id);
-    expect(remainingIds).not.toContain(violationB.id);
-    expect(remainingIds).toContain(violationC.id);
+    const rows = await db.select().from(automationRuns);
+    const dismissedById = new Map(rows.map((v) => [v.id, v.dismissedAt]));
+    expect(dismissedById.get(violationA.id)).toBeInstanceOf(Date);
+    expect(dismissedById.get(violationB.id)).toBeInstanceOf(Date);
+    expect(dismissedById.get(violationC.id)).toBeNull();
   });
 
   it('GET /violations with userIds returns exactly the union of the selected people, singular userId still works', async () => {
@@ -460,7 +478,7 @@ describe('bulk endpoints - people (userIds) multiselect filter', () => {
 
     expect(multiResponse.statusCode).toBe(200);
     const multiBody = multiResponse.json();
-    expect(multiBody.total).toBe(2);
+    expect(multiBody.meta.total).toBe(2);
     const multiUserIds = multiBody.data
       .map((v: { user: { userId: string } }) => v.user.userId)
       .sort();
@@ -468,7 +486,7 @@ describe('bulk endpoints - people (userIds) multiselect filter', () => {
 
     expect(singularResponse.statusCode).toBe(200);
     const singularBody = singularResponse.json();
-    expect(singularBody.total).toBe(1);
+    expect(singularBody.meta.total).toBe(1);
     expect(singularBody.data[0].user.userId).toBe(personC.id);
   });
 
@@ -490,7 +508,7 @@ describe('bulk endpoints - people (userIds) multiselect filter', () => {
 
     expect(response.statusCode).toBe(400);
     for (const id of [violationA.id, violationB.id, violationC.id]) {
-      const [row] = await db.select().from(violations).where(eq(violations.id, id));
+      const [row] = await db.select().from(automationRuns).where(eq(automationRuns.id, id));
       expect(row?.acknowledgedAt).toBeNull();
     }
   });
@@ -512,10 +530,78 @@ describe('bulk endpoints - people (userIds) multiselect filter', () => {
     await app.close();
 
     expect(response.statusCode).toBe(400);
-    const remaining = await db.select().from(violations);
+    const remaining = await db.select().from(automationRuns);
     const remainingIds = remaining.map((v) => v.id);
     expect(remainingIds).toEqual(
       expect.arrayContaining([violationA.id, violationB.id, violationC.id])
     );
+  });
+});
+
+describe('recomputeIdentityAggregates semantics', () => {
+  it('a solo account mirrors its own score, and its violations set the identity total', async () => {
+    const server = await createTestServer({ type: 'plex' });
+    const person = await createTestUser({ role: 'member' });
+    const su = await createTestServerUser({
+      userId: person.id,
+      serverId: server.id,
+      trustScore: 85,
+    });
+    const rule = await createConcurrentStreamsAutomation(2);
+    const session = await createTestSession({ serverId: server.id, serverUserId: su.id });
+    await createTestRun({ automationId: rule.id, serverUserId: su.id, sessionId: session.id });
+
+    await userService.recomputeIdentityAggregates(person.id);
+
+    const [row] = await db.select().from(users).where(eq(users.id, person.id));
+    expect(row?.aggregateTrustScore).toBe(85);
+    expect(row?.totalViolations).toBe(1);
+  });
+
+  it('a removed account stops dragging the trust rollup but its violations still count', async () => {
+    const serverA = await createTestServer({ type: 'plex' });
+    const serverB = await createTestServer({ type: 'jellyfin' });
+    const person = await createTestUser({ role: 'member' });
+    await createTestServerUser({
+      userId: person.id,
+      serverId: serverA.id,
+      trustScore: 95,
+    });
+    const removedSu = await createTestServerUser({
+      userId: person.id,
+      serverId: serverB.id,
+      trustScore: 20,
+      removedAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    const rule = await createConcurrentStreamsAutomation(2);
+    const session = await createTestSession({ serverId: serverB.id, serverUserId: removedSu.id });
+    await createTestRun({
+      automationId: rule.id,
+      serverUserId: removedSu.id,
+      sessionId: session.id,
+    });
+
+    await userService.recomputeIdentityAggregates(person.id);
+
+    const [row] = await db.select().from(users).where(eq(users.id, person.id));
+    expect(row?.aggregateTrustScore).toBe(95);
+    expect(row?.totalViolations).toBe(1);
+  });
+
+  it('an identity whose accounts are all removed keeps its worst historical score instead of resetting to 100', async () => {
+    const server = await createTestServer({ type: 'plex' });
+    const person = await createTestUser({ role: 'member' });
+    await createTestServerUser({
+      userId: person.id,
+      serverId: server.id,
+      trustScore: 35,
+      removedAt: new Date('2026-01-01T00:00:00Z'),
+    });
+
+    await userService.recomputeIdentityAggregates(person.id);
+
+    const [row] = await db.select().from(users).where(eq(users.id, person.id));
+    expect(row?.aggregateTrustScore).toBe(35);
+    expect(row?.totalViolations).toBe(0);
   });
 });

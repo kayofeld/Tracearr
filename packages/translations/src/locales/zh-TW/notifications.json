@@ -1,84 +1,92 @@
 {
   "push": {
-    "newDevice": "新设备",
-    "serverDown": "服务器连接丢失",
-    "serverUp": "服务器已重新上线",
-    "streamEnded": "流结束",
-    "streamStarted": "流开始",
-    "trustScoreChanged": "信任分数已更改",
-    "violationDetected": "检测到共享违约行为"
+    "newDevice": "新裝置",
+    "serverDown": "與伺服器連線中斷",
+    "serverUp": "伺服器已重新上線",
+    "streamEnded": "串流已結束",
+    "streamStarted": "串流已開始",
+    "trustScoreChanged": "已更改信任分數",
+    "violationDetected": "偵測到共享違規行為"
   },
   "settings": {
-    "allSeverity": "所有(下, 警告, 高)",
-    "allTypes": "全部类型",
-    "concurrentStreams": "同步流",
+    "allSeverity": "所有 (低,警告,高)",
+    "allTypes": "所有類型",
+    "concurrentStreams": "並行串流",
     "concurrentStreamsDesc": "When max stream limit is exceeded",
-    "enablePushNotifications": "启用推送通知",
-    "enableQuietHours": "启用安静时间",
-    "highOnly": "仅限高严重度",
-    "minimumSeverity": "最小的严重级别",
-    "newDevice": "新设备",
+    "enablePushNotifications": "啟用推送通知",
+    "enableQuietHours": "啟用勿擾時段",
+    "highOnly": "僅限高嚴重度",
+    "minimumSeverity": "最小的嚴重程度",
+    "newDevice": "新裝置",
     "newDeviceDesc": "When a new device connects",
     "notificationEvents": "通知事件",
-    "overrideForCritical": "覆盖临界值",
-    "perHour": "每小时",
-    "perMinute": "每分钟",
-    "quietHours": "安静时段",
-    "rateLimit": "当前速率限制状态",
+    "overrideForCritical": "覆蓋臨界值",
+    "perHour": "每小時",
+    "perMinute": "每分鐘",
+    "quietHours": "勿擾時段",
+    "rateLimit": "當前速率限制狀態",
     "rateLimiting": "速率限制",
-    "serverDown": "服务器关闭",
+    "serverDown": "伺服器離線",
     "serverDownDesc": "When a media server goes offline",
-    "serverUp": "服务器已启动",
+    "serverUp": "伺服器上線",
     "serverUpDesc": "When a media server comes back online",
-    "streamStarted": "流开始",
+    "streamStarted": "串流已開始",
     "streamStartedDesc": "When a user starts watching",
-    "streamStopped": "流停止",
+    "streamStopped": "串流已停止",
     "streamStoppedDesc": "When a user stops watching",
-    "title": "通知设置",
-    "trustScoreChanged": "信任得分已更改",
+    "title": "通知設定",
+    "trustScoreChanged": "信任分數已更改",
     "trustScoreChangedDesc": "When a user's trust score changes",
-    "violationDetected": "检测到违规事件",
+    "violationDetected": "檢測到違規",
     "violationDetectedDesc": "When a sharing violation is triggered",
-    "violationFilters": "违规过滤器",
-    "warningAndHigh": "仅警告和高"
+    "violationFilters": "違規篩選器",
+    "warningAndHigh": "僅警告和高"
   },
   "toast": {
     "error": {
-      "acknowledgeFailed": "无法识别违反行为",
-      "agentAddFailed": "添加代理失败",
-      "agentRemoveFailed": "移除代理失败",
-      "agentTestFailed": "测试失败",
-      "agentUpdateFailed": "更新代理失败",
-      "apiKeyGenerateFailed": "API 密钥重置失败",
-      "authFailed": "验证失败",
-      "clipboardFailed": "复制到剪贴板失败",
-      "copyFailed": "无法复制到剪贴板",
-      "deviceRemoveFailed": "无法删除设备",
-      "deviceRenameFailed": "无法重命名设备",
-      "dismissFailed": "未能删除违规行为",
-      "displayNameUpdateFailed": "更新显示名失败",
+      "acknowledgeFailed": "無法辨識違規行為",
+      "agentAddFailed": "無法新增代理",
+      "agentRemoveFailed": "無法移除代理",
+      "agentTestFailed": "測試失敗",
+      "agentUpdateFailed": "無法更新代理",
+      "apiKeyGenerateFailed": "無法生成 API 金鑰",
+      "authFailed": "認證失敗",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
+      "clipboardFailed": "無法複製到剪貼簿",
+      "copyFailed": "無法複製到剪貼簿",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
+      "deviceRemoveFailed": "無法移除裝置",
+      "deviceRenameFailed": "無法重新命名裝置",
+      "dismissFailed": "無法排除違規",
+      "displayNameUpdateFailed": "無法更新顯示名稱",
       "invalidClaimCode": {
-        "message": "请检查服务器日志",
-        "title": "无效的索赔码"
+        "message": "請檢查伺服器日誌",
+        "title": "無效的申請碼"
       },
-      "invalidUrl": "无效的 URL",
-      "jobAlreadyRunning": "任务已在运行",
-      "jobLoadFailed": "加载维护任务失败",
-      "jobStartFailed": "启动任务失败",
-      "mobileAccessDisableFailed": "禁用移动访问失败",
-      "mobileAccessEnableFailed": "启用移动访问失败",
+      "invalidUrl": "無效的網址",
+      "jobAlreadyRunning": "任務已在運行",
+      "jobLoadFailed": "無法加載維護任務",
+      "jobStartFailed": "無法啟動任務",
+      "mobileAccessDisableFailed": "無法停用移動裝置存取",
+      "mobileAccessEnableFailed": "無法啟用移動裝置存取",
       "ombiMappingUpdateFailed": "Failed to update requester mapping",
       "ombiPurgeFailed": "Failed to purge Ombi data",
       "ombiSyncAlreadyRunning": "An Ombi sync is already running",
       "ombiSyncFailed": "Failed to start Ombi sync",
       "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
-      "pairTokenGenerateFailed": "生成配对令牌失败",
+      "pairTokenGenerateFailed": "無法生成配對憑證",
       "playedStateSyncAlreadyRunning": "A played-state sync is already running for this server",
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
-      "plexDirectUrl": "plex.direct URL是此处不能使用的中继地址。请使用直接IP地址或主机名。",
-      "plexUnlinkFailed": "取消链接Plex帐户失败",
-      "routingUpdateFailed": "更新路由失败",
+      "plexDirectUrl": "plex.direct URL 是中繼位址，這裡不能使用。請改用直接 IP 位址或主機名稱。",
+      "plexReauthorizeFailed": "",
+      "plexUnlinkFailed": "無法取消連接 Plex 帳號",
+      "routingUpdateFailed": "無法更新路由",
       "ruleCreateFailed": "创建规则失败",
       "ruleDeleteFailed": "删除规则失败",
       "ruleUpdateFailed": "更新规则失败",
@@ -87,23 +95,23 @@
       "seerrSyncAlreadyRunning": "A Seerr sync is already running",
       "seerrSyncFailed": "Failed to start Seerr sync",
       "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
-      "serverAddFailed": "添加服务器失败",
-      "serverRemoveFailed": "删除服务器失败",
-      "serverReorderFailed": "服务器重新排序失败",
-      "serverSyncFailed": "同步服务器失败",
-      "serverUpdateFailed": "更新服务器失败",
-      "serverUrlUpdateFailed": "无法更新服务器 URL",
+      "serverAddFailed": "無法新增伺服器",
+      "serverRemoveFailed": "無法移除伺服器",
+      "serverReorderFailed": "無法重新排序伺服器",
+      "serverSyncFailed": "無法同步伺服器",
+      "serverUpdateFailed": "無法更新伺服器",
+      "serverUrlUpdateFailed": "無法更新伺服器網址",
       "serverUserSplitFailed": "Failed to split account",
-      "sessionsDeleteFailed": "删除会话失败",
-      "sessionsRevokeFailed": "撤销会话失败",
-      "settingsUpdateFailed": "更新设置失败",
-      "streamTerminateFailed": "终止流失败",
-      "trustScoresResetFailed": "重置信任分失败",
+      "sessionsDeleteFailed": "無法刪除會話",
+      "sessionsRevokeFailed": "無法撤銷會話",
+      "settingsUpdateFailed": "無法更新設定",
+      "streamTerminateFailed": "無法終止串流",
+      "trustScoresResetFailed": "無法重置信任分數",
       "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
       "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
       "userMergeFailed": "Failed to merge users",
       "usersRemoveFailed": "Failed to remove users",
-      "webhookTestFailed": "Webhook 测试失败"
+      "webhookTestFailed": "Webhook 測試失敗"
     },
     "info": {
       "serverOffline": {
@@ -123,64 +131,79 @@
         "title": "流停止"
       },
       "updateAvailable": {
-        "message": "Tracearr{{version}}可用",
-        "title": "有可用更新"
+        "message": "Tracearr {{version}} 可用",
+        "title": "有可用的更新"
       },
       "violationDetected": {
-        "message": "{{user}} 触发了 {{ruleType}}",
-        "title": "新违规：{{ruleName}}"
+        "message": "{{user}} 觸發了 {{ruleType}}",
+        "title": "新違規：{{ruleName}}"
       }
     },
     "success": {
       "agentAdded": {
-        "message": "通知代理已添加",
-        "title": "代理已添加"
+        "message": "已新增通知代理",
+        "title": "已新增代理"
       },
       "agentRemoved": {
-        "message": "通知代理已被删除",
-        "title": "代理已删除"
+        "message": "已移除通知代理",
+        "title": "已移除代理"
       },
       "agentUpdated": {
-        "message": "通知代理已更新",
-        "title": "代理已更新"
+        "message": "已更新通知代理",
+        "title": "已更新代理"
       },
       "apiKeyGenerated": {
-        "message": "您的新 API 密钥已准备好使用",
-        "title": "已生成API密钥"
+        "message": "你的新 API 密鑰已準備好使用",
+        "title": "已生成 API 密鑰"
+      },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
       },
       "claimCodeValidated": {
-        "message": "您现在可以继续设置",
-        "title": "验证认领码"
+        "message": "你現在可以繼續設定",
+        "title": "已驗證申請碼"
       },
       "copiedToClipboard": {
-        "title": "已复制到剪贴板"
+        "title": "已複製到剪貼簿"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
-        "message": "设备连接已断开",
-        "title": "设备已移除"
+        "message": "設備已中斷連接",
+        "title": "已移除裝置"
       },
       "deviceRenamed": {
-        "message": "设备名称已更新",
-        "title": "设备已重命名"
+        "message": "已更新裝置名稱",
+        "title": "已重新命名裝置"
       },
       "displayNameUpdated": {
-        "title": "已更新显示名称"
+        "title": "已更新顯示名稱"
       },
       "jobCompleted": {
-        "message": "{{name}}成功完成",
-        "title": "任务已完成"
+        "message": "{{name}} 成功完成",
+        "title": "任務已完成"
       },
       "loggedIn": {
-        "message": "登录成功",
+        "message": "成功登入",
         "title": "成功"
       },
       "mobileAccessDisabled": {
-        "message": "所有移动会话已被撤销",
-        "title": "移动访问已禁用"
+        "message": "已撤銷所有移動裝置的會話",
+        "title": "已停用移動裝置存取"
       },
       "mobileAccessEnabled": {
-        "message": "使用 Tracearr 移动应用程序扫描二维码以连接",
-        "title": "移动访问已启用"
+        "message": "使用 Tracearr 手機應用程式掃描 QR 碼來連接",
+        "title": "已啟用移動裝置存取"
       },
       "ombiDataPurged": {
         "title": "Ombi data purged"
@@ -192,16 +215,24 @@
         "title": "Requester mapping updated"
       },
       "pairTokenGenerated": {
-        "message": "用您的移动设备扫描二维码进行配对",
-        "title": "配对令牌已生成"
+        "message": "使用你的移動裝置掃描 QR 碼來進行配對",
+        "title": "已生成配對憑證"
       },
       "plexAccountLinked": {
-        "message": "您现在可以从Plex帐户添加服务器",
-        "title": "Plex 账户已链接"
+        "message": "你現在可以從 Plex 帳號新增伺服器",
+        "title": "已連接 Plex 帳號"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
-        "message": "您的Plex帐户已断开连接",
-        "title": "Plex账户未链接"
+        "message": "你的 Plex 帳號已中斷連接",
+        "title": "未連接 Plex 帳號"
       },
       "ruleCreated": {
         "message": "已成功创建规则",
@@ -225,56 +256,56 @@
         "title": "Requester mapping updated"
       },
       "serverAdded": {
-        "message": "{{name}}已成功连接",
-        "title": "服务器已添加"
+        "message": "{{name}} 已成功連接",
+        "title": "已新增伺服器"
       },
       "serverRemoved": {
-        "message": "服务器已成功删除",
-        "title": "服务器已删除"
+        "message": "已成功刪除伺服器",
+        "title": "已移除伺服器"
       },
       "serverSynced": {
-        "message": "服务器数据已同步",
-        "title": "服务器同步"
+        "message": "已同步伺服器資料",
+        "title": "已同步伺服器"
       },
       "serverUpdated": {
-        "message": "该服务器被成功删除",
-        "title": "服务器更新"
+        "message": "已成功更新伺服器",
+        "title": "已更新伺服器"
       },
       "serverUrlUpdated": {
-        "message": "服务器URL已成功更新",
-        "title": "服务器URL已更新"
+        "message": "已成功更新伺服器網址",
+        "title": "已更新伺服器網址"
       },
       "serverUserSplit": {
         "title": "Account split into a separate user"
       },
       "sessionsDeleted": {
-        "message_one": "{{count}}会话已删除",
-        "message_other": "{{count}}会话已删除",
-        "title": "会话已删除"
+        "message_one": "已刪除 {{count}} 個會話",
+        "message_other": "已刪除 {{count}} 個會話",
+        "title": "已刪除會話"
       },
       "sessionsRevoked": {
-        "message": "所有移动会话已被撤销",
-        "title": "会话已取消"
+        "message": "所有行動裝置的會話已被撤銷",
+        "title": "會話已取消"
       },
       "settingsUpdated": {
-        "message": "您的设置已保存",
-        "title": "设置已更新"
+        "message": "已儲存你的設定",
+        "title": "已更新設定"
       },
       "streamTerminated": {
-        "message": "播放会话已停止",
-        "title": "流已终止"
+        "message": "已停止播放會話",
+        "title": "已終止串流"
       },
       "syncCompletedWithErrors": {
-        "title": "同步完成时发生错误"
+        "title": "同步完成，但出現錯誤"
       },
       "tokenCopied": {
-        "message": "配对令牌已复制到剪贴板",
-        "title": "Token已复制"
+        "message": "已複製配對憑證到剪貼簿",
+        "title": "已複製憑證"
       },
       "trustScoresReset": {
-        "message_one": "{{count}}用户重置为100",
-        "message_other": "{{count}}用户重置为100",
-        "title": "重置信任分数"
+        "message_one": "{{count}} 個使用者重置為 100",
+        "message_other": "{{count}} 個使用者重置為 100",
+        "title": "重置信任分數"
       },
       "updateWebhookCleared": {
         "title": "Redeploy webhook removed"
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },
@@ -292,32 +324,32 @@
         "title": "Users Removed"
       },
       "violationAcknowledged": {
-        "message": "违法行为已被标记为已确认",
-        "title": "确认违约行为"
+        "message": "違規行為已被標記為已確認",
+        "title": "已確認違規行為"
       },
       "violationDismissed": {
-        "message": "违法行为已被拒绝",
-        "title": "丢弃的违规行为"
+        "message": "違規行為已被撤銷",
+        "title": "違規撤銷"
       },
       "violationsAcknowledged": {
-        "message_one": "{{count}}确认违规行为",
-        "message_other": "{{count}}确认违规行为",
-        "title": "确认违规行为"
+        "message_one": "{{count}} 個已確認的違規行為",
+        "message_other": "{{count}} 個已確認的違規行為",
+        "title": "已確認違規行為"
       },
       "violationsDismissed": {
-        "message_one": "{{count}}违规情况已清除",
-        "message_other": "{{count}}违规情况已清除",
-        "title": "违规情况已清除"
+        "message_one": "已撤銷 {{count}} 個違規",
+        "message_other": "已撤銷 {{count}} 個違規",
+        "title": "已撤銷違規"
       },
       "webhookTest": {
-        "message": "Webhook 正常工作",
-        "title": "测试成功"
+        "message": "Webhook 正常運作",
+        "title": "測試成功"
       }
     },
     "warning": {
       "jobFailed": {
-        "message": "{{name}} 遇到错误",
-        "title": "任务失败"
+        "message": "{{name}} 遇到錯誤",
+        "title": "任務失敗"
       }
     }
   }

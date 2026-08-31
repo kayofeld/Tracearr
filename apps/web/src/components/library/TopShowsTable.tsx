@@ -1,8 +1,9 @@
-import { Tv, ArrowUpDown, ArrowUp, ArrowDown, Zap } from 'lucide-react';
+import { Tv, Zap } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { TopShowsResponse } from '@tracearr/shared';
 import type { Server } from '@tracearr/shared';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { DataTablePager } from '@/components/ui/data-table';
 import {
   Table,
   TableBody,
@@ -12,10 +13,15 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ServerBadge } from '@/components/server';
-import { EmptyState } from '@/components/library';
+import { EmptyState } from '@/components/ui/empty-state';
+import { getBingeScoreBadge, getCompletionBadge } from './badges';
+import {
+  SortableTableHead,
+  nextSortOrder,
+  type SortOrder,
+} from '@/components/ui/sortable-table-head';
 
 type ShowSortBy = 'plays' | 'watch_hours' | 'viewers' | 'completion_rate' | 'binge_score';
-type SortOrder = 'asc' | 'desc';
 
 interface TopShowsTableProps {
   data: TopShowsResponse | undefined;
@@ -27,26 +33,6 @@ interface TopShowsTableProps {
   onSortChange: (sortBy: ShowSortBy, sortOrder: SortOrder) => void;
   selectedServers?: Server[];
   isMultiServer?: boolean;
-}
-
-/**
- * Get binge score badge based on score thresholds.
- */
-function getBingeScoreBadge(score: number) {
-  if (score >= 80) return <Badge variant="danger">Highly Addictive</Badge>;
-  if (score >= 60) return <Badge variant="warning">Addictive</Badge>;
-  if (score >= 40) return <Badge variant="secondary">Bingeable</Badge>;
-  return <Badge variant="outline">Casual Watch</Badge>;
-}
-
-/**
- * Get completion rate badge based on percentage.
- */
-function getCompletionBadge(rate: number) {
-  if (rate >= 80) return <Badge variant="success">{rate.toFixed(0)}%</Badge>;
-  if (rate >= 50) return <Badge variant="secondary">{rate.toFixed(0)}%</Badge>;
-  if (rate >= 20) return <Badge variant="warning">{rate.toFixed(0)}%</Badge>;
-  return <Badge variant="outline">{rate.toFixed(0)}%</Badge>;
 }
 
 /**
@@ -65,22 +51,10 @@ export function TopShowsTable({
   selectedServers = [],
   isMultiServer = false,
 }: TopShowsTableProps) {
-  const handleSort = (field: ShowSortBy) => {
-    if (sortBy === field) {
-      onSortChange(field, sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      // Default sort direction: desc for metrics
-      onSortChange(field, 'desc');
-    }
-  };
+  const { t } = useTranslation('common');
 
-  const SortIcon = ({ field }: { field: ShowSortBy }) => {
-    if (sortBy !== field) return <ArrowUpDown className="h-4 w-4 opacity-50" />;
-    return sortOrder === 'asc' ? (
-      <ArrowUp className="h-4 w-4" />
-    ) : (
-      <ArrowDown className="h-4 w-4" />
-    );
+  const handleSort = (field: ShowSortBy) => {
+    onSortChange(field, nextSortOrder(field, sortBy, sortOrder, 'desc'));
   };
 
   if (isLoading) {
@@ -109,51 +83,46 @@ export function TopShowsTable({
         <TableHeader>
           <TableRow>
             <TableHead className="w-[30%]">Show</TableHead>
-            <TableHead>
-              <button
-                className="hover:text-foreground flex items-center gap-1"
-                onClick={() => handleSort('plays')}
-              >
-                Episodes
-                <SortIcon field="plays" />
-              </button>
-            </TableHead>
-            <TableHead>
-              <button
-                className="hover:text-foreground flex items-center gap-1"
-                onClick={() => handleSort('watch_hours')}
-              >
-                Watch Hours
-                <SortIcon field="watch_hours" />
-              </button>
-            </TableHead>
-            <TableHead>
-              <button
-                className="hover:text-foreground flex items-center gap-1"
-                onClick={() => handleSort('viewers')}
-              >
-                Viewers
-                <SortIcon field="viewers" />
-              </button>
-            </TableHead>
-            <TableHead>
-              <button
-                className="hover:text-foreground flex items-center gap-1"
-                onClick={() => handleSort('completion_rate')}
-              >
-                Completion
-                <SortIcon field="completion_rate" />
-              </button>
-            </TableHead>
-            <TableHead>
-              <button
-                className="hover:text-foreground flex items-center gap-1"
-                onClick={() => handleSort('binge_score')}
-              >
-                Binge Score
-                <SortIcon field="binge_score" />
-              </button>
-            </TableHead>
+            <SortableTableHead
+              field="plays"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={handleSort}
+            >
+              Episodes
+            </SortableTableHead>
+            <SortableTableHead
+              field="watch_hours"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={handleSort}
+            >
+              Watch Hours
+            </SortableTableHead>
+            <SortableTableHead
+              field="viewers"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={handleSort}
+            >
+              Viewers
+            </SortableTableHead>
+            <SortableTableHead
+              field="completion_rate"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={handleSort}
+            >
+              Completion
+            </SortableTableHead>
+            <SortableTableHead
+              field="binge_score"
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onSort={handleSort}
+            >
+              Binge Score
+            </SortableTableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -195,32 +164,21 @@ export function TopShowsTable({
         </TableBody>
       </Table>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <span className="text-muted-foreground text-sm">
-            Page {page} of {totalPages}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onPageChange(page - 1)}
-              disabled={page <= 1}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onPageChange(page + 1)}
-              disabled={page >= totalPages}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTablePager
+        page={page}
+        pageCount={totalPages}
+        canPrevious={page > 1}
+        canNext={page < totalPages}
+        onPrevious={() => onPageChange(page - 1)}
+        onNext={() => onPageChange(page + 1)}
+        labels={{
+          navigation: t('table.pagination'),
+          status: t('table.pageOf', { page, total: totalPages }),
+          previous: t('actions.previous'),
+          next: t('actions.next'),
+        }}
+        className="px-2"
+      />
     </div>
   );
 }

@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Nie udało się zaktualizować agenta",
       "apiKeyGenerateFailed": "Nie udało się wygenerować klucza API",
       "authFailed": "Uwierzytelnianie nie powiodło się",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
       "clipboardFailed": "Nie udało się skopiować do schowka",
       "copyFailed": "Nie można skopiować do schowka",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
       "deviceRemoveFailed": "Nie udało się usunąć urządzenia",
       "deviceRenameFailed": "Nie udało się zmienić nazwy urządzenia",
       "dismissFailed": "Nie udało się odrzucić naruszenia",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "plex.direct adresy URL są adresami, które nie mogą być tutaj użyte. Użyj bezpośredniego adresu IP lub nazwy hosta.",
+      "plexReauthorizeFailed": "",
       "plexUnlinkFailed": "Nie udało się odłączyć konta Plex",
       "routingUpdateFailed": "Nie udało się zaktualizować trasy",
       "ruleCreateFailed": "Nie udało się utworzyć reguły",
@@ -148,6 +156,18 @@
         "message": "Twój nowy klucz API jest gotowy do użycia",
         "title": "Wygenerowany klucz API"
       },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
+      },
       "claimCodeValidated": {
         "message": "Możesz kontynuować konfigurację",
         "title": "Kod został poprawnie zweryfikowany"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Skopiowane do schowka"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
         "message": "Urządzenie zostało rozłączone",
         "title": "Urządzenie usunięte"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "Teraz możesz dodać serwery z konta Plex",
         "title": "Konto Plex powiązane"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
         "message": "Twoje konto Plex zostało odłączone",
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },

@@ -1,11 +1,10 @@
 /**
- * sweepStaleSessions notification tests.
+ * sweepStaleSessions tests.
  *
  * The stale sweep force-stops sessions the poller lost track of (no poll saw
- * them in 5+ minutes) and always published `session:stopped` over pubsub, but
- * never enqueued the user-facing stop notification the grace-period sweep
- * sends via `sendGracePeriodStopNotification`. These tests pin that gap and
- * the stoppedAt/durationMs consistency between the DB write and the payload.
+ * them in 5+ minutes): stopSessionAtomic writes the row and dispatches
+ * session.stopped, the sweep publishes `session:stopped` and cleans the cache.
+ * It enqueues nothing of its own.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -56,7 +55,8 @@ vi.mock('../../notificationQueue.js', () => ({
 }));
 
 vi.mock('../database.js', () => ({
-  getActiveRulesV2: vi.fn().mockResolvedValue([]),
+  onActiveAutomationsRefill: vi.fn(),
+  getActiveAutomations: vi.fn().mockResolvedValue([]),
   batchGetIdentityServerUserIds: vi.fn().mockResolvedValue(new Map()),
   batchGetRecentUserSessions: vi.fn().mockResolvedValue(new Map()),
   widenRecentSessionsForMergedIdentities: vi.fn(),
@@ -77,9 +77,13 @@ vi.mock('../sessionLifecycle.js', () => ({
   handleMediaChangeAtomic: vi.fn(),
   handleQualityChangeFallout: vi.fn(),
   processPollResults: vi.fn().mockResolvedValue(undefined),
-  reEvaluateRulesOnPauseState: vi.fn(),
-  reEvaluateRulesOnTranscodeChange: vi.fn(),
   stopSessionAtomic: (...args: unknown[]) => mockStopSessionAtomic(...args),
+}));
+
+const mockDispatch = vi.fn().mockResolvedValue({ violations: [], outcomes: [] });
+vi.mock('../../../services/automations/events/dispatcher.js', () => ({
+  dispatch: (...args: unknown[]) => mockDispatch(...args),
+  subscribe: vi.fn(),
 }));
 
 vi.mock('../violations.js', () => ({
@@ -99,25 +103,12 @@ const staleSessionRow = {
   stoppedAt: null,
 };
 
-const serverRow = { id: 'server-1', name: 'Server One', type: 'plex' as const };
-const serverUserRow = {
-  id: 'server-user-1',
-  username: 'alice',
-  thumbUrl: null,
-  identityName: 'Alice Identity',
-};
-
-/** Mock db.select() call chain in the order sweepStaleSessions issues its 3 queries. */
-function mockDbSequence(staleRows: unknown[], serverRows: unknown[], serverUserRows: unknown[]) {
-  mockDbSelect
-    .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve(staleRows) }) })
-    .mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve(serverRows) }) })
-    .mockReturnValueOnce({
-      from: () => ({ innerJoin: () => ({ where: () => Promise.resolve(serverUserRows) }) }),
-    });
+/** The one query sweepStaleSessions issues: the stale rows themselves. */
+function mockDbSequence(staleRows: unknown[]) {
+  mockDbSelect.mockReturnValueOnce({ from: () => ({ where: () => Promise.resolve(staleRows) }) });
 }
 
-describe('sweepStaleSessions notifications', () => {
+describe('sweepStaleSessions', () => {
   const cacheService = {
     removeActiveSession: vi.fn(),
     addSessionWriteRetry: vi.fn(),
@@ -130,8 +121,8 @@ describe('sweepStaleSessions notifications', () => {
     initializePoller(cacheService as never, pubSubService as never);
   });
 
-  it('enqueues a session_stopped notification with the same stoppedAt used in the DB write', async () => {
-    mockDbSequence([staleSessionRow], [serverRow], [serverUserRow]);
+  it('force-stops the stale session and leaves the notification to the automations', async () => {
+    mockDbSequence([staleSessionRow]);
     mockStopSessionAtomic.mockResolvedValue({
       durationMs: 456000,
       watched: true,
@@ -142,37 +133,16 @@ describe('sweepStaleSessions notifications', () => {
     await sweepStaleSessions();
 
     expect(mockStopSessionAtomic).toHaveBeenCalledTimes(1);
-    const stopCallArgs = mockStopSessionAtomic.mock.calls[0]?.[0] as { stoppedAt: Date };
-
-    expect(mockEnqueueNotification).toHaveBeenCalledTimes(1);
-    const [notification] = mockEnqueueNotification.mock.calls[0] as [
-      { type: string; payload: Record<string, unknown> },
-    ];
-
-    expect(notification.type).toBe('session_stopped');
-    expect(notification.payload.id).toBe('session-1');
-    expect(notification.payload.durationMs).toBe(456000);
-    expect(notification.payload.stoppedAt).toEqual(stopCallArgs.stoppedAt);
-    expect(notification.payload.user).toEqual(serverUserRow);
-    expect(notification.payload.server).toEqual(serverRow);
-  });
-
-  it('does not enqueue a notification when the session was already stopped by another process', async () => {
-    mockDbSequence([staleSessionRow], [serverRow], [serverUserRow]);
-    mockStopSessionAtomic.mockResolvedValue({
-      durationMs: null,
-      watched: false,
-      shortSession: false,
-      wasUpdated: false,
+    expect(mockStopSessionAtomic.mock.calls[0]?.[0]).toMatchObject({
+      session: staleSessionRow,
+      forceStopped: true,
     });
-
-    await sweepStaleSessions();
-
+    expect(pubSubService.publish).toHaveBeenCalledWith('session:stopped', 'session-1');
     expect(mockEnqueueNotification).not.toHaveBeenCalled();
   });
 
   it('removes the cache entry without invalidating per-session, then invalidates dashboard stats once', async () => {
-    mockDbSequence([staleSessionRow], [serverRow], [serverUserRow]);
+    mockDbSequence([staleSessionRow]);
     mockStopSessionAtomic.mockResolvedValue({
       durationMs: 456000,
       watched: true,
@@ -189,7 +159,7 @@ describe('sweepStaleSessions notifications', () => {
   });
 
   it('does not invalidate dashboard stats when no session was actually force-stopped', async () => {
-    mockDbSequence([staleSessionRow], [serverRow], [serverUserRow]);
+    mockDbSequence([staleSessionRow]);
     mockStopSessionAtomic.mockResolvedValue({
       durationMs: null,
       watched: false,

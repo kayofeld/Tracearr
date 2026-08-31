@@ -72,7 +72,7 @@ Tracearr is a monitoring platform for **Plex**, **Jellyfin**, and **Emby**. Trac
 
 **Real-Time Alerts** — Discord, Telegram, and custom webhook notifications fire instantly when rules trigger.
 
-**Public API** — Read-only REST API for third-party integrations. Generate an API key in Settings, then explore endpoints at `/api-docs` (Swagger UI). Works with Homarr, Home Assistant, or anything that speaks HTTP.
+**Public API** — Read-only REST API for third-party integrations. Generate an API key in Settings, then browse the [API reference](https://docs.tracearr.com/api) or the interactive docs built into your instance.
 
 **Bulk Actions** — Multi-select operations across tables. Acknowledge or dismiss violations in bulk, reset trust scores, enable/disable rules, delete session history.
 
@@ -454,6 +454,33 @@ Use the included `.vscode/launch.json` to debug both server and web apps directl
 - [ ] Beta-features validation (backup/import/mobile-beta/beta-channel)
 - [ ] Periodic auto user-sync
 - [ ] Additional notification channels
+- [ ] Tiered access controls
+- [ ] Multi-admin support
+- [ ] Account suspension automation
+
+**v1.6**
+
+- [ ] Email notifications
+- [ ] Telegram notifier
+
+## Project Statistics
+
+<p align="center">
+  <img
+    src="https://repobeats.axiom.co/api/embed/4632d7f3bb419e78c5525af0905a488d9f72a753.svg"
+    alt="Repobeats analytics"
+  />
+</p>
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=connorgallopo%2FTracearr&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=connorgallopo/Tracearr&type=date&theme=dark&legend=top-left&sealed_token=gqNERdnUn6ObeSY81Y6zP40vLBLudEzd1HRVmVfMCjaDrF-MPIll0_KXFkm0b36agZvr6RxkGRX_2xeM81kTqylKJN4i8IpTj9RIq9oLT7AxiBYGK0Zrr2IZR0sQpGHAvmnQP0KtQaN03rFdvuUf6ce-MVOZ7XQ7tpf3UGbabcegW5GUP97_aQso0cq3" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=connorgallopo/Tracearr&type=date&legend=top-left&sealed_token=gqNERdnUn6ObeSY81Y6zP40vLBLudEzd1HRVmVfMCjaDrF-MPIll0_KXFkm0b36agZvr6RxkGRX_2xeM81kTqylKJN4i8IpTj9RIq9oLT7AxiBYGK0Zrr2IZR0sQpGHAvmnQP0KtQaN03rFdvuUf6ce-MVOZ7XQ7tpf3UGbabcegW5GUP97_aQso0cq3" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=connorgallopo/Tracearr&type=date&legend=top-left&sealed_token=gqNERdnUn6ObeSY81Y6zP40vLBLudEzd1HRVmVfMCjaDrF-MPIll0_KXFkm0b36agZvr6RxkGRX_2xeM81kTqylKJN4i8IpTj9RIq9oLT7AxiBYGK0Zrr2IZR0sQpGHAvmnQP0KtQaN03rFdvuUf6ce-MVOZ7XQ7tpf3UGbabcegW5GUP97_aQso0cq3" />
+ </picture>
+</a>
 
 ## License
 
@@ -466,3 +493,5 @@ This fork is © its contributors and builds on **[connorgallopo/Tracearr](https:
 <p align="center">
   <sub>For Plex, Jellyfin, and Emby admins who want to see what's actually happening.</sub>
 </p>
+
+This project is tested with BrowserStack.

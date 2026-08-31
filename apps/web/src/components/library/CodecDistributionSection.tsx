@@ -3,7 +3,7 @@ import { Film, Music } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TopListChart } from '@/components/charts';
-import { EmptyState } from '@/components/library';
+import { EmptyState } from '@/components/ui/empty-state';
 import { PerServerCardGrid } from '@/components/server';
 import { useLibraryCodecs } from '@/hooks/queries';
 import { formatMediaTech, type CodecBreakdown } from '@tracearr/shared';
@@ -37,8 +37,8 @@ function CodecTabsContent({ serverId }: { serverId: string | null | undefined })
   const channelsData = toChartData(codecs.data?.channels);
   const musicData = toChartData(codecs.data?.music);
 
-  const hasVideoData = codecs.data?.video.total ?? 0 > 0;
-  const hasMusicData = codecs.data?.music.total ?? 0 > 0;
+  const hasVideoData = (codecs.data?.video.total ?? 0) > 0;
+  const hasMusicData = (codecs.data?.music.total ?? 0) > 0;
 
   return (
     <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'video' | 'music')}>

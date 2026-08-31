@@ -18,9 +18,9 @@ import type { ProcessedSession } from '../types.js';
 
 const mockDbSelect = vi.fn();
 const mockTouchReturning = vi.fn().mockResolvedValue([{ id: 'foreign-id' }]);
-const { mockCreateMediaServerClient, mockGetActiveRulesV2 } = vi.hoisted(() => ({
+const { mockCreateMediaServerClient, mockGetActiveAutomations } = vi.hoisted(() => ({
   mockCreateMediaServerClient: vi.fn(),
-  mockGetActiveRulesV2: vi.fn().mockResolvedValue([]),
+  mockGetActiveAutomations: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../../../db/client.js', () => ({
@@ -39,6 +39,10 @@ vi.mock('../../../db/schema.js', async (importOriginal) => {
 
 vi.mock('../../../routes/settings.js', () => ({
   getGeoIPSettings: vi.fn().mockResolvedValue({ usePlexGeoip: false }),
+}));
+
+vi.mock('../../../services/settings.js', () => ({
+  getWatchedThreshold: vi.fn().mockResolvedValue(0.85),
 }));
 
 vi.mock('../../../serverState.js', () => ({
@@ -70,9 +74,12 @@ vi.mock('../../notificationQueue.js', () => ({
 }));
 
 vi.mock('../database.js', () => ({
-  getActiveRulesV2: mockGetActiveRulesV2,
+  onActiveAutomationsRefill: vi.fn(),
+  getCachedServers: () => mockDbSelect().from(servers),
+  getActiveAutomations: mockGetActiveAutomations,
   batchGetIdentityServerUserIds: vi.fn().mockResolvedValue(new Map()),
   batchGetRecentUserSessions: vi.fn().mockResolvedValue(new Map()),
+  batchGetLibraryItemIdentity: vi.fn().mockResolvedValue(new Map()),
   widenRecentSessionsForMergedIdentities: vi.fn(),
 }));
 
@@ -96,9 +103,13 @@ vi.mock('../sessionLifecycle.js', () => ({
   handleMediaChangeAtomic: (...args: unknown[]) => mockHandleMediaChangeAtomic(...args),
   handleQualityChangeFallout: vi.fn(),
   processPollResults: vi.fn().mockResolvedValue(undefined),
-  reEvaluateRulesOnPauseState: vi.fn(),
-  reEvaluateRulesOnTranscodeChange: vi.fn(),
   stopSessionAtomic: vi.fn(),
+}));
+
+const mockDispatch = vi.fn().mockResolvedValue({ violations: [], outcomes: [] });
+vi.mock('../../../services/automations/events/dispatcher.js', () => ({
+  dispatch: (...args: unknown[]) => mockDispatch(...args),
+  subscribe: vi.fn(),
 }));
 
 vi.mock('../violations.js', () => ({
@@ -187,7 +198,6 @@ const serverUserRow = {
   thumbUrl: null,
   isServerAdmin: false,
   trustScore: 100,
-  sessionCount: 1,
   lastActivityAt: null,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -276,6 +286,7 @@ function createCacheService(cachedActive: ActiveSession[]) {
     deletePendingSession: vi.fn().mockResolvedValue(undefined),
     // Execute the create-lock callback so the in-lock rechecks actually run.
     withSessionCreateLock: vi.fn().mockImplementation(async (_s, _k, op) => op()),
+    addActiveSession: vi.fn().mockResolvedValue(undefined),
     removeActiveSession: vi.fn().mockResolvedValue(undefined),
     removeUserSession: vi.fn().mockResolvedValue(undefined),
     hasTerminationCooldown: vi.fn().mockResolvedValue(false),
@@ -289,7 +300,7 @@ describe('poller in-lock cross-user sessionKey guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stopPoller();
-    mockGetActiveRulesV2.mockResolvedValue([]);
+    mockGetActiveAutomations.mockResolvedValue([]);
     mockCreateMediaServerClient.mockReturnValue({
       getSessions: vi.fn().mockResolvedValue([createMockProcessedSession()]),
     });
@@ -299,9 +310,10 @@ describe('poller in-lock cross-user sessionKey guards', () => {
     mockFindActiveSession.mockResolvedValue(foreignRow);
   });
 
-  it('rediscovery path (isNew): creates fresh under the real user instead of reattaching the foreign row', async () => {
+  it('rediscovery path (isNew): defers a fresh pending entry under the real user instead of reattaching the foreign row', async () => {
     // Empty cache -> the incoming key reads as new, routing through the isNew
-    // create lock whose recheck finds the foreign row.
+    // create lock whose recheck finds the foreign row. Creation itself is now
+    // deferred to a pending Redis entry rather than an immediate DB row.
     mockBatchFindActiveSessionsByKey.mockResolvedValue(new Map());
     const cacheService = createCacheService([]);
     initializePoller(
@@ -311,12 +323,14 @@ describe('poller in-lock cross-user sessionKey guards', () => {
 
     await triggerPoll();
 
-    expect(mockCreateSessionWithRulesAtomic).toHaveBeenCalledTimes(1);
-    // The foreign row is never rebuilt as this user's session.
-    for (const call of mockBuildActiveSession.mock.calls) {
-      const arg = call[0] as { session?: { id?: string } };
-      expect(arg.session?.id).not.toBe('foreign-id');
-    }
+    expect(mockCreateSessionWithRulesAtomic).not.toHaveBeenCalled();
+    expect(cacheService.setPendingSession).toHaveBeenCalledTimes(1);
+    const [, , pendingData] = cacheService.setPendingSession.mock.calls[0] as [
+      string,
+      string,
+      { serverUser: { id: string } },
+    ];
+    expect(pendingData.serverUser.id).toBe('su-B');
   });
 
   it('stale-cache path: creates fresh under the real user instead of skipping on the foreign row', async () => {

@@ -14,6 +14,11 @@ function Table({ className, ...props }: React.ComponentProps<'table'>) {
   );
 }
 
+// Muted and small so the header row reads as a band distinct from the data,
+// rather than competing with it at the same weight and colour.
+export const tableHeadTextClasses =
+  'text-muted-foreground text-xs font-medium tracking-wide uppercase';
+
 function TableHeader({ className, ...props }: React.ComponentProps<'thead'>) {
   return <thead data-slot="table-header" className={cn('[&_tr]:border-b', className)} {...props} />;
 }
@@ -56,7 +61,8 @@ function TableHead({ className, ...props }: React.ComponentProps<'th'>) {
     <th
       data-slot="table-head"
       className={cn(
-        'text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
+        tableHeadTextClasses,
+        'h-10 px-2 text-left align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
         className
       )}
       {...props}

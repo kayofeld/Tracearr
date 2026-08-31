@@ -15,11 +15,17 @@ import {
 } from '../test/helpers.js';
 import { debugRoutes } from './debug.js';
 
-// Mock the database module
+// Count queries are awaited straight off .from() or off a .where() after it,
+// so the stub row set answers to both.
+const { countRows } = vi.hoisted(() => {
+  const rows: { count: number }[] = [{ count: 0 }];
+  return { countRows: Object.assign(rows, { where: () => rows }) };
+});
+
 vi.mock('../db/client.js', () => ({
   db: {
     select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue([{ count: 0 }]),
+      from: vi.fn().mockReturnValue(countRows),
     }),
     delete: vi.fn().mockReturnValue({
       where: vi.fn().mockReturnValue({
@@ -39,10 +45,8 @@ vi.mock('../db/client.js', () => ({
 vi.mock('../db/schema.js', async (importOriginal) => ({
   ...(await importOriginal()),
   sessions: { id: 'id' },
-  violations: { id: 'id' },
   users: { id: 'id' },
   servers: { id: 'id' },
-  rules: { id: 'id' },
   settings: { id: 'id' },
 }));
 
@@ -81,7 +85,7 @@ describe('Debug Routes Security', () => {
     { method: 'DELETE', url: '/api/v1/debug/violations' },
     { method: 'DELETE', url: '/api/v1/debug/users' },
     { method: 'DELETE', url: '/api/v1/debug/servers' },
-    { method: 'DELETE', url: '/api/v1/debug/rules' },
+    { method: 'DELETE', url: '/api/v1/debug/automations' },
     { method: 'POST', url: '/api/v1/debug/reset' },
     { method: 'POST', url: '/api/v1/debug/refresh-aggregates' },
     { method: 'GET', url: '/api/v1/debug/logs' },

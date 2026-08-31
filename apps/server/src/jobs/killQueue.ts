@@ -10,14 +10,19 @@
  */
 
 import { Queue, Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { getRedisPrefix, type Action } from '@tracearr/shared';
-import { getActionExecutorDeps, type ActionResult } from '../services/rules/executors/index.js';
+import { type Action } from '@tracearr/shared';
+import {
+  getActionExecutorDeps,
+  cooldownTargetId,
+  type ActionResult,
+} from '../services/automations/executors/index.js';
+import { getBullPrefix, queueConnectionOptions } from './queueConnection.js';
 import { isMaintenance } from '../serverState.js';
 import {
   reverifyKillCondition,
   type ReverifyKillConditionResult,
-} from '../services/rules/reverify.js';
-import { storeActionResults } from '../services/rules/v2Integration.js';
+} from '../services/automations/reverify.js';
+import { storeActionResults } from '../services/automations/v2Integration.js';
 
 const QUEUE_NAME = 'kill-stream';
 
@@ -63,8 +68,8 @@ export function initKillQueue(redisUrl: string): void {
     return;
   }
 
-  connectionOptions = { url: redisUrl };
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  connectionOptions = queueConnectionOptions(redisUrl);
+  const bullPrefix = getBullPrefix();
 
   killQueue = new Queue<KillJobData>(QUEUE_NAME, {
     connection: connectionOptions,
@@ -105,7 +110,7 @@ export function startKillWorker(): void {
     return;
   }
 
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  const bullPrefix = getBullPrefix();
 
   killWorker = new Worker<KillJobData>(
     QUEUE_NAME,
@@ -200,7 +205,7 @@ export async function processKillJob(job: Job<KillJobData>): Promise<void> {
   ) {
     await getActionExecutorDeps().setCooldown(
       ruleId,
-      `${ruleId}:${triggeringServerUserId}`,
+      cooldownTargetId(ruleId, triggeringServerUserId, 'kill_stream'),
       cooldownMinutes
     );
   }

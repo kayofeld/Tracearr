@@ -6,8 +6,8 @@
  */
 
 import { Queue, Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { getRedisPrefix } from '@tracearr/shared';
 import type { BackupScheduleType } from '@tracearr/shared';
+import { getBullPrefix, queueConnectionOptions } from './queueConnection.js';
 import { isMaintenance } from '../serverState.js';
 import { getSetting } from '../services/settings.js';
 import { BACKUP_DIR, createBackup, cleanupOldBackups } from '../services/backup.js';
@@ -24,8 +24,8 @@ export function initBackupQueue(redisUrl: string): void {
     return;
   }
 
-  connectionOptions = { url: redisUrl };
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  connectionOptions = queueConnectionOptions(redisUrl);
+  const bullPrefix = getBullPrefix();
 
   backupQueue = new Queue(QUEUE_NAME, {
     connection: connectionOptions,
@@ -54,7 +54,7 @@ export function startBackupWorker(): void {
     return;
   }
 
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  const bullPrefix = getBullPrefix();
 
   backupWorker = new Worker(
     QUEUE_NAME,

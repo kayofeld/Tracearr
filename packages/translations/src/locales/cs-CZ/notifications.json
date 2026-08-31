@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Nepodařilo se aktualizovat agenta",
       "apiKeyGenerateFailed": "Generování API klíče se nezdařilo",
       "authFailed": "Ověření se nezdařilo",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
       "clipboardFailed": "Kopírování do schránky se nezdařilo",
       "copyFailed": "Nelze zkopírovat do schránky",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
       "deviceRemoveFailed": "Odstranění zařízení se nezdařilo",
       "deviceRenameFailed": "Nepodařilo se přejmenovat zařízení",
       "dismissFailed": "Nepodařilo se zrušit porušení",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "plex.direct URL jsou překladové adresy, které zde nelze použít. Použijte prosím přímou IP adresu nebo název hostitele.",
+      "plexReauthorizeFailed": "",
       "plexUnlinkFailed": "Nepodařilo se odpojit Plex účet",
       "routingUpdateFailed": "Nepodařilo se aktualizovat směrování",
       "ruleCreateFailed": "Vytvoření pravidla se nezdařilo",
@@ -148,6 +156,18 @@
         "message": "Váš nový API klíč je připraven k použití",
         "title": "API klíč vygenerován"
       },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
+      },
       "claimCodeValidated": {
         "message": "Nyní můžete pokračovat s nastavením",
         "title": "Kód žádosti byl potvrzen"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Zkopírováno do schránky"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
         "message": "Zařízení bylo odpojeno",
         "title": "Zařízení odstraněno"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "Nyní můžete přidat servery ze svého účtu Plex",
         "title": "Účet Plexu propojen"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
         "message": "Váš účet Plex byl odpojen",
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },

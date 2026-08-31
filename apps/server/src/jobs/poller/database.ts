@@ -5,32 +5,126 @@
  * Includes batch loading for performance optimization and rule fetching.
  */
 
-import { eq, and, desc, gte, inArray, isNotNull } from 'drizzle-orm';
+import { eq, and, desc, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import {
   TIME_MS,
   SESSION_LIMITS,
+  WS_EVENTS,
   type Session,
-  type RuleV2,
-  type RuleConditions,
-  type RuleActions,
-  type ViolationSeverity,
+  type EngineAutomation,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { sessions, rules, serverUsers, terminationLogs } from '../../db/schema.js';
+import {
+  sessions,
+  automations,
+  servers,
+  serverUserExternalAliases,
+  serverUsers,
+  terminationLogs,
+  libraryItems,
+  media,
+} from '../../db/schema.js';
+import { automationsLogger, createLogger } from '../../utils/logger.js';
+import { getPubSubService } from '../../services/cache.js';
 import { mapSessionRow } from './sessionMapper.js';
+
+/** Canonical media identity for a library item, stamped onto sessions at insert. */
+export interface SessionIdentity {
+  mediaId: string | null;
+  showMediaId: string | null;
+  imdbId: string | null;
+  tmdbId: number | null;
+  tvdbId: number | null;
+  parentRatingKey: string | null;
+  grandparentRatingKey: string | null;
+}
+
+/**
+ * Batch load canonical media identity for a set of rating keys on one server
+ * (eliminates a per-session lookup in the polling loop).
+ *
+ * @param serverId - Server the rating keys belong to
+ * @param ratingKeys - Rating keys to resolve identity for
+ * @returns Map of ratingKey -> SessionIdentity
+ */
+export async function batchGetLibraryItemIdentity(
+  serverId: string,
+  ratingKeys: string[]
+): Promise<Map<string, SessionIdentity>> {
+  const result = new Map<string, SessionIdentity>();
+  if (ratingKeys.length === 0) return result;
+
+  const rows = await db
+    .select({
+      ratingKey: libraryItems.ratingKey,
+      mediaId: libraryItems.mediaId,
+      imdbId: libraryItems.imdbId,
+      tmdbId: libraryItems.tmdbId,
+      tvdbId: libraryItems.tvdbId,
+      parentRatingKey: libraryItems.parentRatingKey,
+      grandparentRatingKey: libraryItems.grandparentRatingKey,
+      showMediaId: media.showMediaId,
+      itemMediaType: libraryItems.mediaType,
+    })
+    .from(libraryItems)
+    .leftJoin(media, eq(media.id, libraryItems.mediaId))
+    .where(and(eq(libraryItems.serverId, serverId), inArray(libraryItems.ratingKey, ratingKeys)));
+
+  for (const r of rows) {
+    result.set(r.ratingKey, {
+      mediaId: r.mediaId,
+      showMediaId: r.itemMediaType === 'episode' ? r.showMediaId : null,
+      imdbId: r.imdbId,
+      tmdbId: r.tmdbId,
+      tvdbId: r.tvdbId,
+      parentRatingKey: r.parentRatingKey,
+      grandparentRatingKey: r.grandparentRatingKey,
+    });
+  }
+
+  return result;
+}
 
 // ============================================================================
 // Session Batch Loading
 // ============================================================================
 
+// Fetch-window ceiling: 7 days keeps the query inside the uncompressed
+// chunks of the sessions hypertable and matches the builder's largest window.
+const MAX_AUTOMATION_WINDOW_HOURS = 168;
+
+/**
+ * Largest window_hours any of the given rules asks for, floored at 24 so
+ * evaluators without windows keep their day of context, capped at
+ * MAX_AUTOMATION_WINDOW_HOURS.
+ */
+export function maxWindowHoursFromAutomations(rulesList: EngineAutomation[]): number {
+  let max = 24;
+  for (const rule of rulesList) {
+    for (const group of rule.conditions?.groups ?? []) {
+      for (const condition of group.conditions) {
+        const windowHours = condition.params?.window_hours;
+        if (typeof windowHours === 'number' && windowHours > max) max = windowHours;
+      }
+    }
+  }
+  return Math.min(max, MAX_AUTOMATION_WINDOW_HOURS);
+}
+
+/** History window implied by the cached active automations; 24h until the cache fills. */
+export function defaultRecentSessionWindowHours(): number {
+  return automationsCache ? maxWindowHoursFromAutomations(automationsCache.data) : 24;
+}
+
 /**
  * Batch load recent sessions for multiple server users (eliminates N+1 in polling loop)
  *
- * This function fetches sessions from the last N hours for a batch of server users
- * in a single query, avoiding the performance penalty of querying per-user.
+ * This function fetches sessions for a batch of server users in a single
+ * query, avoiding the performance penalty of querying per-user.
  *
  * @param serverUserIds - Array of server user IDs to load sessions for
- * @param hours - Number of hours to look back (default: 24)
+ * @param hours - Number of hours to look back; defaults to the largest
+ *   window_hours any active rule uses (at least 24)
  * @returns Map of serverUserId -> Session[] for each server user
  *
  * @example
@@ -39,11 +133,15 @@ import { mapSessionRow } from './sessionMapper.js';
  */
 export async function batchGetRecentUserSessions(
   serverUserIds: string[],
-  hours = 24
+  hours?: number
 ): Promise<Map<string, Session[]>> {
   if (serverUserIds.length === 0) return new Map();
 
-  const since = new Date(Date.now() - hours * TIME_MS.HOUR);
+  const windowHours = hours ?? defaultRecentSessionWindowHours();
+  const since = new Date(Date.now() - windowHours * TIME_MS.HOUR);
+  // The per-user cap scales with the window so a longer window doesn't
+  // silently truncate at one day's worth of rows
+  const perUserCap = Math.ceil(windowHours / 24) * SESSION_LIMITS.MAX_RECENT_PER_USER;
   const result = new Map<string, Session[]>();
 
   // Initialize empty arrays for all server users
@@ -51,17 +149,20 @@ export async function batchGetRecentUserSessions(
     result.set(serverUserId, []);
   }
 
-  // Single query to get recent sessions for all server users using inArray
+  // Single query to get recent sessions for all server users using inArray.
+  // The LIMIT bounds the transfer; per-user fairness comes from the JS cap
+  // below (newest-first ordering means a capped-out user loses old rows).
   const recentSessions = await db
     .select()
     .from(sessions)
     .where(and(inArray(sessions.serverUserId, serverUserIds), gte(sessions.startedAt, since)))
-    .orderBy(desc(sessions.startedAt));
+    .orderBy(desc(sessions.startedAt))
+    .limit(serverUserIds.length * perUserCap);
 
   // Group by server user (limit per user to prevent memory issues)
   for (const s of recentSessions) {
     const userSessions = result.get(s.serverUserId) ?? [];
-    if (userSessions.length < SESSION_LIMITS.MAX_RECENT_PER_USER) {
+    if (userSessions.length < perUserCap) {
       userSessions.push(mapSessionRow(s));
     }
     result.set(s.serverUserId, userSessions);
@@ -115,7 +216,8 @@ export function mergeRecentSessionsForIdentity(
  */
 export async function widenRecentSessionsForMergedIdentities(
   recentSessionsMap: Map<string, Session[]>,
-  identityServerUserIdsMap: Map<string, string[]>
+  identityServerUserIdsMap: Map<string, string[]>,
+  hours?: number
 ): Promise<void> {
   const siblingIdsNeeded = new Set<string>();
   for (const ids of identityServerUserIdsMap.values()) {
@@ -126,7 +228,7 @@ export async function widenRecentSessionsForMergedIdentities(
   }
 
   if (siblingIdsNeeded.size > 0) {
-    const supplemental = await batchGetRecentUserSessions([...siblingIdsNeeded]);
+    const supplemental = await batchGetRecentUserSessions([...siblingIdsNeeded], hours);
     for (const [id, sessionsForId] of supplemental) {
       recentSessionsMap.set(id, sessionsForId);
     }
@@ -197,7 +299,22 @@ export async function getServerUserIdByExternalId(
     .where(and(eq(serverUsers.serverId, serverId), eq(serverUsers.externalId, externalId)))
     .limit(1);
 
-  return rows[0]?.id ?? null;
+  if (rows[0]) return rows[0].id;
+
+  // A folded external id still belongs to the surviving account, so the
+  // caller's foreign-row check must not treat its events as a stranger's.
+  const aliased = await db
+    .select({ id: serverUserExternalAliases.serverUserId })
+    .from(serverUserExternalAliases)
+    .where(
+      and(
+        eq(serverUserExternalAliases.serverId, serverId),
+        eq(serverUserExternalAliases.externalId, externalId)
+      )
+    )
+    .limit(1);
+
+  return aliased[0]?.id ?? null;
 }
 
 /**
@@ -227,37 +344,90 @@ export async function getSessionsTerminatedByViolation(violationId: string): Pro
 }
 
 // ============================================================================
-// Rule Loading
+// Automation Loading
 // ============================================================================
 
-// TTL fallback for multi-instance deployments: another instance's invalidation isn't visible here, so a rule change can take up to this long to apply.
-const RULES_CACHE_TTL_MS = 10_000;
+// TTL fallback for multi-instance deployments: another instance's invalidation isn't visible here, so an automation change can take up to this long to apply.
+const AUTOMATIONS_CACHE_TTL_MS = 10_000;
 
-let rulesCache: { data: RuleV2[]; expiresAt: number } | null = null;
+let automationsCache: { data: EngineAutomation[]; expiresAt: number } | null = null;
 
-/** Invalidate the active V2 rules cache. Call from every rule create/update/delete/toggle path. */
-export function invalidateRulesCache(): void {
-  rulesCache = null;
+/** Invalidate the active automations cache. Call from every automation create/update/delete/toggle path. */
+export function invalidateAutomationsCache(): void {
+  automationsCache = null;
+}
+
+type AutomationsRefillListener = (rules: EngineAutomation[]) => void;
+const refillListeners: AutomationsRefillListener[] = [];
+
+/** Called after every automations-cache fill on this instance; listeners must not throw. */
+export function onActiveAutomationsRefill(listener: AutomationsRefillListener): void {
+  refillListeners.push(listener);
+}
+
+// Same TTL story as the automations cache: a server change on another instance can
+// take up to this long to reach this instance's poll loop.
+const SERVERS_CACHE_TTL_MS = 10_000;
+
+let serversCache: { data: (typeof servers.$inferSelect)[]; expiresAt: number } | null = null;
+
+// The servers cache is the poller's, not the engine's.
+const serversLogger = createLogger('servers');
+
+/** Invalidate the servers cache. Call from every server create/update/delete path. */
+export function invalidateServersCache(): void {
+  serversCache = null;
+}
+
+/** Drop this instance's servers cache and tell the others to do the same. */
+export async function publishServersChanged(): Promise<void> {
+  invalidateServersCache();
+  await getPubSubService()
+    ?.publish(WS_EVENTS.SERVERS_CHANGED, {})
+    .catch((error: unknown) => {
+      serversLogger.warn(
+        'servers:changed publish failed; other instances fall back to the cache TTL',
+        {
+          error,
+        }
+      );
+    });
 }
 
 /**
- * Get all active V2 rules (rules with conditions/actions defined).
- *
- * V2 rules use the new conditions/actions format instead of the legacy type/params.
- * These rules are evaluated by the session lifecycle event system.
- *
- * @returns Array of active RuleV2 objects
- *
- * @example
- * const rulesV2 = await getActiveRulesV2();
- * // Evaluate session events against these rules
+ * All servers, cached briefly: the poll tick and the reconciliation poll each
+ * read the full list several times a minute and the list almost never changes.
  */
+export async function getCachedServers(): Promise<(typeof servers.$inferSelect)[]> {
+  const now = Date.now();
+  if (serversCache && serversCache.expiresAt > now) {
+    return serversCache.data;
+  }
+
+  const rows = await db.select().from(servers);
+  serversCache = { data: rows, expiresAt: now + SERVERS_CACHE_TTL_MS };
+  return rows;
+}
+
+// A row the boot migration never stamped matches no trigger, so warn once per id rather than per tick.
+const warnedUntriggeredAutomationIds = new Set<string>();
+
 /**
- * Map a raw `rules` table row (V2 columns) to the shared RuleV2 shape.
- * Shared by getActiveRulesV2 and the kill-queue reverify path so both build
- * an identical RuleV2 from the same row.
+ * Map an `automations` row to the shared EngineAutomation shape. Shared by
+ * getActiveAutomations and the kill-queue reverify path so both build an
+ * identical EngineAutomation from the same row.
  */
-export function mapRuleRowToRuleV2(r: typeof rules.$inferSelect): RuleV2 {
+export function mapAutomationRow(
+  r: typeof automations.$inferSelect,
+  currentVersionId: string | null
+): EngineAutomation {
+  if (!r.triggers && !warnedUntriggeredAutomationIds.has(r.id)) {
+    warnedUntriggeredAutomationIds.add(r.id);
+    automationsLogger.warn('Automation has no stored triggers and will never evaluate', {
+      automationId: r.id,
+      name: r.name,
+    });
+  }
   return {
     id: r.id,
     name: r.name,
@@ -267,27 +437,52 @@ export function mapRuleRowToRuleV2(r: typeof rules.$inferSelect): RuleV2 {
     userId: r.userId,
     enforceAcrossServers: r.enforceAcrossServers,
     isActive: r.isActive,
-    severity: (r.severity ?? 'warning') as ViolationSeverity,
-    conditions: r.conditions as RuleConditions,
-    actions: r.actions as RuleActions,
+    severity: r.severity,
+    kind: r.kind,
+    // Both columns are nullable jsonb; a row that never held either reads as empty.
+    conditions: r.conditions ?? { groups: [] },
+    actions: r.actions ?? { actions: [] },
+    triggers: r.triggers ?? [],
+    currentVersionId,
+    cooldownMinutes: r.cooldownMinutes,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
 }
 
-export async function getActiveRulesV2(): Promise<RuleV2[]> {
+/**
+ * The version a run records. One index lookup per rule on a 10s cache fill.
+ * The outer column is named in full: a table selection renders its columns
+ * unqualified, and a bare `id` here would bind to the subquery's own table.
+ */
+const CURRENT_VERSION_ID = sql<string | null>`(
+  SELECT v.id FROM automation_versions v
+  WHERE v.automation_id = automations.id
+  ORDER BY v.version DESC
+  LIMIT 1
+)`;
+
+/**
+ * Active automations with conditions defined, evaluated by the session
+ * lifecycle event system. Cached in-process for AUTOMATIONS_CACHE_TTL_MS.
+ */
+export async function getActiveAutomations(): Promise<EngineAutomation[]> {
   const now = Date.now();
-  if (rulesCache && rulesCache.expiresAt > now) {
-    return rulesCache.data;
+  if (automationsCache && automationsCache.expiresAt > now) {
+    return automationsCache.data;
   }
 
+  // Ordered so every evaluation takes its per-run advisory locks in the same
+  // sequence; two dispatches for one subject cannot then deadlock each other.
   const activeRules = await db
-    .select()
-    .from(rules)
-    .where(and(eq(rules.isActive, true), isNotNull(rules.conditions)));
+    .select({ automation: automations, currentVersionId: CURRENT_VERSION_ID })
+    .from(automations)
+    .where(and(eq(automations.isActive, true), isNotNull(automations.conditions)))
+    .orderBy(automations.id);
 
-  const mapped = activeRules.map(mapRuleRowToRuleV2);
+  const mapped = activeRules.map((row) => mapAutomationRow(row.automation, row.currentVersionId));
 
-  rulesCache = { data: mapped, expiresAt: now + RULES_CACHE_TTL_MS };
+  automationsCache = { data: mapped, expiresAt: now + AUTOMATIONS_CACHE_TTL_MS };
+  for (const listener of refillListeners) listener(mapped);
   return mapped;
 }

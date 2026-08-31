@@ -5,11 +5,12 @@
  */
 
 import { eq } from 'drizzle-orm';
-import type { Rule, ViolationWithDetails, RuleType } from '@tracearr/shared';
+import type { RunFinishedEvent, ViolationWithDetails } from '@tracearr/shared';
 import { WS_EVENTS } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { servers, serverUsers, sessions, users } from '../../db/schema.js';
-import type { violations } from '../../db/schema.js';
+import type { automationRuns } from '../../db/schema.js';
+import { publishRunFinished, runFinishedOf } from '../../services/automations/runRecorder.js';
 import type { PubSubService } from '../../services/cache.js';
 import { enqueueNotification } from '../notificationQueue.js';
 
@@ -17,14 +18,12 @@ import { enqueueNotification } from '../notificationQueue.js';
 // Transaction-Aware Violation Creation
 // ============================================================================
 
-/**
- * Minimal rule info needed for violation broadcasting.
- * Supports both V1 (legacy) and V2 rules.
- */
+/** Minimal automation info needed for violation broadcasting. */
 export interface ViolationRuleInfo {
   id: string;
   name: string;
-  type: RuleType | null; // null for V2 rules
+  // Kept so the broadcast payload matches the v1-era API shape; automations never set it.
+  type: null;
 }
 
 /**
@@ -32,8 +31,8 @@ export interface ViolationRuleInfo {
  * Contains data needed for post-transaction broadcasting.
  */
 export interface ViolationInsertResult {
-  violation: typeof violations.$inferSelect;
-  rule: Rule | ViolationRuleInfo;
+  violation: typeof automationRuns.$inferSelect;
+  rule: ViolationRuleInfo;
 }
 
 /**
@@ -41,51 +40,61 @@ export interface ViolationInsertResult {
  * Call this AFTER the transaction to ensure data is persisted before broadcasting.
  *
  * @param violationResults - Array of violation insert results
- * @param sessionId - Session ID for fetching server details
+ * @param subject - Session id, or { serverUserId } for violations that have no session
  * @param pubSubService - PubSub service for WebSocket broadcast
  */
 export async function broadcastViolations(
   violationResults: ViolationInsertResult[],
-  sessionId: string,
-  pubSubService: PubSubService | null
+  subject: string | { serverUserId: string },
+  pubSubService: Pick<PubSubService, 'publish'> | null
 ): Promise<void> {
   if (!pubSubService || violationResults.length === 0) return;
 
-  // Get server user and server details for the violation broadcast (single query for all)
-  const [details] = await db
-    .select({
-      userId: serverUsers.id,
-      username: serverUsers.username,
-      thumbUrl: serverUsers.thumbUrl,
-      identityName: users.name,
-      serverId: servers.id,
-      serverName: servers.name,
-      serverType: servers.type,
-    })
-    .from(sessions)
-    .innerJoin(serverUsers, eq(serverUsers.id, sessions.serverUserId))
-    .innerJoin(users, eq(serverUsers.userId, users.id))
-    .innerJoin(servers, eq(servers.id, sessions.serverId))
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
+  const detailFields = {
+    userId: serverUsers.id,
+    identityUserId: users.id,
+    username: serverUsers.username,
+    thumbUrl: serverUsers.thumbUrl,
+    identityName: users.name,
+    serverId: servers.id,
+    serverName: servers.name,
+    serverType: servers.type,
+  };
+  const [details] =
+    typeof subject === 'string'
+      ? await db
+          .select(detailFields)
+          .from(sessions)
+          .innerJoin(serverUsers, eq(serverUsers.id, sessions.serverUserId))
+          .innerJoin(users, eq(serverUsers.userId, users.id))
+          .innerJoin(servers, eq(servers.id, sessions.serverId))
+          .where(eq(sessions.id, subject))
+          .limit(1)
+      : await db
+          .select(detailFields)
+          .from(serverUsers)
+          .innerJoin(users, eq(serverUsers.userId, users.id))
+          .innerJoin(servers, eq(servers.id, serverUsers.serverId))
+          .where(eq(serverUsers.id, subject.serverUserId))
+          .limit(1);
 
   if (!details) return;
 
+  const finished: RunFinishedEvent[] = [];
   for (const { violation, rule } of violationResults) {
-    // Get rule type - null for V2 rules
-    const ruleType = 'type' in rule ? rule.type : null;
-
     const violationWithDetails: ViolationWithDetails = {
       id: violation.id,
-      ruleId: violation.ruleId,
-      serverUserId: violation.serverUserId,
+      ruleId: violation.automationId,
+      // Policy runs always carry both; details.userId is the same server user.
+      serverUserId: violation.serverUserId ?? details.userId,
       sessionId: violation.sessionId,
-      severity: violation.severity,
+      severity: violation.severity ?? 'warning',
       data: violation.data,
       acknowledgedAt: violation.acknowledgedAt,
       createdAt: violation.createdAt,
       user: {
         id: details.userId,
+        userId: details.identityUserId,
         username: details.username,
         thumbUrl: details.thumbUrl,
         serverId: details.serverId,
@@ -94,7 +103,7 @@ export async function broadcastViolations(
       rule: {
         id: rule.id,
         name: rule.name,
-        type: ruleType,
+        type: rule.type,
       },
       server: {
         id: details.serverId,
@@ -104,9 +113,12 @@ export async function broadcastViolations(
     };
 
     await pubSubService.publish(WS_EVENTS.VIOLATION_NEW, violationWithDetails);
+    finished.push(runFinishedOf(violation));
     console.log(`[Poller] Violation broadcast: ${rule.name} for user ${details.username}`);
 
     // Enqueue notification for async dispatch (Discord, webhooks, push)
     await enqueueNotification({ type: 'violation', payload: violationWithDetails });
   }
+
+  await publishRunFinished(finished, pubSubService);
 }

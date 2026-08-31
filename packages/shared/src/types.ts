@@ -1,11 +1,18 @@
 /**
  * Core type definitions for Tracearr
  */
-import type { webhookFormatSchema, sessionTargetSchema } from './schemas.js';
+import type {
+  ActionResult,
+  AutomationActions,
+  AutomationConditions,
+  AutomationKind,
+  GroupEvidence,
+  RunFinishedEvent,
+  TriggerNode,
+} from './automations/index.js';
+import type { NotificationToast } from './destinations.js';
+import type { statPeriodSchema } from './schemas.js';
 import type { z } from 'zod';
-
-// Re-export SessionTarget for use in action interfaces
-type SessionTarget = z.infer<typeof sessionTargetSchema>;
 
 // User role - combined permission level and account status
 // Can log in: owner, admin, viewer
@@ -23,7 +30,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, number> = {
 } as const;
 
 // Roles that can log into Tracearr
-export const LOGIN_ROLES: UserRole[] = ['owner', 'admin', 'viewer'];
+export const LOGIN_ROLES: UserRole[] = ['owner', 'admin'];
 
 // Role helper functions
 export const canLogin = (role: UserRole): boolean => LOGIN_ROLES.includes(role);
@@ -42,8 +49,13 @@ export interface Server {
   name: string;
   type: ServerType;
   url: string;
+  /** The media server's own id, used to build item deep links. */
+  machineIdentifier?: string | null;
   displayOrder?: number;
   color?: string | null;
+  /** What the server reports running, and the newest release the update checker saw. */
+  version?: string | null;
+  latestVersion?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -73,7 +85,6 @@ export interface ServerUser {
   thumbUrl: string | null;
   isServerAdmin: boolean;
   trustScore: number;
-  sessionCount: number;
   joinedAt: Date | null;
   lastActivityAt: Date | null;
   removedAt: Date | null;
@@ -102,6 +113,17 @@ export interface ServerUserWithIdentity extends ServerUser {
   // this representative account's own score.
   // Only populated by the list endpoint; absent on detail endpoints (/users/:id, /full).
   identityTrustScore?: number;
+  // Earliest join and latest activity across every account this person has,
+  // distinct from the representative account's own joinedAt/lastActivityAt.
+  // Only populated by the list endpoint.
+  identityJoinedAt?: Date | string | null;
+  identityLastActivityAt?: Date | string | null;
+  // Server-computed: whether this identity can log in at all. Wider than
+  // canLogin(role) - it also counts a password hash, a linked Plex account and
+  // any auth account. A merge can only ever absorb into a login-capable target,
+  // so deriving this on the client from role alone picks the wrong direction.
+  // Only populated by the list endpoint.
+  loginCapable?: boolean;
 }
 
 // Server User detail with stats - returned by GET /users/:id
@@ -402,6 +424,10 @@ export interface TranscodeInfo {
   hwEncoding?: string;
   speed?: number;
   throttled?: boolean;
+  /** Percent of the file transcoded so far (0-100) */
+  progress?: number;
+  /** Seconds of media the transcoder has ready past the start */
+  maxOffsetAvailable?: number;
   reasons?: string[];
 }
 
@@ -479,6 +505,14 @@ export interface Session extends StreamDetailFields {
   year: number | null; // Release year
   thumbPath: string | null; // Poster path (e.g., /library/metadata/123/thumb)
   ratingKey: string | null; // Plex/Jellyfin media identifier
+  serverVersionKey: string | null; // Which file/version was played (Plex Media.id, JF/Emby MediaSource id)
+  parentRatingKey: string | null;
+  grandparentRatingKey: string | null;
+  mediaId: string | null;
+  showMediaId: string | null;
+  imdbId: string | null;
+  tmdbId: number | null;
+  tvdbId: number | null;
   externalSessionId: string | null; // External reference for deduplication
   startedAt: Date;
   stoppedAt: Date | null;
@@ -552,15 +586,6 @@ export interface SessionWithDetails extends Omit<Session, 'ratingKey' | 'externa
   segments?: SessionSegment[];
 }
 
-// Rule types
-export type RuleType =
-  | 'impossible_travel'
-  | 'simultaneous_locations'
-  | 'device_velocity'
-  | 'concurrent_streams'
-  | 'geo_restriction'
-  | 'account_inactivity';
-
 export interface ImpossibleTravelParams {
   maxSpeedKmh: number;
   ignoreVpnRanges?: boolean;
@@ -608,232 +633,15 @@ export interface AccountInactivityParams {
   inactivityUnit: AccountInactivityUnit;
 }
 
-export type RuleParams =
-  | ImpossibleTravelParams
-  | SimultaneousLocationsParams
-  | DeviceVelocityParams
-  | ConcurrentStreamsParams
-  | GeoRestrictionParams
-  | AccountInactivityParams;
+export type {
+  ActionResult,
+  ConditionEvidence,
+  GroupEvidence,
+  NodeFields,
+} from './automations/index.js';
 
-export interface Rule {
-  id: string;
-  name: string;
-  // V1 fields (legacy, nullable for V2 rules)
-  type: RuleType | null;
-  params: RuleParams | null;
-  // V2 fields (nullable for V1 rules)
-  description?: string | null;
-  severity?: ViolationSeverity;
-  conditions?: RuleConditions | null;
-  actions?: RuleActions | null;
-  serverId?: string | null;
-  // Identity (person) scope - applies to every server_user of this identity.
-  // At most one of serverId, serverUserId, userId is ever set.
-  userId?: string | null;
-  // Display name of the identity userId points at, joined in by the API.
-  identityName?: string | null;
-  // Opt-in: when true and the rule fired from an identity-aware evaluation,
-  // actions may target sessions across every server the identity has an
-  // account on instead of just the triggering account. Defaults to false.
-  enforceAcrossServers?: boolean;
-  // Common fields
-  serverUserId: string | null;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-// ============================================
-// Rules Builder V2 - Condition/Action System
-// ============================================
-
-// Condition operators
-export type ComparisonOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte';
-export type ArrayOperator = 'in' | 'not_in';
-export type StringOperator = 'contains' | 'not_contains';
-export type Operator = ComparisonOperator | ArrayOperator | StringOperator;
-
-// Condition field categories
-export type SessionBehaviorField =
-  | 'concurrent_streams'
-  | 'active_session_distance_km'
-  | 'travel_speed_kmh'
-  | 'unique_ips_in_window'
-  | 'unique_devices_in_window'
-  | 'inactive_days'
-  | 'current_pause_minutes'
-  | 'total_pause_minutes';
-
-export type StreamQualityField =
-  | 'source_resolution'
-  | 'output_resolution'
-  | 'is_transcoding'
-  | 'is_transcode_downgrade'
-  | 'source_bitrate_mbps';
-
-export type TranscodingConditionValue = 'video' | 'audio' | 'video_or_audio' | 'neither';
-
-export type UserAttributeField = 'user_id' | 'trust_score' | 'account_age_days';
-
-export type DeviceClientField = 'device_type' | 'client_name' | 'platform';
-
-export type NetworkLocationField = 'is_local_network' | 'country' | 'ip_in_range';
-
-export type ScopeField = 'server_id' | 'library_id' | 'media_type';
-
-export type ConditionField =
-  | SessionBehaviorField
-  | StreamQualityField
-  | UserAttributeField
-  | DeviceClientField
-  | NetworkLocationField
-  | ScopeField;
-
-// Resolution enum for stream quality
-export type VideoResolution = '4K' | '1080p' | '720p' | '480p' | 'SD' | 'unknown';
-
-// Device type enum
-export type DeviceType = 'mobile' | 'tablet' | 'tv' | 'desktop' | 'browser' | 'unknown';
-
-// Platform enum
-export type Platform =
-  | 'ios'
-  | 'android'
-  | 'windows'
-  | 'macos'
-  | 'linux'
-  | 'tvos'
-  | 'androidtv'
-  | 'roku'
-  | 'webos'
-  | 'tizen'
-  | 'unknown';
-
-// Media type enum (already exists but adding for clarity)
-export type MediaTypeEnum = 'movie' | 'episode' | 'track' | 'photo' | 'live' | 'trailer';
-
-// Condition value types
-export type ConditionValue = string | number | boolean | string[] | number[];
-
-// Evidence types for violation diagnostics
-export interface ConditionEvidence {
-  field: ConditionField;
-  operator: Operator;
-  threshold: ConditionValue;
-  actual: unknown;
-  matched: boolean;
-  relatedSessionIds?: string[];
-  details?: Record<string, unknown>;
-}
-
-export interface GroupEvidence {
-  groupIndex: number;
-  matched: boolean;
-  conditions: ConditionEvidence[];
-}
-
-// Single condition
-export interface Condition {
-  field: ConditionField;
-  operator: Operator;
-  value: ConditionValue;
-  params?: {
-    window_hours?: number; // for velocity checks
-    // When true, exclude sessions from the same device when comparing across sessions.
-    // Useful for: concurrent_streams (don't double-count same device),
-    // travel_speed_kmh (VPN switch isn't travel), active_session_distance_km (same device = same location)
-    exclude_same_device?: boolean;
-    // When true, only count sessions from different IPs.
-    exclude_same_ip?: boolean;
-    // When set, only count sessions from these device types.
-    // Useful for: concurrent_streams (ignore phones/tablets when detecting sharing)
-    count_device_types?: DeviceType[];
-  };
-}
-
-// Condition group (OR logic within group)
-export interface ConditionGroup {
-  conditions: Condition[];
-}
-
-// Rule conditions (AND logic between groups)
-export interface RuleConditions {
-  groups: ConditionGroup[];
-}
-
-// Action types
-export type ActionType =
-  | 'log_only'
-  | 'notify'
-  | 'adjust_trust'
-  | 'set_trust'
-  | 'reset_trust'
-  | 'kill_stream'
-  | 'message_client';
-
-// Notification channels
-export type NotificationChannelV2 = 'push' | 'discord' | 'email' | 'webhook';
-
-// Action definitions
-export interface LogOnlyAction {
-  type: 'log_only';
-  message?: string;
-}
-
-export interface NotifyAction {
-  type: 'notify';
-  channels: NotificationChannelV2[];
-  cooldown_minutes?: number;
-}
-
-export interface AdjustTrustAction {
-  type: 'adjust_trust';
-  amount: number; // positive or negative
-}
-
-export interface SetTrustAction {
-  type: 'set_trust';
-  value: number;
-}
-
-export interface ResetTrustAction {
-  type: 'reset_trust';
-}
-
-export interface KillStreamAction {
-  type: 'kill_stream';
-  /** Seconds to wait before killing. The kill only fires if the rule condition still holds after the wait; 0 (default) still re-checks once before killing. */
-  delay_seconds?: number;
-  require_confirmation?: boolean;
-  cooldown_minutes?: number;
-  /** Message to display to user before termination. If omitted, terminates silently. */
-  message?: string;
-  target?: SessionTarget;
-}
-
-export interface MessageClientAction {
-  type: 'message_client';
-  message: string;
-  target?: SessionTarget;
-}
-
-export type Action =
-  | LogOnlyAction
-  | NotifyAction
-  | AdjustTrustAction
-  | SetTrustAction
-  | ResetTrustAction
-  | KillStreamAction
-  | MessageClientAction;
-
-// Rule actions container
-export interface RuleActions {
-  actions: Action[];
-}
-
-// New Rule interface (V2)
-export interface RuleV2 {
+/** The engine's automation shape: definition columns plus the row's timestamps. */
+export interface EngineAutomation {
   id: string;
   name: string;
   description: string | null;
@@ -842,24 +650,21 @@ export interface RuleV2 {
   serverUserId: string | null;
   // Identity (person) scope - applies to every server_user of this identity.
   userId: string | null;
-  // Opt-in cross-server enforcement; see the field of the same name on Rule.
+  // Opt-in: actions may target sessions on every server the identity has an account on.
   enforceAcrossServers: boolean;
   isActive: boolean;
   severity: ViolationSeverity;
-  conditions: RuleConditions;
-  actions: RuleActions;
+  kind: AutomationKind;
+  conditions: AutomationConditions;
+  actions: AutomationActions;
+  // Which events evaluate this automation. Never null here: the cache mapper normalizes an unstamped row to [].
+  triggers: TriggerNode[];
+  /** Latest automation_versions row, stamped on every run this definition records. */
+  currentVersionId: string | null;
+  /** Minutes a subject is suppressed after a completed run; null disables the cooldown. */
+  cooldownMinutes: number | null;
   createdAt: Date;
   updatedAt: Date;
-}
-
-// Action result types (for UI display of action execution results)
-export interface ActionResult {
-  actionType: string;
-  success: boolean;
-  skipped?: boolean;
-  skipReason?: string;
-  errorMessage?: string;
-  executedAt?: string;
 }
 
 // Violation types
@@ -903,8 +708,8 @@ export interface ViolationSessionInfo {
 }
 
 export interface ViolationWithDetails extends Violation {
-  // type is optional to support V2 rules which don't have a type field
-  rule: Pick<Rule, 'id' | 'name'> & { type: RuleType | null };
+  // type is a v1 leftover: rows written before the automation model carry one, automations leave it null.
+  rule: { id: string; name: string; type: string | null };
   user: Pick<ServerUser, 'id' | 'username' | 'thumbUrl' | 'serverId'> & {
     identityName: string | null;
     // The person's identity id (users.id), for identity-level filtering.
@@ -915,11 +720,6 @@ export interface ViolationWithDetails extends Violation {
   server?: Pick<Server, 'id' | 'name' | 'type'>;
   session?: ViolationSessionInfo;
   relatedSessions?: ViolationSessionInfo[];
-  userHistory?: {
-    previousIPs: string[];
-    previousDevices: string[];
-    previousLocations: Array<{ city: string | null; country: string | null; ip: string }>;
-  };
   /** Action results from V2 rule execution */
   actionResults?: ActionResult[];
   /** Condition evidence from V2 rule evaluation */
@@ -1069,13 +869,13 @@ export interface ServerResourceDataPoint {
   at: number;
   /** Timespan interval in seconds */
   timespan: number;
-  /** System-wide CPU utilization percentage */
-  hostCpuUtilization: number;
-  /** Plex process CPU utilization percentage */
+  /** System-wide CPU utilization percentage; null when the source cannot see the host (non-Linux plugin hosts) */
+  hostCpuUtilization: number | null;
+  /** Media server process CPU utilization percentage */
   processCpuUtilization: number;
-  /** System-wide memory utilization percentage */
-  hostMemoryUtilization: number;
-  /** Plex process memory utilization percentage */
+  /** System-wide memory utilization percentage; null when the source cannot see the host */
+  hostMemoryUtilization: number | null;
+  /** Media server process memory utilization percentage */
   processMemoryUtilization: number;
 }
 
@@ -1110,8 +910,49 @@ export interface ServerBandwidthStats {
   fetchedAt: Date;
 }
 
-// Webhook format types
-export type WebhookFormat = z.infer<typeof webhookFormatSchema>;
+/** Plex account referenced by bandwidth samples */
+export interface BandwidthAccount {
+  id: number;
+  name: string;
+  thumb: string | null;
+}
+
+/** Plex device referenced by bandwidth samples */
+export interface BandwidthDevice {
+  id: number;
+  name: string;
+  platform: string | null;
+}
+
+/**
+ * Per-account/device bandwidth sample. Entries are 1-second buckets
+ * regardless of the timespan echoed by the Plex API.
+ */
+export interface BandwidthSample {
+  at: number;
+  accountId: number;
+  deviceId: number;
+  lan: boolean;
+  bytes: number;
+}
+
+// Combined live stats for the dashboard: one request carries both series
+export interface ServerLiveStats {
+  /** Server ID these stats belong to */
+  serverId: string;
+  /** Resource data points (newest first based on 'at' timestamp) */
+  statistics: ServerResourceDataPoint[];
+  /** Aggregated bandwidth points (newest first based on 'at' timestamp) */
+  bandwidth: ServerBandwidthDataPoint[];
+  /** Raw per-account/device bandwidth samples (newest first) */
+  bandwidthSamples: BandwidthSample[];
+  /** Accounts referenced by bandwidthSamples */
+  bandwidthAccounts: BandwidthAccount[];
+  /** Devices referenced by bandwidthSamples */
+  bandwidthDevices: BandwidthDevice[];
+  /** ISO, on the Tracearr server's clock - the charts' axis anchor */
+  fetchedAt: string;
+}
 
 // Unit system for display preferences (stored in settings)
 export type UnitSystem = 'metric' | 'imperial';
@@ -1121,16 +962,6 @@ export interface Settings {
   allowGuestAccess: boolean;
   // Display preferences
   unitSystem: UnitSystem;
-  // Notifications settings
-  discordWebhookUrl: string | null;
-  customWebhookUrl: string | null;
-  webhookFormat: WebhookFormat | null;
-  ntfyTopic: string | null;
-  ntfyAuthToken: string | null;
-  pushoverApiToken: string | null;
-  pushoverUserKey: string | null;
-  telegramBotToken: string | null;
-  telegramChatId: string | null;
   // Poller settings
   pollerEnabled: boolean;
   pollerIntervalMs: number;
@@ -1164,6 +995,39 @@ export interface Settings {
   // Plugin update check
   pluginUpdateCheckEnabled: boolean;
   pluginManifestUrl: string | null;
+  // Media-server update check
+  serverUpdateCheckEnabled: boolean;
+  // Watch completion thresholds (percent, per media type)
+  watchedThresholdMovie: number;
+  watchedThresholdTv: number;
+  watchedThresholdMusic: number;
+  // Public API v2
+  publicApiRateLimitPerMinute: number;
+  // Media browsing: warm poster caches for a server after its library sync completes
+  imagePrecacheEnabled: boolean;
+  // Media browsing: server whose poster wins when a title exists on multiple servers, null = automatic (most recently added copy)
+  preferredPosterServerId: string | null;
+}
+
+/** GET /settings/image-cache. Sizes in bytes; timestamps ISO. */
+export interface ImageCacheStatus {
+  bytes: number;
+  files: number;
+  versionedFiles: number;
+  sweptAt: string | null;
+  freedBytesLastSweep: number;
+  deletedFilesLastSweep: number;
+  /** Rows in library_items with a thumb path, removed ones included. */
+  postersWithThumb: number;
+  /** postersWithThumb × 18 KB. */
+  estimatedNeedBytes: number;
+  freeBytes: number;
+  totalBytes: number;
+  minFreePercent: number;
+  /** IMAGE_CACHE_MAX_MB in bytes, or null when unset. */
+  maxBytes: number | null;
+  diskLimitedSince: string | null;
+  shortfallBytes: number;
 }
 
 // Tailscale integration
@@ -1282,6 +1146,54 @@ export interface JellystatImportResult {
   }[];
 }
 
+// Playback Reporting plugin import types
+export interface PlaybackReportingImportProgress {
+  status:
+    | 'idle'
+    | 'waiting'
+    | 'detecting'
+    | 'fetching'
+    | 'enriching'
+    | 'processing'
+    | 'complete'
+    | 'error';
+  totalRecords: number;
+  fetchedRecords: number;
+  processedRecords: number;
+  importedRecords: number;
+  skippedRecords: number;
+  /** Skipped: row already imported (pr- namespace) or already present via a Jellystat import (raw rowid namespace) */
+  duplicateRecords: number;
+  /** Skipped: user not found in Tracearr (sync server first) */
+  unknownUserRecords: number;
+  /** Skipped: row falls inside the span Tracearr already tracks for this server */
+  overlapRecords: number;
+  /** Skipped: theme songs, trailers, etc. */
+  filteredRecords: number;
+  errorRecords: number;
+  enrichedRecords: number;
+  message: string;
+  /** Present when status='waiting' - what this job is waiting for */
+  waitingFor?: HeavyOpsWaitingFor;
+}
+
+export interface PlaybackReportingImportResult {
+  success: boolean;
+  imported: number;
+  skipped: number;
+  duplicates: number;
+  overlap: number;
+  filtered: number;
+  errors: number;
+  enriched: number;
+  message: string;
+  skippedUsers?: {
+    userId: string;
+    username: string | null;
+    recordCount: number;
+  }[];
+}
+
 // Library sync progress types
 export interface LibrarySyncProgress {
   serverId: string;
@@ -1305,9 +1217,11 @@ export interface ServerToClientEvents {
   'session:stopped': (sessionId: string) => void;
   'session:updated': (session: ActiveSession) => void;
   'violation:new': (violation: ViolationWithDetails) => void;
+  'run:finished': (runs: RunFinishedEvent[]) => void;
   'stats:updated': (stats: DashboardStats) => void;
   'import:progress': (progress: TautulliImportProgress) => void;
   'import:jellystat:progress': (progress: JellystatImportProgress) => void;
+  'import:playbackreporting:progress': (progress: PlaybackReportingImportProgress) => void;
   'maintenance:progress': (progress: MaintenanceJobProgress) => void;
   'library:sync:progress': (progress: LibrarySyncProgress) => void;
   'ombi:sync:progress': (event: OmbiSyncProgressEvent) => void;
@@ -1318,6 +1232,9 @@ export interface ServerToClientEvents {
   'server:down': (data: { serverId: string; serverName: string }) => void;
   'server:up': (data: { serverId: string; serverName: string }) => void;
   'server:connection': (status: ServerConnectionStatus) => void;
+  'notification:toast': (data: NotificationToast) => void;
+  'destinations:changed': () => void;
+  'servers:changed': () => void;
 }
 
 export interface ClientToServerEvents {
@@ -1464,7 +1381,7 @@ export interface HistoryFilterOptions {
  * Extended filter options for rules builder.
  * Includes all countries with session indicators and servers.
  */
-export interface RulesFilterOptions extends Omit<HistoryFilterOptions, 'countries'> {
+export interface AutomationFilterOptions extends Omit<HistoryFilterOptions, 'countries'> {
   /** All countries with session activity indicator */
   countries: CountryOption[];
   /** Available servers */
@@ -1551,14 +1468,15 @@ export type NotificationEventType =
   | 'violation_detected'
   | 'stream_started'
   | 'stream_stopped'
-  | 'concurrent_streams'
-  | 'new_device'
-  | 'trust_score_changed'
   | 'server_down'
   | 'server_up'
   | 'plugin_update_available'
-  /** A newer Tracearr release is available (from the 6-hourly version check). */
-  | 'app_update_available';
+  | 'server_update_available'
+  | 'tracearr_update_available'
+  | 'media_added'
+  | 'media_upgraded'
+  | 'new_device'
+  | 'trust_score_changed';
 
 // Notification preferences (per-device settings)
 export interface NotificationPreferences {
@@ -1609,21 +1527,6 @@ export interface RateLimitStatus {
 // Extended preferences response including live rate limit status
 export interface NotificationPreferencesWithStatus extends NotificationPreferences {
   rateLimitStatus?: RateLimitStatus;
-}
-
-// Notification channel types
-export type NotificationChannel = 'discord' | 'webhook' | 'push' | 'webToast';
-
-// Notification channel routing configuration (per-event type)
-export interface NotificationChannelRouting {
-  id: string;
-  eventType: NotificationEventType;
-  discordEnabled: boolean;
-  webhookEnabled: boolean;
-  pushEnabled: boolean;
-  webToastEnabled: boolean;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 // =============================================================================
@@ -1690,6 +1593,7 @@ export interface PlexSSENotification {
     ActivityNotification?: PlexActivityNotification[];
     StatusNotification?: PlexStatusNotification[];
     TranscodeSession?: PlexTranscodeNotification[];
+    TimelineEntry?: PlexTimelineEntry[];
   };
 }
 
@@ -1704,6 +1608,20 @@ export interface PlexPlaySessionNotification {
   viewOffset: number;
   playQueueItemID: number;
   state: 'playing' | 'paused' | 'stopped' | 'buffering';
+}
+
+// Library item lifecycle notification (add/scan/delete), sent as 'timeline' events.
+// state: 0-4 are in-progress metadata processing steps, 5 = fully processed/added,
+// 9 = deleted. These values are inferred from community SSE consumers (Plex does
+// not document them); a wrong guess just means the event is ignored, not acted on.
+export interface PlexTimelineEntry {
+  identifier: string;
+  sectionID?: number;
+  itemID: number;
+  type: number;
+  title?: string;
+  state: number;
+  updatedAt?: number;
 }
 
 // Activity notification (library scans, etc.)
@@ -1772,6 +1690,12 @@ export interface SSEConnectionStatus {
   pluginVersion?: string | null;
 }
 
+// Diagnosis for an SSE endpoint that 404s, from the server's own plugin list:
+// 'missing' not installed; 'blocked' installed and active but the endpoint is
+// unreachable (usually a reverse proxy); 'restart_required' installed, server
+// restart pending; 'malfunctioned' failed to load; 'unknown' could not check.
+export type PluginIssue = 'missing' | 'blocked' | 'restart_required' | 'malfunctioned' | 'unknown';
+
 // Per-server connection status surfaced to clients
 // Covers all server types (plex/jellyfin/emby) with a unified shape
 export interface ServerConnectionStatus {
@@ -1785,6 +1709,8 @@ export interface ServerConnectionStatus {
   error: string | null;
   pluginVersion: string | null;
   pluginUpdateAvailable: boolean;
+  // Only set while state is 'unsupported'; null otherwise
+  pluginIssue: PluginIssue | null;
 }
 
 // =============================================================================
@@ -1883,6 +1809,12 @@ export interface PlexAccount {
 // Response from GET /auth/plex/accounts
 export interface PlexAccountsResponse {
   accounts: PlexAccount[];
+  /**
+   * This install's Plex client identifier. The browser creates the link PIN and
+   * the server redeems it, and plex.tv only honours a redemption from the
+   * identifier that created the PIN, so both ends must use this exact value.
+   */
+  clientIdentifier: string;
 }
 
 // Request body for POST /auth/plex/link-account
@@ -1900,6 +1832,26 @@ export interface UnlinkPlexAccountResponse {
   success: boolean;
 }
 
+/**
+ * refreshed - was already linked to this account, token replaced
+ * adopted   - plex.tv confirmed this account owns it, so the link was corrected
+ * unmatched - no link, and plex.tv could not confirm ownership; still broken
+ */
+export type ReauthorizedServerStatus = 'refreshed' | 'adopted' | 'unmatched';
+
+export interface ReauthorizedServer {
+  id: string;
+  name: string;
+  status: ReauthorizedServerStatus;
+  ok: boolean; // Verified admin access with the new token; always false when unmatched
+}
+
+// Response from POST /auth/plex/accounts/:id/reauthorize
+export interface ReauthorizePlexAccountResponse {
+  account: PlexAccount;
+  servers: ReauthorizedServer[];
+}
+
 // =============================================================================
 // Maintenance Job Types
 // =============================================================================
@@ -1915,9 +1867,11 @@ export type MaintenanceJobType =
   | 'normalize_resolutions'
   | 'backfill_user_dates'
   | 'backfill_library_snapshots'
+  | 'normalize_library_snapshots'
   | 'cleanup_old_chunks'
   | 'full_aggregate_rebuild'
-  | 'repair_corrupted_chunks';
+  | 'repair_corrupted_chunks'
+  | 'backfill_session_identity';
 
 export type MaintenanceJobStatus = 'idle' | 'waiting' | 'running' | 'complete' | 'error';
 
@@ -1955,6 +1909,8 @@ export type RunningTaskType =
   | 'library_sync'
   | 'tautulli_import'
   | 'jellystat_import'
+  | 'playback_reporting_import'
+  | 'image_precache'
   | 'maintenance'
   | 'ombi_sync'
   | 'seerr_sync'
@@ -2452,6 +2408,14 @@ export interface LibraryStorageResponse {
     bytesPerDay: string;
     bytesPerWeek: string;
     bytesPerMonth: string;
+    /** Days of history behind the numbers; below minDataDays they are unusable */
+    fitDays?: number;
+    /**
+     * Which side of the mediaVersionsBackfilledAt changeover the fit ran on.
+     * 'preChangeover' means old-semantics history is standing in until the
+     * post-changeover side accumulates minDataDays of snapshots.
+     */
+    basis?: 'current' | 'preChangeover';
   };
   predictions: {
     day30: StoragePrediction | null;
@@ -2465,17 +2429,37 @@ export interface LibraryStorageResponse {
 }
 
 // Library Duplicates Response (GET /library/duplicates)
-export type MatchType = 'imdb' | 'tmdb' | 'tvdb' | 'fuzzy';
+/** 'version' groups are one title whose single library item carries several
+ * physical files; the others group distinct items (copies) by identity. */
+export type MatchType = 'imdb' | 'tmdb' | 'tvdb' | 'fuzzy' | 'version';
+
+/** One physical file of a duplicate item */
+export interface DuplicateItemVersion {
+  resolution: string | null;
+  videoCodec: string | null;
+  fileSize: number | null;
+  filePath: string | null;
+  /**
+   * The same physical file already listed elsewhere in the group (equal byte
+   * size, the codebase-wide mirror heuristic). Jellyfin merged-version
+   * libraries list every file under every library entry; mirrors keep the
+   * listing honest without counting the file twice.
+   */
+  isMirror?: boolean;
+}
 
 export interface DuplicateItem {
   id: string;
   serverId: string;
   serverName: string;
+  libraryId: string | null;
+  libraryName: string | null;
   title: string;
   year: number | null;
   mediaType: string;
   fileSize: number | null;
   resolution: string | null;
+  versions: DuplicateItemVersion[];
 }
 
 export interface DuplicateGroup {
@@ -2483,8 +2467,18 @@ export interface DuplicateGroup {
   matchType: MatchType;
   confidence: number;
   serverCount: number;
+  /** All copies live on one server (cross-library copies or one item's versions) */
+  sameServer: boolean;
   items: DuplicateItem[];
+  /**
+   * Distinct physical files in the group after mirror dedup. Optional only
+   * because responses cached before the field existed can still be served
+   * for up to an hour; the server always sets it.
+   */
+  uniqueFileCount?: number;
+  /** Mirror-deduped bytes: the same physical file (equal size) counts once */
   totalStorageBytes: number;
+  /** Bytes freed by keeping only the best-quality file */
   potentialSavingsBytes: number;
 }
 
@@ -2492,7 +2486,7 @@ export interface DuplicatesSummary {
   totalGroups: number;
   totalDuplicateItems: number;
   totalPotentialSavingsBytes: number;
-  byMatchType: { imdb: number; tmdb: number; tvdb: number; fuzzy: number };
+  byMatchType: { imdb: number; tmdb: number; tvdb: number; fuzzy: number; version: number };
 }
 
 export interface DuplicatesResponse {
@@ -3035,6 +3029,309 @@ export type CompletionResponse =
       pagination: CompletionPaginationInfo;
     };
 
+export type WatchedState = 'watched' | 'partial' | 'unwatched';
+
+// Catalog browse endpoint (GET /library/catalog)
+
+export interface CatalogRowServerEntry {
+  serverId: string;
+  addedAt: string;
+  videoResolution: string | null;
+  fileSize: number | null;
+  /** Active physical files of this copy (1 for single-version titles) */
+  versionCount: number;
+}
+
+export interface CatalogRow {
+  mediaId: string;
+  mediaType: 'movie' | 'show';
+  title: string;
+  year: number | null;
+  genres: string[];
+  posterUrl: string | null;
+  posterVersion: string | null;
+  dominantColor: string | null;
+  servers: CatalogRowServerEntry[];
+  resolutionBest: string | null;
+  watchedState: WatchedState;
+  /** Same probe, scoped to the requesting admin's own identity instead of
+   * the anyone-grain lens - "have I personally watched this". */
+  watchedStateSelf: WatchedState;
+  plays: number;
+  viewers: number;
+}
+
+export interface CatalogResponseMeta {
+  /** Absolute row offset this window starts at, echoing the request. */
+  offset: number;
+  pageSize: number;
+  totalItems: number;
+  totalFileSize: number;
+}
+
+export interface CatalogResponse {
+  data: CatalogRow[];
+  meta: CatalogResponseMeta;
+}
+
+// Catalog letter index (GET /library/catalog/letters) - per-letter title
+// counts for the same filter set as the catalog page query, so the frontend
+// can derive letter -> cumulative row offset for the alphabet rail.
+// Fixed 27-entry set, '#' FIRST then A-Z, zero counts included, in that
+// order - the frontend needs a stable, complete key set to build offsets
+// without special-casing an absent letter. Buckets are collation ranges over
+// media.sort_title (article-stripped, so "The Matrix" counts under M): '#'
+// is everything sorting below 'a' (digit-leading and empty sort titles),
+// which is why it leads - those rows sit before every letter in the catalog
+// ordering, and a bucket ordered A-Z-then-# would compute wrong offsets.
+export interface CatalogLetterBucket {
+  /** '#' or 'A'..'Z'. */
+  letter: string;
+  count: number;
+}
+
+export interface CatalogLettersResponse {
+  letters: CatalogLetterBucket[];
+}
+
+// Shelves endpoint (GET /library/shelves) - windowed library command center:
+// four type-split shelves, a KPI strip, and a dead-weight (storage reclaim)
+// module. All-users aggregate (no per-viewer lens) so the whole payload is
+// cacheable verbatim per (scope, period).
+
+// Shelves are cached verbatim for every viewer (no per-viewer lens), so a
+// shelf row deliberately carries no self-watched state.
+export type ShelfRow = Omit<CatalogRow, 'plays' | 'viewers' | 'watchedStateSelf'>;
+
+/** Same period convention as statsQuerySchema/TimeRangeValue on the frontend. */
+export type ShelvesPeriod = z.infer<typeof statPeriodSchema>;
+
+export interface RecentlyAddedShelfRow extends ShelfRow {
+  /** Newly-tracked episode count for a show card; always null for movies. */
+  newEpisodes: number | null;
+}
+
+export interface MostPopularShelfRow extends ShelfRow {
+  plays: number;
+  viewers: number;
+  rank: number;
+}
+
+export interface DeadWeightRow extends ShelfRow {
+  fileBytes: number;
+  /** Null when the title's canonical media row has never had latest_added_at
+   * stamped (no active library copy has ever been synced). */
+  addedAt: string | null;
+}
+
+export interface ShelvesKpiWatchedInPeriod {
+  /** Distinct canonical titles (movies + shows) with >=1 play in the window. */
+  titlesTouched: number;
+  /** Total canonical titles (movies + shows) in scope, all-time. */
+  totalTitles: number;
+}
+
+export interface ShelvesKpiNewlyAdded {
+  /** Canonical titles (movies + shows) added within the window. */
+  count: number;
+  totalBytes: number;
+  /** Of the titles added in the window, how many have ever been played. */
+  playedCount: number;
+}
+
+export interface ShelvesKpiDeadWeight {
+  /** All-time never-watched canonical title count (not window-scoped). */
+  count: number;
+  totalBytes: number;
+}
+
+export interface ShelvesKpis {
+  watchedInPeriod: ShelvesKpiWatchedInPeriod;
+  /** Total watched time across the window, in seconds. */
+  hoursWatched: number;
+  newlyAdded: ShelvesKpiNewlyAdded;
+  /** Omitted when the request opts out via includeDeadWeight=false. */
+  deadWeight?: ShelvesKpiDeadWeight;
+}
+
+export interface ShelvesResponseMeta {
+  movies: number;
+  shows: number;
+  totalFileSize: number;
+}
+
+export interface ShelvesResponse {
+  period: ShelvesPeriod;
+  recentlyAddedMovies: RecentlyAddedShelfRow[];
+  recentlyAddedShows: RecentlyAddedShelfRow[];
+  mostPopularMovies: MostPopularShelfRow[];
+  mostPopularShows: MostPopularShelfRow[];
+  deadWeight?: DeadWeightRow[];
+  kpis: ShelvesKpis;
+  meta: ShelvesResponseMeta;
+}
+
+// Genres aggregate endpoint (GET /library/genres)
+
+export interface GenreRow {
+  genre: string;
+  itemCount: number;
+  plays: number;
+  watchTimeMs: number;
+}
+
+export interface GenresResponse {
+  data: GenreRow[];
+}
+
+// Media detail endpoints (GET /library/media/:id and sub-resources)
+
+/** One physical file of a library copy */
+export interface MediaVersionEntry {
+  resolution: string | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  dynamicRange: string | null;
+  container: string | null;
+  fileSize: number | null;
+}
+
+export interface MediaAvailabilityEntry {
+  serverId: string;
+  serverType: string;
+  libraryId: string;
+  /** Library display name, null until that server's library sync has recorded it. */
+  libraryName: string | null;
+  ratingKey: string;
+  addedAt: string;
+  removedAt: string | null;
+  videoResolution: string | null;
+  fileSize: number | null;
+  /** Show rows only: summed episode file bytes for this server+library; null for movies/episodes. */
+  episodeFileSize: number | null;
+  /** Show rows only: distinct episode resolutions ordered by frequency desc; null for movies/episodes. */
+  episodeResolutions: string[] | null;
+  /** Show rows only: active episode count for this server+library; null for movies/episodes. */
+  episodeCount: number | null;
+  /** Physical files of this copy, largest first. Empty for containers. */
+  versions: MediaVersionEntry[];
+  /** The copy this one replaced (event-witnessed upgrade); null when none was witnessed. */
+  replaces: MediaReplacedCopy | null;
+}
+
+export interface MediaReplacedCopy {
+  addedAt: string;
+  removedAt: string;
+  videoResolution: string | null;
+  fileSize: number | null;
+}
+
+export interface MediaDetailResponse {
+  id: string;
+  mediaType: string;
+  title: string;
+  year: number | null;
+  imdbId: string | null;
+  tmdbId: number | null;
+  tvdbId: number | null;
+  genres: string[] | null;
+  showMediaId: string | null;
+  mergedIds: string[];
+  availability: MediaAvailabilityEntry[];
+  seasonCount: number | null;
+  episodeCount: number | null;
+}
+
+export interface MediaChildEntry {
+  id: string;
+  mediaType: 'season' | 'episode';
+  title: string;
+  seasonNumber: number | null;
+  episodeCount: number | null;
+  episodeNumber: number | null;
+  imdbId: string | null;
+  tmdbId: number | null;
+  tvdbId: number | null;
+  showMediaId: string | null;
+  genres: string[] | null;
+}
+
+export interface MediaChildrenResponse {
+  data: MediaChildEntry[];
+}
+
+export interface MediaStatsMeasures {
+  plays: number;
+  watchTimeMs: number;
+  uniqueUsers: number;
+}
+
+export interface MediaStatsWindow {
+  combined: MediaStatsMeasures;
+  perServer: (MediaStatsMeasures & { serverId: string; serverName: string | null })[];
+}
+
+export interface MediaStatsResponse {
+  mediaId: string;
+  mediaType: string;
+  windows: { all_time: MediaStatsWindow; last_30: MediaStatsWindow; last_7: MediaStatsWindow };
+}
+
+export interface MediaWatcherEntry {
+  user: {
+    serverUserId: string;
+    userId: string;
+    serverId: string;
+    username: string | null;
+    identityName: string | null;
+    /** Identity thumbnail when set, else the server account's avatar. */
+    thumb: string | null;
+  };
+  plays: number;
+  watchTimeMs: number;
+  completionPct: number | null;
+  lastWatchedDay: string | null;
+  distinctEpisodesWatched: number | null;
+}
+
+export interface MediaWatchersResponse {
+  mediaId: string;
+  mediaType: string;
+  window: 'all_time' | 'last_30' | 'last_7';
+  watchers: MediaWatcherEntry[];
+}
+
+export interface MediaPlatformBreakdownEntry {
+  platform: string | null;
+  player: string | null;
+  plays: number;
+  watchTimeMs: number;
+}
+
+export interface MediaPlatformBreakdownResponse {
+  data: MediaPlatformBreakdownEntry[];
+}
+
+export interface SeasonHeatEpisode {
+  episodeNumber: number | null;
+  watchedState: WatchedState;
+}
+
+export interface SeasonHeatSeason {
+  seasonNumber: number | null;
+  title: string;
+  year: number | null;
+  episodeCount: number;
+  watchedCount: number;
+  watchedPct: number;
+  episodes: SeasonHeatEpisode[];
+}
+
+export interface MediaSeasonHeatResponse {
+  mediaId: string;
+  seasons: SeasonHeatSeason[];
+}
+
 // Library Watch Patterns Response (GET /library/patterns)
 
 /**
@@ -3247,6 +3544,25 @@ export interface LibraryResolutionResponse {
 }
 
 // ============================================================================
+// Library Options (catalog Library filter)
+// ============================================================================
+
+/** One server's library, for the catalog browse Library select. Grouped by
+ * server on the frontend when the account has more than one. */
+export interface LibraryOption {
+  serverId: string;
+  serverName: string;
+  libraryId: string;
+  name: string;
+  mediaType: string;
+}
+
+/** Response from /library/libraries endpoint */
+export interface LibrariesResponse {
+  data: LibraryOption[];
+}
+
+// ============================================================================
 // Backup & Restore
 // ============================================================================
 
@@ -3271,8 +3587,10 @@ export interface BackupMetadata {
     sessions: number;
     users: number;
     servers: number;
-    rules: number;
+    /** Absent in manifests written before the rename, which count automations as `rules`. */
+    automations?: number;
     libraryItems: number;
+    rules?: number;
   };
 }
 

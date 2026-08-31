@@ -312,7 +312,7 @@ export function History() {
 
       {/* Filters */}
       <Card>
-        <CardContent className="pt-4">
+        <CardContent>
           <HistoryFiltersBar
             filters={filters}
             onFiltersChange={handleFiltersChange}
@@ -326,8 +326,9 @@ export function History() {
       </Card>
 
       {/* Sessions Table */}
-      <Card>
-        <CardContent className={sessionsIsError ? undefined : 'p-0'}>
+      {/* Card owns the vertical padding now, so a flush table zeroes both axes */}
+      <Card className={sessionsIsError ? undefined : 'py-0'}>
+        <CardContent className={sessionsIsError ? undefined : 'px-0'}>
           {sessionsIsError ? (
             <ErrorState
               title={t('common:errors.somethingWentWrong')}

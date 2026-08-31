@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import Highcharts from 'highcharts';
 import { HighchartsReact } from 'highcharts-react-official';
 import { ChartSkeleton } from '@/components/ui/skeleton';
+import { ChartEmpty } from './ChartEmpty';
 
 interface QualityData {
   directPlay: number;
@@ -126,14 +127,7 @@ export function QualityChart({ data, isLoading, height = 250 }: QualityChartProp
   }
 
   if (!data || data.total === 0) {
-    return (
-      <div
-        className="text-muted-foreground flex items-center justify-center rounded-lg border border-dashed"
-        style={{ height }}
-      >
-        No quality data available
-      </div>
-    );
+    return <ChartEmpty height={height} message="No quality data available" />;
   }
 
   return (

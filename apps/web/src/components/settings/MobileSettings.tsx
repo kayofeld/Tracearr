@@ -16,16 +16,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { CopyButton } from '@/components/ui/copy-button';
 import {
   Trash2,
   Loader2,
   Smartphone,
-  Copy,
   LogOut,
   Plus,
   Clock,
   Info,
-  CheckCircle2,
   Pencil,
   Download,
 } from 'lucide-react';
@@ -164,7 +163,7 @@ function MobileSessionCard({ session }: { session: MobileSession }) {
 }
 
 export function MobileSettings() {
-  const { t } = useTranslation(['settings', 'common', 'notifications']);
+  const { t } = useTranslation(['settings', 'common']);
   const { data: config, isLoading } = useMobileConfig();
   const { data: settings } = useSettings();
   const enableMobile = useEnableMobile();
@@ -176,7 +175,6 @@ export function MobileSettings() {
   const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
   const [showQRDialog, setShowQRDialog] = useState(false);
   const [pairToken, setPairToken] = useState<{ token: string; expiresAt: string } | null>(null);
-  const [copied, setCopied] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
   // Timer for token expiration
@@ -218,21 +216,6 @@ export function MobileSettings() {
     } catch (err) {
       // Error already handled by mutation's onError, but log for support
       console.error('Token generation error:', err);
-    }
-  };
-
-  const handleCopyToken = async () => {
-    if (pairToken?.token) {
-      try {
-        await navigator.clipboard.writeText(pairToken.token);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-        toast.success(t('notifications:toast.success.tokenCopied.title'), {
-          description: t('notifications:toast.success.tokenCopied.message'),
-        });
-      } catch {
-        toast.error(t('notifications:toast.error.copyFailed'));
-      }
     }
   };
 
@@ -369,7 +352,7 @@ export function MobileSettings() {
               <Button onClick={() => enableMobile.mutate()} disabled={enableMobile.isPending}>
                 {enableMobile.isPending ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="animate-spin" />
                     {t('mobile.enabling')}
                   </>
                 ) : (
@@ -394,11 +377,7 @@ export function MobileSettings() {
                   onClick={handleAddDevice}
                   disabled={deviceCount >= maxDevices || generatePairToken.isPending}
                 >
-                  {generatePairToken.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="mr-2 h-4 w-4" />
-                  )}
+                  {generatePairToken.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
                   {t('mobile.addDevice')}
                 </Button>
               </div>
@@ -427,7 +406,7 @@ export function MobileSettings() {
                 </CardDescription>
               </div>
               <Button variant="outline" size="sm" onClick={() => setShowRevokeConfirm(true)}>
-                <LogOut className="mr-2 h-4 w-4" />
+                <LogOut />
                 {t('mobile.revokeAllSessions')}
               </Button>
             </div>
@@ -474,18 +453,7 @@ export function MobileSettings() {
                   <Label>{t('mobile.oneTimePairToken')}</Label>
                   <div className="flex gap-2">
                     <Input readOnly value={pairToken.token} className="font-mono text-xs" />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={handleCopyToken}
-                      title={t('mobile.copyToken')}
-                    >
-                      {copied ? (
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                      ) : (
-                        <Copy className="h-4 w-4" />
-                      )}
-                    </Button>
+                    <CopyButton value={pairToken.token} label={t('mobile.copyToken')} />
                   </div>
                   <p className="text-muted-foreground text-xs">{t('mobile.tokenExpiryNote')}</p>
                 </div>

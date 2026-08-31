@@ -187,7 +187,7 @@ describe('LibraryNeverWatched (QA supplemental)', () => {
   it('advances the server-side page when Next is clicked', async () => {
     renderPage();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'common:actions.next' }));
 
     expect(lastItemsArgs()[4]).toBe(2);
   });
@@ -195,7 +195,7 @@ describe('LibraryNeverWatched (QA supplemental)', () => {
   it('resets to page 1 when the media type filter changes', async () => {
     renderPage();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'common:actions.next' }));
     expect(lastItemsArgs()[4]).toBe(2);
 
     await userEvent.click(screen.getByText('library.neverWatched.filterMovies'));
@@ -209,7 +209,7 @@ describe('LibraryNeverWatched (QA supplemental)', () => {
   it('propagates a column sort to sortBy/sortOrder and resets the page', async () => {
     renderPage();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'common:actions.next' }));
     expect(lastItemsArgs()[4]).toBe(2);
 
     // Click the Title header -> server-side sort by title asc, back to page 1

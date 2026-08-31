@@ -12,11 +12,19 @@ body:
 
       **Before submitting:** Search [existing issues](https://github.com/connorgallopo/tracearr/issues) first.
 
+      **What gets a report closed:** replacing this template with your own format, or pasting
+      AI-generated analysis and suggested fixes in place of the facts the form asks for.
+      We need the template filled in with what actually happened, plus logs. A two-line
+      description with real logs beats a page of generated diagnosis every time.
+
 - type: input
   id: version
   attributes:
     label: Tracearr Version
-    description: "Find this at the bottom of the left-hand navigation or in your docker image tag"
+    description: |
+      Paste the output of `curl -s http://your-tracearr:3000/api/v1/version`. That works
+      when the UI does not load. It is also at the bottom of the left-hand navigation, or
+      in your docker image tag.
     placeholder: "e.g., v1.4.0, supervised-v1.4.0"
   validations:
     required: true
@@ -25,12 +33,14 @@ body:
   id: deployment
   attributes:
     label: Deployment Method
-    description: How are you running Tracearr?
+    description: "Pick by how Tracearr runs, not by the hardware it runs on: the NAS, hypervisor or distro goes in Host System below."
     options:
     - Docker - Supervised (all-in-one container)
     - Docker - Standard (separate containers)
-    - TrueNAS Scale (TrueCharts)
-    - Unraid (Community Apps)
+    - Docker - Managed by a UI (Unraid, Synology, Portainer, TrueNAS Docker)
+    - Proxmox VE LXC (systemd services, no Docker)
+    - Kubernetes (Helm chart)
+    - Third-party catalog package (TrueCharts and similar)
     - Other (specify below)
   validations:
     required: true
@@ -106,8 +116,9 @@ body:
   attributes:
     label: Docker Compose / Run Command
     description: |
-      **Skip this if using TrueNAS or Unraid templates.**
-      For Docker users: paste your docker-compose.yml or docker run command.
+      Paste whichever one you have: your `docker-compose.yml`, your `docker run` command,
+      or the container settings your UI shows you (ports, paths, environment variables).
+      A Proxmox LXC install has none of these. Write `Proxmox LXC` here instead.
       Remove sensitive data (passwords, API keys, domains).
     render: yaml
     placeholder: |
@@ -119,13 +130,60 @@ body:
   attributes:
     label: Relevant Logs
     description: |
-      Paste any relevant error messages or logs. Set `LOG_LEVEL=debug` for more detail.
+      **Required.** If something isn't working, fails to start, crashes, or shows wrong
+      data, we cannot act without logs. If your report is purely visual (layout, colors,
+      spacing), write `UI only` here instead.
 
-      **Standard Docker:** `docker logs tracearr`
-      **Supervised Docker:** View logs in the web UI at `/debug` (Log Explorer section), or via CLI:
-      `docker exec tracearr cat /var/log/supervisor/tracearr-error.log`
-      (Also available: tracearr.log, postgres.log, postgres-error.log, redis.log, supervisord.log)
+      Full guide, every platform: https://docs.tracearr.com/troubleshooting/logs
+
+      Two rules decide whether a log paste is usable, and a report that misses either one
+      comes back with a question instead of a fix: **all three services**, and
+      **the full window in which you reproduced it**.
+
+      Run the block for your deployment. Only that block. If there is no block for yours,
+      follow the guide above.
+
+      **Docker - Standard, and Docker managed by a UI.** Check your container names with
+      `docker ps` first, since an install created through a UI gets a stack prefix such as
+      `tracearr-timescale-1`.
+
+      ```bash
+      docker logs tracearr       --since 2h > tracearr.log       2>&1
+      docker logs tracearr-db    --since 2h > tracearr-db.log    2>&1
+      docker logs tracearr-redis --since 2h > tracearr-redis.log 2>&1
+      ```
+
+      Keep the `2>&1`. PostgreSQL writes its server log to stderr, so without it the
+      database file arrives holding the startup banner and nothing else.
+
+      **Docker - Supervised.** Sign in as the owner account, open `/debug`, and click
+      **Download All** in the Log Explorer. Attach the `tracearr-logs-<timestamp>.zip`.
+      The on-screen viewer stops at 1000 lines and cannot reach rotated files, so copying
+      out of it will not cover your window.
+
+      **Proxmox VE LXC.** Run these as root or as a member of `adm`.
+
+      ```bash
+      journalctl -Iu tracearr > tracearr.log 2>&1
+
+      { journalctl -u 'postgresql@*' --no-pager
+        pg_lsclusters | awk '$4=="online" {print $7}' | while read -r f; do
+          echo "--- $f ---"; cat "$f"
+        done
+      } > tracearr-db.log 2>&1
+
+      { journalctl -u redis-server --no-pager
+        RLOG=$(redis-cli CONFIG GET logfile 2>/dev/null | tail -1)
+        [ -n "$RLOG" ] && { echo "--- $RLOG ---"; cat "$RLOG"; }
+      } > tracearr-redis.log 2>&1
+      ```
+
+      Capture all of that before you touch `LOG_LEVEL`. Raising it to `debug` takes an
+      environment edit plus a restart, and the restart throws away the history you were
+      about to collect. Capture first, raise the level, then reproduce it again.
     render: shell
+  validations:
+    required: true
 
 - type: dropdown
   id: previously_worked
@@ -154,6 +212,12 @@ body:
     - label: Version number filled in above
       required: true
     - label: Docker compose/run command included (if applicable)
+      required: true
+    - label: Logs are attached above, or this is a purely visual issue
+      required: true
+    - label: Logs cover the full window in which I reproduced this, for every service
+      required: true
+    - label: I wrote this report myself and kept the template intact
       required: true
     - label: I have searched the docs at https://docs.tracearr.com
       required: true

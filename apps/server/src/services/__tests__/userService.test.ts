@@ -7,6 +7,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import type { SQL } from 'drizzle-orm';
+import { renderSql } from '../../test/helpers.js';
 
 // Mock the database
 vi.mock('../../db/client.js', () => ({
@@ -32,12 +34,12 @@ import {
   createOwnerUser,
   linkPlexAccount,
   syncUserFromMediaServer,
-  updateServerUserTrustScore,
+  applyTrustChange,
   getServerUsersByServer,
   batchSyncUsersFromMediaServer,
   getServerUserDisplayNames,
+  recomputeIdentityAggregates,
   UserNotFoundError,
-  ServerUserNotFoundError,
 } from '../userService.js';
 
 // Helper to create mock user (identity layer)
@@ -71,7 +73,6 @@ function createMockServerUser(overrides: Record<string, unknown> = {}) {
     thumbUrl: null,
     isServerAdmin: false,
     trustScore: 100,
-    sessionCount: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -227,7 +228,6 @@ describe('getServerUserWithDetails', () => {
       thumbUrl: null,
       isServerAdmin: false,
       trustScore: 100,
-      sessionCount: 5,
       createdAt: new Date(),
       updatedAt: new Date(),
       userName: 'Test User',
@@ -283,7 +283,6 @@ describe('getUserWithStats', () => {
       username: 'testuser',
       thumbUrl: null,
       trustScore: 100,
-      sessionCount: 5,
     };
     const stats = { totalSessions: 42, totalWatchTime: BigInt(3600000) };
 
@@ -671,48 +670,49 @@ describe('syncUserFromMediaServer', () => {
   });
 });
 
-describe('updateServerUserTrustScore', () => {
-  it('should update trust score successfully and recompute the identity rollup', async () => {
+describe('applyTrustChange', () => {
+  it('returns both sides of the one write and recomputes the identity rollup', async () => {
     const serverUserId = randomUUID();
     const userId = randomUUID();
-    const updatedServerUser = createMockServerUser({ id: serverUserId, userId, trustScore: 80 });
+    const updated = createMockServerUser({ id: serverUserId, userId, trustScore: 75 });
 
     const txUpdate = vi.fn().mockReturnValue({
       set: vi.fn().mockReturnThis(),
+      from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([updatedServerUser]),
+      returning: vi.fn().mockResolvedValue([{ previous: 80, row: updated }]),
     });
     const txSelect = vi.fn().mockReturnValue({
       from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockResolvedValue([{ weightedSum: 80, totalSessions: 1 }]),
+      innerJoin: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([{ trust: 75, count: 0 }]),
     });
     vi.mocked(db.transaction).mockImplementation(async (callback) => {
       return callback({ update: txUpdate, select: txSelect } as never);
     });
 
-    const result = await updateServerUserTrustScore(serverUserId, 80);
+    const result = await applyTrustChange(serverUserId, { mode: 'adjust', amount: -5 });
 
-    expect(result.trustScore).toBe(80);
+    expect(result?.previous).toBe(80);
+    expect(result?.serverUser.trustScore).toBe(75);
     // Rollup recompute reads and writes within the same transaction
     expect(txSelect).toHaveBeenCalled();
     expect(txUpdate).toHaveBeenCalledTimes(2);
   });
 
-  it('should throw ServerUserNotFoundError when server user not found', async () => {
+  it('returns null when the account is already gone', async () => {
+    const txUpdate = vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnThis(),
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([]),
+    });
     vi.mocked(db.transaction).mockImplementation(async (callback) => {
-      const tx = {
-        update: vi.fn().mockReturnValue({
-          set: vi.fn().mockReturnThis(),
-          where: vi.fn().mockReturnThis(),
-          returning: vi.fn().mockResolvedValue([]),
-        }),
-      };
-      return callback(tx as never);
+      return callback({ update: txUpdate } as never);
     });
 
-    await expect(updateServerUserTrustScore('non-existent', 50)).rejects.toThrow(
-      ServerUserNotFoundError
-    );
+    expect(await applyTrustChange('non-existent', { mode: 'reset' })).toBeNull();
+    expect(txUpdate).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -841,5 +841,38 @@ describe('getServerUserDisplayNames', () => {
 
     expect(db.select).toHaveBeenCalledTimes(1);
     expect(chain.where).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('recomputeIdentityAggregates', () => {
+  /** Chainable stub that records its builder arguments and resolves to `rows`. */
+  function recordingChain(rows: unknown[]) {
+    const chain: Record<string, unknown> = {
+      then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
+        Promise.resolve(rows).then(resolve, reject),
+    };
+    for (const method of ['from', 'innerJoin', 'where']) {
+      chain[method] = vi.fn(() => chain);
+    }
+    return chain as { where: ReturnType<typeof vi.fn> } & Record<string, unknown>;
+  }
+
+  it('counts only completed policy runs into total_violations', async () => {
+    const accountChain = recordingChain([{ trust: 80, firstJoinedAt: null, lastActivityAt: null }]);
+    const violationChain = recordingChain([{ count: 2 }]);
+    vi.mocked(db.select)
+      .mockReturnValueOnce(accountChain as never)
+      .mockReturnValueOnce(violationChain as never);
+    const setSpy = vi.fn(() => ({ where: vi.fn(async () => undefined) }));
+    vi.mocked(db.update).mockReturnValue({ set: setSpy } as never);
+
+    await recomputeIdentityAggregates(randomUUID());
+
+    const where = violationChain.where.mock.calls[0]?.[0] as SQL;
+    const text = renderSql(where).sql.replace(/\s+/g, ' ').trim();
+    expect(text).toContain('automation_runs.kind =');
+    expect(text).toContain('automation_runs.outcome =');
+    expect(text).toContain('automation_runs.dismissed_at is null');
+    expect(setSpy).toHaveBeenCalledWith(expect.objectContaining({ totalViolations: 2 }));
   });
 });

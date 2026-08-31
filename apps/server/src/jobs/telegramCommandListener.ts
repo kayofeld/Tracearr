@@ -21,9 +21,29 @@
  * same token (which Telegram answers with 409 conflicts).
  */
 
-import { getSettings } from '../services/settings.js';
 import { matchPairingCode, resolvePollingToken } from '../services/telegramPairing.js';
 import { redactTelegramToken } from '../services/telegramApi.js';
+import { listDestinations, readConfig } from '../services/notifications/destinationStore.js';
+
+/**
+ * The bot token used to live in settings as plaintext. Upstream replaced the
+ * per-channel settings columns with `destinations`, whose config is AES-GCM
+ * encrypted, so the token is read from the Telegram destination instead - the
+ * same value the destination delivers with, and no second copy to keep in sync.
+ *
+ * Returns null when no Telegram destination is configured (or its config will
+ * not decrypt), which the caller treats as "nothing to poll".
+ */
+async function readTelegramBotToken(): Promise<string | null> {
+  for (const row of await listDestinations()) {
+    if (row.type !== 'telegram') continue;
+    const result = readConfig(row);
+    if (!result.ok) continue;
+    const token = result.config.botToken;
+    if (typeof token === 'string' && token !== '') return token;
+  }
+  return null;
+}
 
 const API = 'https://api.telegram.org';
 const LONG_POLL_SECONDS = 30;
@@ -156,11 +176,11 @@ async function runLoop(myGen: number): Promise<void> {
   while (myGen === generation) {
     let configToken: string | null;
     try {
-      ({ telegramBotToken: configToken } = await getSettings(['telegramBotToken']));
+      configToken = await readTelegramBotToken();
     } catch (err) {
       // A DB blip must not kill the loop; back off and retry.
       console.warn(
-        '[TelegramListener] settings read failed:',
+        '[TelegramListener] destination read failed:',
         err instanceof Error ? err.message : err
       );
       await sleep(IDLE_MS);

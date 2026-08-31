@@ -6,11 +6,11 @@ const { mockReverifyKillCondition, mockStoreActionResults } = vi.hoisted(() => (
   mockStoreActionResults: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../services/rules/reverify.js', () => ({
+vi.mock('../../services/automations/reverify.js', () => ({
   reverifyKillCondition: mockReverifyKillCondition,
 }));
 
-vi.mock('../../services/rules/v2Integration.js', () => ({
+vi.mock('../../services/automations/v2Integration.js', () => ({
   storeActionResults: mockStoreActionResults,
 }));
 
@@ -49,7 +49,7 @@ import {
   setActionExecutorDeps,
   resetActionExecutorDeps,
   type ActionExecutorDeps,
-} from '../../services/rules/executors/index.js';
+} from '../../services/automations/executors/index.js';
 import type { Job } from 'bullmq';
 
 function makeJob(data: KillJobData, attemptsMade = 0, attempts = 3): Job<KillJobData> {
@@ -338,8 +338,7 @@ describe('killQueue', () => {
     describe('cooldown arming', () => {
       function depsWith(setCooldown: ActionExecutorDeps['setCooldown']) {
         setActionExecutorDeps({
-          logAudit: vi.fn(),
-          sendNotification: vi.fn(),
+          enqueueAutomationNotification: vi.fn().mockResolvedValue(0),
           adjustUserTrust: vi.fn(),
           setUserTrust: vi.fn(),
           resetUserTrust: vi.fn(),
@@ -347,7 +346,6 @@ describe('killQueue', () => {
           sendClientMessage: vi.fn(),
           checkCooldown: vi.fn().mockResolvedValue(false),
           setCooldown,
-          queueForConfirmation: vi.fn(),
         });
       }
 
@@ -363,7 +361,11 @@ describe('killQueue', () => {
           makeJob(makeData({ ruleId, cooldownMinutes: 10, triggeringServerUserId }))
         );
 
-        expect(setCooldown).toHaveBeenCalledWith(ruleId, `${ruleId}:${triggeringServerUserId}`, 10);
+        expect(setCooldown).toHaveBeenCalledWith(
+          ruleId,
+          `${ruleId}:${triggeringServerUserId}:kill_stream`,
+          10
+        );
       });
 
       it('does not arm the cooldown when the kill was aborted (skipped outcome)', async () => {

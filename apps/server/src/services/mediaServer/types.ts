@@ -30,6 +30,12 @@ export interface MediaSession {
   /** Media item identifier (ratingKey for Plex, itemId for Jellyfin) */
   mediaId: string;
 
+  /**
+   * Identifier of the file/version being played (Plex Media.id, JF/Emby
+   * PlayState.MediaSourceId). Server-scoped, unstable across library rebuilds.
+   */
+  serverVersionKey?: string;
+
   /** User information */
   user: {
     id: string;
@@ -258,6 +264,27 @@ export interface MediaPlayedItem {
 }
 
 /**
+ * One physical file of a library item (a Plex Media child or a JF/Emby
+ * MediaSource). Multi-part files collapse into fileSize + partCount.
+ */
+export interface MediaItemVersion {
+  /** Plex Media.id / JF MediaSource.Id / Emby mediasource_{id}, as reported */
+  serverVersionKey: string;
+  videoResolution?: string;
+  videoCodec?: string;
+  videoDynamicRange?: string;
+  audioCodec?: string;
+  audioChannels?: number;
+  container?: string;
+  /** kbps */
+  bitrate?: number;
+  /** SUM of this version's Parts, bytes */
+  fileSize?: number;
+  partCount: number;
+  filePath?: string;
+}
+
+/**
  * Unified library item representation across media servers
  *
  * Used for library scanning and snapshot generation. Contains both
@@ -292,17 +319,31 @@ export interface MediaLibraryItem {
   /** Video codec (HEVC, H264, VP9, AV1, etc.) */
   videoCodec?: string;
 
+  /** Normalized dynamic range token (see @tracearr/shared normalizeDynamicRange),
+   * e.g. 'sdr', 'hdr10', 'dolby vision'. */
+  videoDynamicRange?: string;
+
   /** Audio codec (TrueHD, DTS-HD MA, AAC, FLAC, etc.) */
   audioCodec?: string;
 
   /** Audio channel count (2, 6, 8) */
   audioChannels?: number;
 
-  /** File size in bytes */
+  /** File size in bytes (SUM across versions) */
   fileSize?: number;
 
   /** Container format (mkv, mp4, avi, etc.) */
   container?: string;
+
+  /**
+   * Every physical file of this item, one entry per Plex Media child /
+   * JF-Emby MediaSource. Empty for containers (shows, seasons, albums).
+   * The flat quality fields above are rollups over this list.
+   */
+  versions?: MediaItemVersion[];
+
+  /** Hash over the sorted version tuples; drives sync change detection */
+  versionsFingerprint?: string;
 
   // === External ID Fields (filled by Phase 3 enrichment or from server data) ===
 
@@ -314,6 +355,15 @@ export interface MediaLibraryItem {
 
   /** TVDB numeric ID */
   tvdbId?: number;
+
+  /** MusicBrainz ID (track/album/artist only) */
+  musicBrainzId?: string;
+
+  /** Genre names */
+  genres?: string[];
+
+  /** Poster/thumbnail path, relative to the media server (browsing UI) */
+  thumbPath?: string;
 
   // === Hierarchy Fields (for episodes and tracks) ===
   // Uses Plex-style naming: grandparent (show/artist), parent (season/album)
@@ -427,6 +477,15 @@ export interface IMediaServerClient {
   testConnection(): Promise<boolean>;
 
   /**
+   * The server's own identifier, as its web client addresses it. Distinct from
+   * the Tracearr `servers.id` row uuid.
+   */
+  getServerIdentity?(): Promise<string | null>;
+
+  /** The version the server reports for itself, unnormalized (Plex carries a build hash). */
+  getSoftwareVersion?(): Promise<string | null>;
+
+  /**
    * Terminate a playback session
    *
    * @param sessionId - The session ID to terminate (use terminationId from MediaSession)
@@ -444,7 +503,11 @@ export interface IMediaServerClient {
    *
    * @param libraryId - The library identifier
    * @param options - Pagination options
-   * @returns Promise with items array and total count for pagination
+   * @returns Promise with items array and total count for pagination. rawCount, when
+   *   present, is the page's item count before any client-side filtering (e.g. extras) -
+   *   callers should use it instead of items.length to decide whether pagination is
+   *   exhausted, since a page can filter down to zero parsed items while the server
+   *   page itself was full.
    */
   getLibraryItems(
     libraryId: string,
@@ -452,7 +515,7 @@ export interface IMediaServerClient {
       offset?: number;
       limit?: number;
     }
-  ): Promise<{ items: MediaLibraryItem[]; totalCount: number }>;
+  ): Promise<{ items: MediaLibraryItem[]; totalCount: number; rawCount?: number }>;
 
   /**
    * Get all leaf items (episodes) from a library with pagination support
@@ -462,7 +525,8 @@ export interface IMediaServerClient {
    *
    * @param libraryId - The library identifier
    * @param options - Pagination options
-   * @returns Promise with episode items and total count, or undefined if not supported
+   * @returns Promise with episode items and total count, or undefined if not supported.
+   *   See getLibraryItems for the rawCount caveat.
    */
   getLibraryLeaves?(
     libraryId: string,
@@ -470,7 +534,7 @@ export interface IMediaServerClient {
       offset?: number;
       limit?: number;
     }
-  ): Promise<{ items: MediaLibraryItem[]; totalCount: number }>;
+  ): Promise<{ items: MediaLibraryItem[]; totalCount: number; rawCount?: number }>;
 
   /**
    * Get items added or changed since a given date. Used for incremental sync.
@@ -525,6 +589,35 @@ export interface IMediaServerClient {
     userExternalId: string,
     options?: { offset?: number; limit?: number }
   ): Promise<{ items: MediaPlayedItem[]; rawCount: number; totalCount: number }>;
+
+  /**
+   * Get all seasons for a library with pagination support. Plex-only: JF/Emby
+   * return season items through getLibraryLeaves/getLibraryLeavesSince instead,
+   * so this stays undefined for those clients.
+   *
+   * @param libraryId - The library identifier
+   * @param options - Pagination options
+   * @returns Promise with season items and total count
+   */
+  getLibrarySeasons?(
+    libraryId: string,
+    options?: { offset?: number; limit?: number }
+  ): Promise<{ items: MediaLibraryItem[]; totalCount: number; rawCount?: number }>;
+
+  /**
+   * Get seasons added or changed since a given date. Plex-only counterpart to
+   * getLibrarySeasons; see that method's doc for why JF/Emby don't implement this.
+   *
+   * @param libraryId - The library identifier
+   * @param since - Only return seasons added or modified after this date
+   * @param options - Pagination options
+   * @returns Promise with season items and total count
+   */
+  getLibrarySeasonsSince?(
+    libraryId: string,
+    since: Date,
+    options?: { offset?: number; limit?: number }
+  ): Promise<{ items: MediaLibraryItem[]; totalCount: number }>;
 }
 
 /**

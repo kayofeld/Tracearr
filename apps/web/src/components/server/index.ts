@@ -1,4 +1,5 @@
 export { ServerBadge } from './ServerBadge';
+export { ServerSelect } from './ServerSelect';
 export { ServerColorAccent } from './ServerColorAccent';
 export { ServerLegend } from './ServerLegend';
 export { PerServerCardGrid } from './PerServerCardGrid';

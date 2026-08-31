@@ -19,10 +19,11 @@ import { db } from '../db/client.js';
 import {
   users,
   serverUsers,
+  serverUserExternalAliases,
   servers,
   sessions,
-  violations,
-  rules,
+  automationRuns,
+  automations,
   plexAccounts,
   mobileSessions,
   mobileTokens,
@@ -30,9 +31,14 @@ import {
   authAccounts,
   userMergeAudits,
 } from '../db/schema.js';
-import { invalidateRulesCache } from '../jobs/poller/database.js';
+import { uncapDecompressionForTx } from '../db/timescale.js';
+import { invalidateAutomationsCache } from '../jobs/poller/database.js';
 import { getAuth } from '../lib/auth.js';
-import { ServerUserNotFoundError, UserNotFoundError } from './userService.js';
+import {
+  recomputeIdentityAggregates,
+  ServerUserNotFoundError,
+  UserNotFoundError,
+} from './userService.js';
 
 export interface MergeIdentitySnapshot {
   id: string;
@@ -150,38 +156,6 @@ async function loadIdentitySnapshot(tx: Tx, userId: string): Promise<MergeIdenti
   };
 }
 
-// Recomputes trust and totalViolations together in the same transaction. The trust
-// weighting matches recalculateAggregateTrustScore in userService.ts; it is inlined
-// here so both aggregates are derived and written in one pass alongside the violation count.
-async function recomputeIdentityAggregates(tx: Tx, userId: string): Promise<void> {
-  const [trust] = await tx
-    .select({
-      weightedSum: sql<number>`coalesce(sum(${serverUsers.trustScore}::numeric * ${serverUsers.sessionCount}), 0)`,
-      totalSessions: sql<number>`coalesce(sum(${serverUsers.sessionCount}), 0)`,
-    })
-    .from(serverUsers)
-    .where(eq(serverUsers.userId, userId));
-
-  const totalSessions = Number(trust?.totalSessions ?? 0);
-  const aggregateScore =
-    totalSessions > 0 ? Math.round(Number(trust?.weightedSum ?? 0) / totalSessions) : 100;
-
-  const [violationCount] = await tx
-    .select({ count: sql<number>`count(*)::int` })
-    .from(violations)
-    .innerJoin(serverUsers, eq(violations.serverUserId, serverUsers.id))
-    .where(eq(serverUsers.userId, userId));
-
-  await tx
-    .update(users)
-    .set({
-      aggregateTrustScore: aggregateScore,
-      totalViolations: violationCount?.count ?? 0,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
-}
-
 export interface MergedIdentityRowIds {
   plexAccountIds: string[];
   mobileSessionIds: string[];
@@ -222,9 +196,9 @@ async function repointIdentityRows(
   // compare names against here, so nothing is lost by leaving them on the
   // target - the restored identity from a split just starts without them.
   await tx
-    .update(rules)
+    .update(automations)
     .set({ userId: targetUserId, updatedAt: new Date() })
-    .where(eq(rules.userId, sourceUserId));
+    .where(eq(automations.userId, sourceUserId));
   // terminationLogs.triggeredByUserId is deliberately not tracked for split to
   // reverse: it records which admin manually triggered a termination, not an
   // attribute of the terminated account, so there is no source-identity row to
@@ -302,14 +276,19 @@ async function combineServerUsers(
     throw new MergeValidationError('server user disappeared during merge');
   }
 
+  // server_user_id is a compress_segmentby key, so repointing an account with
+  // real history rewrites whole compressed segments. The default per-DML cap
+  // aborts the merge partway through once that gets large enough.
+  await uncapDecompressionForTx(tx);
+
   await tx
     .update(sessions)
     .set({ serverUserId: targetServerUserId })
     .where(eq(sessions.serverUserId, sourceServerUserId));
   await tx
-    .update(violations)
+    .update(automationRuns)
     .set({ serverUserId: targetServerUserId })
-    .where(eq(violations.serverUserId, sourceServerUserId));
+    .where(eq(automationRuns.serverUserId, sourceServerUserId));
   await tx
     .update(terminationLogs)
     .set({ serverUserId: targetServerUserId })
@@ -319,24 +298,24 @@ async function combineServerUsers(
   // Conflicting source rules are dropped rather than kept as duplicates; their
   // names are returned so the caller can tell the admin what didn't survive.
   const targetRuleRows = await tx
-    .select({ name: rules.name })
-    .from(rules)
-    .where(eq(rules.serverUserId, targetServerUserId));
+    .select({ name: automations.name })
+    .from(automations)
+    .where(eq(automations.serverUserId, targetServerUserId));
   const targetRuleNames = new Set(targetRuleRows.map((r) => r.name));
   const sourceRuleRows = await tx
-    .select({ id: rules.id, name: rules.name })
-    .from(rules)
-    .where(eq(rules.serverUserId, sourceServerUserId));
+    .select({ id: automations.id, name: automations.name })
+    .from(automations)
+    .where(eq(automations.serverUserId, sourceServerUserId));
   const droppedRuleNames: string[] = [];
   for (const rule of sourceRuleRows) {
     if (targetRuleNames.has(rule.name)) {
       droppedRuleNames.push(rule.name);
-      await tx.delete(rules).where(eq(rules.id, rule.id));
+      await tx.delete(automations).where(eq(automations.id, rule.id));
     } else {
       await tx
-        .update(rules)
+        .update(automations)
         .set({ serverUserId: targetServerUserId, updatedAt: new Date() })
-        .where(eq(rules.id, rule.id));
+        .where(eq(automations.id, rule.id));
     }
   }
 
@@ -363,16 +342,27 @@ async function combineServerUsers(
     })
     .where(eq(serverUsers.id, targetServerUserId));
 
-  await tx.delete(serverUsers).where(eq(serverUsers.id, sourceServerUserId));
-
-  const [sessionCount] = await tx
-    .select({ count: sql<number>`count(*)::int` })
-    .from(sessions)
-    .where(eq(sessions.serverUserId, targetServerUserId));
+  // Aliases already pointing at the source would cascade away with it.
   await tx
-    .update(serverUsers)
-    .set({ sessionCount: sessionCount?.count ?? 0, updatedAt: new Date() })
-    .where(eq(serverUsers.id, targetServerUserId));
+    .update(serverUserExternalAliases)
+    .set({ serverUserId: targetServerUserId })
+    .where(eq(serverUserExternalAliases.serverUserId, sourceServerUserId));
+
+  // The media server still reports the source's external id. Claim it for the
+  // surviving row, or the next session recreates the account we just folded.
+  await tx
+    .insert(serverUserExternalAliases)
+    .values({
+      serverId: sourceSu.serverId,
+      externalId: sourceSu.externalId,
+      serverUserId: targetServerUserId,
+    })
+    .onConflictDoUpdate({
+      target: [serverUserExternalAliases.serverId, serverUserExternalAliases.externalId],
+      set: { serverUserId: targetServerUserId },
+    });
+
+  await tx.delete(serverUsers).where(eq(serverUsers.id, sourceServerUserId));
 
   return droppedRuleNames;
 }
@@ -445,7 +435,7 @@ export async function mergeUsers(
     }
 
     const movedIdentityRowIds = await repointIdentityRows(tx, sourceUserId, targetUserId);
-    await recomputeIdentityAggregates(tx, targetUserId);
+    await recomputeIdentityAggregates(targetUserId, tx);
 
     // If this source was itself the target of an earlier merge, that earlier
     // audit's targetUserId still points at it. user_merge_audits.targetUserId
@@ -493,7 +483,7 @@ export async function mergeUsers(
     };
   });
 
-  invalidateRulesCache();
+  invalidateAutomationsCache();
 
   // recomputeIdentityAggregates wrote the target's columns with raw SQL,
   // which any live session's cached Redis snapshot never sees on its own
@@ -634,8 +624,8 @@ export async function splitServerUser(
       }
     }
 
-    await recomputeIdentityAggregates(tx, oldUserId);
-    await recomputeIdentityAggregates(tx, newUser!.id);
+    await recomputeIdentityAggregates(oldUserId, tx);
+    await recomputeIdentityAggregates(newUser!.id, tx);
 
     return { newUserId: newUser!.id, serverUserId, oldUserId };
   });

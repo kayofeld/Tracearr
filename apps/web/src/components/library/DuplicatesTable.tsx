@@ -1,10 +1,11 @@
 import { useState, Fragment } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronRight, Copy } from 'lucide-react';
 import { formatMediaTech, type DuplicatesResponse } from '@tracearr/shared';
 import { cn } from '@/lib/utils';
 import { formatBytes } from '@/lib/formatters';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { DataTablePager } from '@/components/ui/data-table';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import {
   Table,
@@ -14,11 +15,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { MatchTypeBadge, EmptyState } from '@/components/library';
+import { MatchTypeBadge, InlineErrorState } from '@/components/library';
+import { EmptyState } from '@/components/ui/empty-state';
 
 interface DuplicatesTableProps {
   data: DuplicatesResponse | undefined;
   isLoading?: boolean;
+  isError?: boolean;
+  onRetry: () => void;
   page: number;
   onPageChange: (page: number) => void;
 }
@@ -27,7 +31,15 @@ interface DuplicatesTableProps {
  * Table component for displaying duplicate content groups.
  * Rows are expandable to show individual items within each duplicate group.
  */
-export function DuplicatesTable({ data, isLoading, page, onPageChange }: DuplicatesTableProps) {
+export function DuplicatesTable({
+  data,
+  isLoading,
+  isError,
+  onRetry,
+  page,
+  onPageChange,
+}: DuplicatesTableProps) {
+  const { t } = useTranslation(['pages', 'common']);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const toggleGroup = (matchKey: string) => {
@@ -42,17 +54,21 @@ export function DuplicatesTable({ data, isLoading, page, onPageChange }: Duplica
   if (isLoading) {
     return (
       <div className="flex h-48 items-center justify-center">
-        <div className="text-muted-foreground">Loading duplicates...</div>
+        <div className="text-muted-foreground">{t('library.storage.loadingDuplicates')}</div>
       </div>
     );
+  }
+
+  if (isError) {
+    return <InlineErrorState message={t('library.storage.duplicatesFailed')} onRetry={onRetry} />;
   }
 
   if (!data?.duplicates?.length) {
     return (
       <EmptyState
         icon={Copy}
-        title="No duplicates found"
-        description="No duplicate content detected across your libraries."
+        title={t('library.storage.noDuplicatesTitle')}
+        description={t('library.storage.noDuplicatesDesc')}
       />
     );
   }
@@ -65,17 +81,17 @@ export function DuplicatesTable({ data, isLoading, page, onPageChange }: Duplica
         <TableHeader>
           <TableRow>
             <TableHead className="w-10" />
-            <TableHead>Title</TableHead>
-            <TableHead>Match Type</TableHead>
-            <TableHead className="text-right">Copies</TableHead>
-            <TableHead className="text-right">Recoverable Space</TableHead>
+            <TableHead>{t('library.storage.colTitle')}</TableHead>
+            <TableHead>{t('library.storage.colMatchType')}</TableHead>
+            <TableHead className="text-right">{t('library.storage.colCopies')}</TableHead>
+            <TableHead className="text-right">{t('library.storage.colRecoverable')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {data.duplicates.map((group) => {
             const isExpanded = expandedGroups.has(group.matchKey);
             // Get representative title from first item
-            const displayTitle = group.items[0]?.title ?? 'Unknown';
+            const displayTitle = group.items[0]?.title ?? t('common:labels.unknown');
             const displayYear = group.items[0]?.year;
 
             return (
@@ -105,12 +121,24 @@ export function DuplicatesTable({ data, isLoading, page, onPageChange }: Duplica
                           </div>
                         </TableCell>
                         <TableCell>
-                          <MatchTypeBadge
-                            matchType={group.matchType}
-                            confidence={group.confidence}
-                          />
+                          <div className="flex items-center gap-2">
+                            <MatchTypeBadge
+                              matchType={group.matchType}
+                              confidence={group.confidence}
+                            />
+                            {group.sameServer && (
+                              <Badge variant="secondary">{t('library.storage.sameServer')}</Badge>
+                            )}
+                          </div>
                         </TableCell>
-                        <TableCell className="text-right">{group.items.length}</TableCell>
+                        <TableCell className="text-right">
+                          {/* Fallback covers responses cached before uniqueFileCount existed */}
+                          {group.uniqueFileCount ??
+                            group.items.reduce(
+                              (count, item) => count + Math.max(item.versions.length, 1),
+                              0
+                            )}
+                        </TableCell>
                         <TableCell className="text-right">
                           {formatBytes(group.potentialSavingsBytes)}
                         </TableCell>
@@ -122,19 +150,45 @@ export function DuplicatesTable({ data, isLoading, page, onPageChange }: Duplica
                           <div className="bg-muted/30 border-b px-4 py-3">
                             <div className="space-y-2">
                               {group.items.map((item) => (
-                                <div
-                                  key={item.id}
-                                  className="flex items-center justify-between gap-4 text-sm"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <Badge variant="outline">{item.serverName}</Badge>
+                                <div key={item.id} className="space-y-1">
+                                  <div className="flex items-center justify-between gap-4 text-sm">
+                                    <div className="flex items-center gap-3">
+                                      <Badge variant="outline">{item.serverName}</Badge>
+                                      {item.libraryName && (
+                                        <Badge variant="secondary">{item.libraryName}</Badge>
+                                      )}
+                                      <span className="text-muted-foreground">
+                                        {formatMediaTech(item.resolution)}
+                                      </span>
+                                    </div>
                                     <span className="text-muted-foreground">
-                                      {formatMediaTech(item.resolution)}
+                                      {formatBytes(item.fileSize)}
                                     </span>
                                   </div>
-                                  <span className="text-muted-foreground">
-                                    {formatBytes(item.fileSize)}
-                                  </span>
+                                  {item.versions.length > 1 &&
+                                    item.versions.map((version, index) => (
+                                      <div
+                                        key={`${item.id}-v${index}`}
+                                        className="text-muted-foreground flex items-center justify-between gap-4 pl-6 text-xs"
+                                      >
+                                        <span className="flex items-center gap-2">
+                                          {[
+                                            version.resolution
+                                              ? formatMediaTech(version.resolution)
+                                              : null,
+                                            version.videoCodec,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(' · ') || '—'}
+                                          {version.isMirror && (
+                                            <Badge variant="outline" className="text-[10px]">
+                                              {t('library.storage.mirror')}
+                                            </Badge>
+                                          )}
+                                        </span>
+                                        <span>{formatBytes(version.fileSize)}</span>
+                                      </div>
+                                    ))}
                                 </div>
                               ))}
                             </div>
@@ -150,32 +204,21 @@ export function DuplicatesTable({ data, isLoading, page, onPageChange }: Duplica
         </TableBody>
       </Table>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <span className="text-muted-foreground text-sm">
-            Page {page} of {totalPages}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onPageChange(page - 1)}
-              disabled={page <= 1}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onPageChange(page + 1)}
-              disabled={page >= totalPages}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTablePager
+        page={page}
+        pageCount={totalPages}
+        canPrevious={page > 1}
+        canNext={page < totalPages}
+        onPrevious={() => onPageChange(page - 1)}
+        onNext={() => onPageChange(page + 1)}
+        labels={{
+          navigation: t('common:table.pagination'),
+          status: t('common:table.pageOf', { page, total: totalPages }),
+          previous: t('common:actions.previous'),
+          next: t('common:actions.next'),
+        }}
+        className="px-2"
+      />
     </div>
   );
 }
