@@ -4,6 +4,54 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v2.3.0: caught up with upstream v2.2.3
+
+The fork had been running on its own line since July and was 389 commits behind. This release merges
+upstream v2.2.3 in whole. Everything the fork adds is still here; where upstream had independently
+built its own version of something the fork already had, upstream's won and the fork's code moved onto
+it.
+
+### Read this before upgrading an existing install
+
+Your database will not migrate itself onto this release. The fork numbered its own migrations 0067 to
+0071, and upstream had since used those same numbers for different work. This release adopts upstream's
+migration chain whole and renumbers the fork's tables to 0097, which leaves a database that already ran
+the old numbering in a state the migrator cannot reconcile on its own: it decides what to apply by
+timestamp, so it would skip ten upstream migrations whose timestamps predate what the fork already
+applied, including the ones that create the tables the new code reads. A fresh install is unaffected.
+Reconcile an existing database before starting this version.
+
+Telegram notifications need setting up again. Upstream replaced the notification-channel model with
+destinations, so Telegram is now a destination rather than a channel, and its bot token lives in the
+destination's encrypted config instead of a plaintext settings column. That is a better place for it,
+but nothing migrates the old value across.
+
+### What upstream brings
+
+- Automations: a rule builder with templates, run history and violation tracking.
+- Media browsing: overview, grid, genres and per-title detail pages, with a catalog and shelves behind
+  them.
+- A map of where streams are coming from, with the basemap bundled rather than fetched.
+- A second public API version, with its own rate limiting and documentation.
+- Bandwidth statistics, storage and dead-weight views, sort titles, episode-to-show linking, and a
+  leader lease so background producers run on one instance instead of all of them.
+
+### What the fork keeps
+
+Ombi and Seerr request attribution, the Never Watched page, the requester statistics page, Emby-native
+login, Telegram notifications, the in-app updater, and the played-state mirror are all unchanged in
+behaviour. The Never Watched page's played-state logic was rebuilt on top of upstream's rewritten
+query, and the pages that list things now use upstream's table component.
+
+### Notes
+
+- Upstream's own take on never-watched content ships alongside the fork's page as the storage and
+  dead-weight views. They answer slightly different questions and both are available.
+- The image proxy keeps the fork's guard against a media server redirecting the proxy off-origin with
+  the access token attached. Upstream had dropped it.
+- Web asset paths are now normalised to forward slashes, which lets the repository's own test suite run
+  on Windows.
+
 ## v1.13.0 — Never Watched now knows what you watched before Tracearr existed
 
 - **The Never Watched page was wrong for a large part of your library, and now isn't.** It worked out
