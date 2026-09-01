@@ -1,21 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
-import { Activity, Users, Gauge, Clock, HardDrive, ArrowDown, ArrowUp } from 'lucide-react';
+import { Activity, Users, Gauge, Clock, HardDrive } from 'lucide-react';
 import Highcharts from 'highcharts';
 import { HighchartsReact } from 'highcharts-react-official';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { StatCard, formatWatchTime } from '@/components/ui/stat-card';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+  createDataTableColumnHelper,
+  DataTableBody,
+  DataTableEmpty,
+  DataTableHeader,
+  DataTableRoot,
+  DataTableViewport,
+  useDataTable,
+} from '@/components/ui/data-table';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
-import { Skeleton, ChartSkeleton } from '@/components/ui/skeleton';
+import { ChartSkeleton } from '@/components/ui/skeleton';
+// Direct path, not the charts barrel: that pulls in highcharts-more, which fails to load under jsdom.
+import { ChartEmpty } from '@/components/charts/ChartEmpty';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { InlineErrorState } from '@/components/library/ErrorState';
@@ -26,8 +29,14 @@ import { useTimeRange } from '@/hooks/useTimeRange';
 import { getAvatarUrl } from '@/components/users/utils';
 import { formatBytes } from '@/lib/formatters';
 import { ServerColumnCell } from '@/components/server';
-import type { DailyBandwidthRow } from '@tracearr/shared';
-import type { Server } from '@tracearr/shared';
+import type { BandwidthTopUser, DailyBandwidthRow, Server } from '@tracearr/shared';
+
+const topUserColumn = createDataTableColumnHelper<BandwidthTopUser>();
+
+const getTopUserId = (row: BandwidthTopUser) => `${row.serverId}-${row.serverUserId}`;
+
+// The endpoint returns a fixed top ten, so the card shows every row and has no pager.
+const TOP_USERS_PAGE_SIZE = 100;
 
 interface BandwidthChartProps {
   data: DailyBandwidthRow[] | undefined;
@@ -288,14 +297,7 @@ function BandwidthChart({
   }
 
   if (!data || data.length === 0) {
-    return (
-      <div
-        className="text-muted-foreground flex items-center justify-center rounded-lg border border-dashed"
-        style={{ height }}
-      >
-        {t('statsBandwidth.noData')}
-      </div>
-    );
+    return <ChartEmpty height={height} message={t('statsBandwidth.noData')} />;
   }
 
   return (
@@ -318,8 +320,6 @@ export function StatsBandwidth() {
   const summary = useBandwidthSummary(apiParams, selectedServerIds);
 
   const summaryData = summary.data;
-  const users = topUsers.data?.data ?? [];
-  const [dataSortDir, setDataSortDir] = useState<'asc' | 'desc'>('desc');
 
   // Map from server id to the minimal server shape needed for ServerColumnCell
   const serverById = useMemo(
@@ -327,19 +327,92 @@ export function StatsBandwidth() {
     [selectedServers]
   );
 
-  const rankByUserId = useMemo(() => {
-    return new Map(users.map((user, index) => [user.serverUserId, index + 1]));
-  }, [users]);
-
-  const sortedUsers = useMemo(() => {
-    return [...users].sort((a, b) => {
-      const diff = a.totalBytes - b.totalBytes;
-      return dataSortDir === 'asc' ? diff : -diff;
-    });
-  }, [users, dataSortDir]);
-
   // Resolve the first selected server id for avatar URL construction when single-server
   const primaryServerId = selectedServerIds[0] ?? null;
+
+  const topUserColumns = useMemo(
+    () =>
+      topUserColumn.columns([
+        // Row index rather than sort position, so a rank never moves when a header is clicked.
+        topUserColumn.display({
+          id: 'rank',
+          header: t('common:labels.rank'),
+          meta: { width: '3rem', cellClassName: 'text-muted-foreground font-medium' },
+          cell: ({ row }) => row.index + 1,
+        }),
+        topUserColumn.display({
+          id: 'user',
+          header: t('common:labels.user'),
+          cell: ({ row }) => {
+            const user = row.original;
+            const avatarServerId = isMultiServer ? user.serverId : primaryServerId;
+            return (
+              <Link
+                to={`/users/${user.serverUserId}`}
+                className="flex items-center gap-3 hover:underline"
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarImage
+                    src={getAvatarUrl(avatarServerId, user.thumbUrl, 32) ?? undefined}
+                    alt={user.username}
+                  />
+                  <AvatarFallback>
+                    {(user.identityName ?? user.username).slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="font-medium">{user.identityName ?? user.username}</span>
+              </Link>
+            );
+          },
+        }),
+        ...(isMultiServer
+          ? [
+              topUserColumn.display({
+                id: 'server',
+                header: t('common:labels.server'),
+                cell: ({ row }) => {
+                  const server = serverById.get(row.original.serverId);
+                  return server ? <ServerColumnCell server={server} /> : null;
+                },
+              }),
+            ]
+          : []),
+        topUserColumn.display({
+          id: 'sessions',
+          header: t('common:labels.sessions'),
+          meta: { numeric: true },
+          cell: ({ row }) => row.original.sessions.toLocaleString(),
+        }),
+        topUserColumn.accessor('totalBytes', {
+          header: t('common:labels.data'),
+          sortDescFirst: false,
+          meta: { numeric: true },
+          cell: ({ getValue }) => formatBytes(getValue()),
+        }),
+        topUserColumn.display({
+          id: 'watchTime',
+          header: t('common:labels.watchTime'),
+          meta: { numeric: true },
+          cell: ({ row }) => `${row.original.totalHours.toFixed(1)}h`,
+        }),
+        topUserColumn.display({
+          id: 'avgBitrate',
+          header: t('statsBandwidth.avgBitrate'),
+          meta: { numeric: true },
+          cell: ({ row }) => (
+            <Badge variant="outline">{row.original.avgBitrateMbps.toFixed(1)} Mbps</Badge>
+          ),
+        }),
+      ]),
+    [t, isMultiServer, primaryServerId, serverById]
+  );
+
+  const { table: topUsersTable } = useDataTable<BandwidthTopUser>({
+    columns: topUserColumns,
+    data: topUsers.data?.data,
+    getRowId: getTopUserId,
+    pageSize: TOP_USERS_PAGE_SIZE,
+  });
 
   return (
     <div className="space-y-6">
@@ -433,92 +506,30 @@ export function StatsBandwidth() {
               message={topUsers.error?.message ?? t('common:errors.unexpectedError')}
               onRetry={() => void topUsers.refetch()}
             />
-          ) : topUsers.isLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : sortedUsers.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">{t('common:labels.rank')}</TableHead>
-                  <TableHead>{t('common:labels.user')}</TableHead>
-                  {isMultiServer && <TableHead>{t('common:labels.server')}</TableHead>}
-                  <TableHead className="text-right">{t('common:labels.sessions')}</TableHead>
-                  <TableHead className="text-right">
-                    <button
-                      type="button"
-                      className="hover:text-foreground inline-flex w-full items-center justify-end gap-1 transition-colors"
-                      onClick={() =>
-                        setDataSortDir((current) => (current === 'asc' ? 'desc' : 'asc'))
-                      }
-                    >
-                      {t('common:labels.data')}
-                      {dataSortDir === 'asc' ? (
-                        <ArrowUp className="h-3.5 w-3.5" />
-                      ) : (
-                        <ArrowDown className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                  </TableHead>
-                  <TableHead className="text-right">{t('common:labels.watchTime')}</TableHead>
-                  <TableHead className="text-right">{t('statsBandwidth.avgBitrate')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedUsers.map((user, idx) => {
-                  const serverColor = isMultiServer ? (colorMap.get(user.serverId) ?? null) : null;
-                  const rowStyle = serverColor
-                    ? { boxShadow: `inset 3px 0 0 0 ${serverColor}` }
-                    : undefined;
-                  const server = serverById.get(user.serverId);
-                  const avatarServerId = isMultiServer ? user.serverId : primaryServerId;
-
-                  return (
-                    <TableRow key={`${user.serverId}-${user.serverUserId}`} style={rowStyle}>
-                      <TableCell className="text-muted-foreground font-medium">
-                        {rankByUserId.get(user.serverUserId) ?? idx + 1}
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          to={`/users/${user.serverUserId}`}
-                          className="flex items-center gap-3 hover:underline"
-                        >
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage
-                              src={getAvatarUrl(avatarServerId, user.thumbUrl, 32) ?? undefined}
-                              alt={user.username}
-                            />
-                            <AvatarFallback>
-                              {(user.identityName ?? user.username).slice(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium">{user.identityName ?? user.username}</span>
-                        </Link>
-                      </TableCell>
-                      {isMultiServer && (
-                        <TableCell>
-                          {server ? <ServerColumnCell server={server} /> : null}
-                        </TableCell>
-                      )}
-                      <TableCell className="text-right">{user.sessions.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{formatBytes(user.totalBytes)}</TableCell>
-                      <TableCell className="text-right">{user.totalHours.toFixed(1)}h</TableCell>
-                      <TableCell className="text-right">
-                        <Badge variant="outline">{user.avgBitrateMbps.toFixed(1)} Mbps</Badge>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
           ) : (
-            <div className="rounded-xl border border-dashed p-8 text-center">
-              <Users className="text-muted-foreground/50 mx-auto h-12 w-12" />
-              <p className="text-muted-foreground mt-2">{t('common:empty.noUserData')}</p>
-            </div>
+            <DataTableRoot density="default">
+              <DataTableViewport>
+                <DataTableHeader table={topUsersTable} />
+                <DataTableBody
+                  table={topUsersTable}
+                  isLoading={topUsers.isLoading}
+                  loadingLabel={t('common:states.loading')}
+                  getRowStyle={(user) => {
+                    const serverColor = isMultiServer ? colorMap.get(user.serverId) : undefined;
+                    return serverColor
+                      ? { boxShadow: `inset 3px 0 0 0 ${serverColor}` }
+                      : undefined;
+                  }}
+                  empty={
+                    <DataTableEmpty
+                      table={topUsersTable}
+                      icon={Users}
+                      title={t('common:empty.noUserData')}
+                    />
+                  }
+                />
+              </DataTableViewport>
+            </DataTableRoot>
           )}
         </CardContent>
       </Card>

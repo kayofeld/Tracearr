@@ -236,10 +236,24 @@ export function jsonHeaders(token?: string): Record<string, string> {
 /**
  * Helper to create Plex-specific headers
  */
+// plex.tv scopes a PIN to the identifier that created it - polling with a
+// different one returns 404/1020. A constant shared by every install therefore
+// lets any install redeem any other's PIN. Loaded from settings at startup;
+// the legacy value is only the pre-startup fallback. Public, never a secret.
+let plexClientIdentifier = 'tracearr';
+
+export function setPlexClientIdentifier(id: string): void {
+  plexClientIdentifier = id;
+}
+
+export function getPlexClientIdentifier(): string {
+  return plexClientIdentifier;
+}
+
 export function plexHeaders(token?: string): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
-    'X-Plex-Client-Identifier': 'tracearr',
+    'X-Plex-Client-Identifier': plexClientIdentifier,
     'X-Plex-Product': 'Tracearr',
     'X-Plex-Version': '1.0.0',
     'X-Plex-Device': 'Server',

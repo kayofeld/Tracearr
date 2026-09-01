@@ -20,6 +20,18 @@ vi.mock('../../../db/client.js', () => ({
     select: vi.fn(),
     insert: vi.fn(),
     update: vi.fn(),
+    transaction: vi.fn(),
+  },
+}));
+
+vi.mock('../../../services/plexAccounts.js', () => ({
+  reconcilePlexAccountToken: vi.fn(),
+}));
+
+vi.mock('../../../services/sseManager.js', () => ({
+  sseManager: {
+    removeServer: vi.fn().mockResolvedValue(undefined),
+    refresh: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -79,6 +91,8 @@ import { db } from '../../../db/client.js';
 import { getUserById } from '../../../services/userService.js';
 import { PlexClient } from '../../../services/mediaServer/index.js';
 import { syncServer } from '../../../services/sync.js';
+import { reconcilePlexAccountToken } from '../../../services/plexAccounts.js';
+import { sseManager } from '../../../services/sseManager.js';
 import { isClaimCodeEnabled, validateClaimCode } from '../../../utils/claimCode.js';
 import { plexRoutes } from '../plex.js';
 
@@ -185,6 +199,18 @@ const viewerUser: AuthUser = {
   serverIds: [randomUUID()],
 };
 
+const mockLinkedAccount = {
+  id: randomUUID(),
+  userId: ownerId,
+  plexAccountId: 'plex-account-123',
+  plexUsername: 'admin',
+  plexEmail: 'admin@example.com',
+  plexThumbnail: 'https://plex.tv/thumb.png',
+  plexToken: 'account-token',
+  allowLogin: true,
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+};
+
 const mockExistingServer = {
   id: randomUUID(),
   name: 'Existing Plex Server',
@@ -238,6 +264,10 @@ describe('Plex Auth Routes', () => {
   beforeEach(() => {
     mockGetUsers.mockResolvedValue([{ id: '1', username: 'admin', isAdmin: true }]);
     mockGetAllServerIds.mockResolvedValue([]);
+    // resetAllMocks wipes the resolved values from the vi.mock factory, and the
+    // reauthorize route chains .catch() onto refresh().
+    vi.mocked(sseManager.removeServer).mockResolvedValue(undefined);
+    vi.mocked(sseManager.refresh).mockResolvedValue(undefined);
     // syncServer is awaited via .then() in the route's fire-and-forget path.
     // Without a resolved value, the chained `.then` blows up.
     vi.mocked(syncServer).mockResolvedValue({
@@ -278,6 +308,7 @@ describe('Plex Auth Routes', () => {
       const selectMock = {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
         limit: vi.fn().mockResolvedValue([]),
       };
       vi.mocked(db.select).mockReturnValue(selectMock as never);
@@ -354,16 +385,20 @@ describe('Plex Auth Routes', () => {
       vi.mocked(getUserById).mockResolvedValue(mockDbUser as never);
 
       // Create a flexible mock
-      const makeChain = (result: unknown[]) => ({
-        limit: vi.fn().mockResolvedValue(result),
-      });
+      const makeChain = (result: unknown[]) => {
+        const chain: Record<string, unknown> = {
+          limit: vi.fn().mockResolvedValue(result),
+        };
+        chain.orderBy = vi.fn().mockReturnValue(chain);
+        return chain;
+      };
 
       const selectMock = {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockImplementation(() => {
           return Object.assign(
             Promise.resolve([{ machineIdentifier: 'other-machine-id' }]), // Connected server
-            makeChain([{ token: mockExistingServer.token }]) // For limit() queries
+            makeChain([{ plexToken: mockExistingServer.token }]) // For limit() queries
           );
         }),
       };
@@ -419,14 +454,15 @@ describe('Plex Auth Routes', () => {
       // Mock getUserById to return the user
       vi.mocked(getUserById).mockResolvedValue(mockDbUser as never);
 
-      // Mock the DB query with limit() returning empty for both servers and plex_accounts
+      // Mock the DB query with limit() returning empty for both plex_accounts and servers
       const selectMock = {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
         limit: vi
           .fn()
-          .mockResolvedValueOnce([]) // No existing plex servers
-          .mockResolvedValueOnce([]), // No plex accounts
+          .mockResolvedValueOnce([]) // No plex accounts
+          .mockResolvedValueOnce([]), // No existing plex servers
       };
       vi.mocked(db.select).mockReturnValue(selectMock as never);
 
@@ -452,14 +488,15 @@ describe('Plex Auth Routes', () => {
       vi.mocked(getUserById).mockResolvedValue(mockDbUser as never);
 
       // Mock all limit() calls:
-      // 1. Get existing Plex server (has token)
+      // 1. Resolve the token from the user's oldest linked account
       // 2. Check machineIdentifier duplicate (found - conflict!)
       const selectMock = {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
         limit: vi
           .fn()
-          .mockResolvedValueOnce([{ token: mockExistingServer.token }]) // First - get token from existing server
+          .mockResolvedValueOnce([mockLinkedAccount]) // First - token from linked account
           .mockResolvedValueOnce([{ id: mockExistingServer.id }]), // Second - duplicate found
       };
       vi.mocked(db.select).mockReturnValue(selectMock as never);
@@ -498,15 +535,16 @@ describe('Plex Auth Routes', () => {
       };
 
       // Mock all limit() calls:
-      // 1. Get existing Plex server (has token)
+      // 1. Resolve the token from the user's oldest linked account
       // 2. Check machineIdentifier duplicate (not found)
       // 3. Check URL duplicate (not found)
       const selectMock = {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
         limit: vi
           .fn()
-          .mockResolvedValueOnce([{ token: mockExistingServer.token }]) // First - get token from existing server
+          .mockResolvedValueOnce([mockLinkedAccount]) // First - token from linked account
           .mockResolvedValueOnce([]) // Second - no machineIdentifier duplicate
           .mockResolvedValueOnce([]), // Third - no URL duplicate
       };
@@ -516,7 +554,7 @@ describe('Plex Auth Routes', () => {
       vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({ success: true });
 
       // Mock insert
-      mockDbInsert([newServer]);
+      const insertChain = mockDbInsert([newServer]);
 
       // Mock sync
       vi.mocked(syncServer).mockResolvedValue({
@@ -543,6 +581,19 @@ describe('Plex Auth Routes', () => {
       const body = response.json();
       expect(body.server.id).toBe(newServerId);
       expect(body.success).toBe(true);
+
+      // The resolved account owns the new row: its token and its id, not a
+      // token copied off some other server with no account attribution.
+      expect(PlexClient.verifyServerAdmin).toHaveBeenCalledWith(
+        mockLinkedAccount.plexToken,
+        'http://192.168.1.100:32400'
+      );
+      expect(insertChain.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          token: mockLinkedAccount.plexToken,
+          plexAccountId: mockLinkedAccount.id,
+        })
+      );
     });
 
     it('returns 403 when not admin on server', async () => {
@@ -555,9 +606,10 @@ describe('Plex Auth Routes', () => {
       const selectMock = {
         from: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
         limit: vi
           .fn()
-          .mockResolvedValueOnce([{ token: mockExistingServer.token }]) // Get token from existing server
+          .mockResolvedValueOnce([mockLinkedAccount]) // Token from linked account
           .mockResolvedValueOnce([]) // No machineIdentifier duplicate
           .mockResolvedValueOnce([]), // No URL duplicate
       };
@@ -914,6 +966,182 @@ describe('Plex Auth Routes', () => {
       const body = response.json();
       expect(body.server.connections).toHaveLength(2);
       expect(body.server.connections.every((c: { custom?: boolean }) => !c.custom)).toBe(true);
+    });
+  });
+
+  describe('POST /plex/accounts/:id/reauthorize', () => {
+    const freshPin = {
+      id: mockLinkedAccount.plexAccountId,
+      username: 'admin',
+      email: 'admin@example.com',
+      thumb: 'https://plex.tv/new-thumb.png',
+      token: 'fresh-token',
+      tokenKind: 'legacy' as const,
+      refreshToken: null,
+      expiresAt: null,
+    };
+
+    const linkedServer = {
+      id: randomUUID(),
+      name: 'Linked Server',
+      url: 'http://192.168.1.100:32400',
+      status: 'refreshed' as const,
+    };
+
+    /** Account lookup ends at .limit(); the trailing server count ends at .where(). */
+    function mockAccountLookup(account: typeof mockLinkedAccount | null = mockLinkedAccount) {
+      const selectMock = {
+        from: vi.fn().mockReturnThis(),
+        where: vi.fn().mockImplementation(() =>
+          Object.assign(Promise.resolve([{ count: 1 }]), {
+            limit: vi.fn().mockResolvedValue(account ? [account] : []),
+          })
+        ),
+      };
+      vi.mocked(db.select).mockReturnValue(selectMock as never);
+    }
+
+    it('returns 403 for non-owner users', async () => {
+      app = await buildTestApp(viewerUser);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/plex/accounts/${mockLinkedAccount.id}/reauthorize`,
+        payload: { pin: '12345' },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(reconcilePlexAccountToken).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when the account is not the caller\u2019s', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getUserById).mockResolvedValue(mockDbUser as never);
+      mockAccountLookup(null);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/plex/accounts/${randomUUID()}/reauthorize`,
+        payload: { pin: '12345' },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(PlexClient.checkOAuthPin).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 when the PIN is not authorized yet', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getUserById).mockResolvedValue(mockDbUser as never);
+      mockAccountLookup();
+      vi.mocked(PlexClient.checkOAuthPin).mockResolvedValue(null);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/plex/accounts/${mockLinkedAccount.id}/reauthorize`,
+        payload: { pin: '12345' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(reconcilePlexAccountToken).not.toHaveBeenCalled();
+    });
+
+    it('returns 409 and reconciles nothing when the PIN belongs to another Plex account', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getUserById).mockResolvedValue(mockDbUser as never);
+      mockAccountLookup();
+      vi.mocked(PlexClient.checkOAuthPin).mockResolvedValue({
+        ...freshPin,
+        id: 'someone-elses-plex-account',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/plex/accounts/${mockLinkedAccount.id}/reauthorize`,
+        payload: { pin: '12345' },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(reconcilePlexAccountToken).not.toHaveBeenCalled();
+      expect(sseManager.refresh).not.toHaveBeenCalled();
+    });
+
+    it('hands the redeemed identity to the reconciler and verifies with the new token', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getUserById).mockResolvedValue(mockDbUser as never);
+      mockAccountLookup();
+      vi.mocked(PlexClient.checkOAuthPin).mockResolvedValue(freshPin);
+      vi.mocked(reconcilePlexAccountToken).mockResolvedValue({
+        reconciled: [linkedServer],
+        unmatched: [],
+      });
+      vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({ success: true });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/plex/accounts/${mockLinkedAccount.id}/reauthorize`,
+        payload: { pin: '12345' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(reconcilePlexAccountToken).toHaveBeenCalledWith(
+        expect.objectContaining({ id: mockLinkedAccount.id }),
+        expect.objectContaining({ token: 'fresh-token', id: mockLinkedAccount.plexAccountId }),
+        expect.anything()
+      );
+      expect(PlexClient.verifyServerAdmin).toHaveBeenCalledWith('fresh-token', linkedServer.url);
+      expect(sseManager.refresh).toHaveBeenCalled();
+      expect(response.json().servers).toEqual([
+        { id: linkedServer.id, name: linkedServer.name, status: 'refreshed', ok: true },
+      ]);
+    });
+
+    it('reports a server that still refuses the new token', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getUserById).mockResolvedValue(mockDbUser as never);
+      mockAccountLookup();
+      vi.mocked(PlexClient.checkOAuthPin).mockResolvedValue(freshPin);
+      vi.mocked(reconcilePlexAccountToken).mockResolvedValue({
+        reconciled: [linkedServer],
+        unmatched: [],
+      });
+      vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({
+        success: false,
+        code: 'NOT_ADMIN',
+        message: 'not admin',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/plex/accounts/${mockLinkedAccount.id}/reauthorize`,
+        payload: { pin: '12345' },
+      });
+
+      expect(response.json().servers[0].ok).toBe(false);
+    });
+
+    it('surfaces servers the reconciler could not attribute instead of reporting success', async () => {
+      app = await buildTestApp(ownerUser);
+      vi.mocked(getUserById).mockResolvedValue(mockDbUser as never);
+      mockAccountLookup();
+      vi.mocked(PlexClient.checkOAuthPin).mockResolvedValue(freshPin);
+      const stranded = { id: randomUUID(), name: 'Stranded Server' };
+      vi.mocked(reconcilePlexAccountToken).mockResolvedValue({
+        reconciled: [],
+        unmatched: [stranded],
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/plex/accounts/${mockLinkedAccount.id}/reauthorize`,
+        payload: { pin: '12345' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().servers).toEqual([
+        { id: stranded.id, name: stranded.name, status: 'unmatched', ok: false },
+      ]);
+      // Nothing was written, so there is no stale connection to rebuild
+      expect(sseManager.refresh).not.toHaveBeenCalled();
     });
   });
 });

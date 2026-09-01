@@ -13,19 +13,74 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Link2, Unlink, Loader2, XCircle, Server, Plus } from 'lucide-react';
+import { Link2, Unlink, Loader2, XCircle, Server, Plus, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { PlexAccount } from '@/lib/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-// Plex OAuth configuration
+// Plex OAuth configuration. The client identifier is NOT hardcoded: plex.tv
+// scopes a PIN to the identifier that created it, and the server redeems the
+// PIN this component creates, so both ends must send the same per-install
+// value. It comes from GET /auth/plex/accounts.
 const PLEX_OAUTH_URL = 'https://app.plex.tv/auth#';
-const PLEX_CLIENT_ID = 'tracearr';
+const PIN_POLL_INTERVAL_MS = 2000;
+const PIN_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Resolves with the authorized pin id, which the server redeems for a token. */
+async function runPlexOAuth(clientIdentifier: string): Promise<string> {
+  const pinResponse = await fetch('https://plex.tv/api/v2/pins', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Plex-Client-Identifier': clientIdentifier,
+      'X-Plex-Product': 'Tracearr',
+    },
+    body: JSON.stringify({
+      strong: true,
+      'X-Plex-Product': 'Tracearr',
+      'X-Plex-Client-Identifier': clientIdentifier,
+    }),
+  });
+
+  if (!pinResponse.ok) {
+    throw new Error('Failed to create Plex PIN');
+  }
+
+  const pin = (await pinResponse.json()) as { id: number; code: string };
+  const oauthUrl = `${PLEX_OAUTH_URL}?clientID=${clientIdentifier}&code=${pin.code}&context%5Bdevice%5D%5Bproduct%5D=Tracearr`;
+  const oauthWindow = window.open(oauthUrl, 'plex_oauth', 'width=600,height=700');
+
+  try {
+    const deadline = Date.now() + PIN_POLL_TIMEOUT_MS;
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, PIN_POLL_INTERVAL_MS));
+
+      const check = await fetch(`https://plex.tv/api/v2/pins/${pin.id}`, {
+        headers: {
+          Accept: 'application/json',
+          'X-Plex-Client-Identifier': clientIdentifier,
+        },
+      }).catch(() => null);
+
+      if (!check) continue;
+      if (!check.ok) throw new Error('Failed to check PIN status');
+
+      const { authToken } = (await check.json()) as { authToken: string | null };
+      if (authToken) return String(pin.id);
+    }
+
+    throw new Error('OAuth timeout - please try again');
+  } finally {
+    oauthWindow?.close();
+  }
+}
 
 interface PlexAccountsManagerProps {
   compact?: boolean; // For inline display in server settings
-  onAccountLinked?: () => void; // Callback after linking account
+  onAccountLinked?: (accountId: string) => void;
 }
 
 export function PlexAccountsManager({
@@ -37,7 +92,12 @@ export function PlexAccountsManager({
   const [showManageDialog, setShowManageDialog] = useState(false);
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState<string | null>(null);
   const [isLinking, setIsLinking] = useState(false);
+  const [reauthorizingId, setReauthorizingId] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
+
+  // Both flows drive the same named popup, so a second start would steal the
+  // first one's window and leave it polling a PIN nobody will authorize.
+  const oauthBusy = isLinking || reauthorizingId !== null;
 
   // Fetch plex accounts
   const {
@@ -50,6 +110,7 @@ export function PlexAccountsManager({
   });
 
   const accounts = accountsData?.accounts ?? [];
+  const plexClientId = accountsData?.clientIdentifier;
 
   // Unlink mutation
   const unlinkMutation = useMutation({
@@ -70,95 +131,79 @@ export function PlexAccountsManager({
 
   // Start Plex OAuth flow for linking
   const startPlexOAuth = async () => {
+    if (!plexClientId) {
+      setLinkError('Plex client identifier unavailable - reload and try again');
+      return;
+    }
+
     setIsLinking(true);
     setLinkError(null);
 
     try {
-      // Create Plex PIN
-      const pinResponse = await fetch('https://plex.tv/api/v2/pins', {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
-          'X-Plex-Product': 'Tracearr',
-        },
-        body: JSON.stringify({
-          strong: true,
-          'X-Plex-Product': 'Tracearr',
-          'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
-        }),
-      });
+      const pinId = await runPlexOAuth(plexClientId);
+      const { account } = await api.auth.linkPlexAccount(pinId);
 
-      if (!pinResponse.ok) {
-        throw new Error('Failed to create Plex PIN');
+      toast.success(t('toast.success.plexAccountLinked.title'), {
+        description: t('toast.success.plexAccountLinked.message'),
+      });
+      await refetch();
+      await queryClient.invalidateQueries({ queryKey: ['plex-accounts'] });
+      onAccountLinked?.(account.id);
+    } catch (error) {
+      setLinkError(error instanceof Error ? error.message : 'Failed to link account');
+    } finally {
+      setIsLinking(false);
+    }
+  };
+
+  const startReauthorize = async (accountId: string) => {
+    if (!plexClientId) {
+      setLinkError('Plex client identifier unavailable - reload and try again');
+      return;
+    }
+
+    setReauthorizingId(accountId);
+    setLinkError(null);
+
+    try {
+      const pinId = await runPlexOAuth(plexClientId);
+      const result = await api.auth.reauthorizePlexAccount(accountId, pinId);
+
+      const reconnected = result.servers.filter((s) => s.ok);
+      const unmatched = result.servers.filter((s) => s.status === 'unmatched');
+      const failed = result.servers.filter((s) => !s.ok && s.status !== 'unmatched');
+
+      if (failed.length > 0 || unmatched.length > 0) {
+        toast.warning(t('toast.success.plexAccountReauthorized.title'), {
+          description:
+            failed.length > 0
+              ? t('toast.success.plexAccountReauthorized.partial', {
+                  names: failed.map((s) => s.name).join(', '),
+                })
+              : t('toast.success.plexAccountReauthorized.unmatched', {
+                  names: unmatched.map((s) => s.name).join(', '),
+                }),
+        });
+      } else {
+        toast.success(t('toast.success.plexAccountReauthorized.title'), {
+          description:
+            reconnected.length === 0
+              ? t('toast.success.plexAccountReauthorized.messageNoServers')
+              : t('toast.success.plexAccountReauthorized.message', {
+                  count: reconnected.length,
+                }),
+        });
       }
 
-      const pinData = (await pinResponse.json()) as { id: number; code: string };
-
-      // Open Plex OAuth window
-      const oauthUrl = `${PLEX_OAUTH_URL}?clientID=${PLEX_CLIENT_ID}&code=${pinData.code}&context%5Bdevice%5D%5Bproduct%5D=Tracearr`;
-      const oauthWindow = window.open(oauthUrl, 'plex_oauth', 'width=600,height=700');
-
-      // Poll for PIN authorization
-      const pollInterval = setInterval(() => {
-        void (async () => {
-          try {
-            const checkResponse = await fetch(`https://plex.tv/api/v2/pins/${pinData.id}`, {
-              headers: {
-                Accept: 'application/json',
-                'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
-              },
-            });
-
-            if (!checkResponse.ok) {
-              clearInterval(pollInterval);
-              setIsLinking(false);
-              setLinkError('Failed to check PIN status');
-              return;
-            }
-
-            const checkData = (await checkResponse.json()) as { authToken: string | null };
-
-            if (checkData.authToken) {
-              clearInterval(pollInterval);
-              oauthWindow?.close();
-
-              // Now link the account via our API
-              try {
-                await api.auth.linkPlexAccount(pinData.id.toString());
-                toast.success(t('toast.success.plexAccountLinked.title'), {
-                  description: t('toast.success.plexAccountLinked.message'),
-                });
-                await refetch();
-                await queryClient.invalidateQueries({ queryKey: ['plex-accounts'] });
-                onAccountLinked?.();
-                setIsLinking(false);
-              } catch (error) {
-                setLinkError(error instanceof Error ? error.message : 'Failed to link account');
-                setIsLinking(false);
-              }
-            }
-          } catch {
-            // Continue polling
-          }
-        })();
-      }, 2000);
-
-      // Stop polling after 5 minutes
-      setTimeout(
-        () => {
-          clearInterval(pollInterval);
-          if (isLinking) {
-            setIsLinking(false);
-            setLinkError('OAuth timeout - please try again');
-          }
-        },
-        5 * 60 * 1000
-      );
+      await refetch();
+      await queryClient.invalidateQueries({ queryKey: ['plex-accounts'] });
+      await queryClient.invalidateQueries({ queryKey: ['servers'] });
     } catch (error) {
-      setIsLinking(false);
-      setLinkError(error instanceof Error ? error.message : 'Failed to start OAuth');
+      const message = error instanceof Error ? error.message : 'Failed to reauthorize account';
+      setLinkError(message);
+      toast.error(t('toast.error.plexReauthorizeFailed'), { description: message });
+    } finally {
+      setReauthorizingId(null);
     }
   };
 
@@ -184,9 +229,12 @@ export function PlexAccountsManager({
           accounts={accounts}
           isLoading={isLoading}
           isLinking={isLinking}
+          oauthBusy={oauthBusy}
           linkError={linkError}
           onLink={startPlexOAuth}
           onUnlink={(id) => setShowUnlinkConfirm(id)}
+          onReauthorize={(id) => void startReauthorize(id)}
+          reauthorizingId={reauthorizingId}
         />
         <ConfirmDialog
           open={!!showUnlinkConfirm}
@@ -222,10 +270,10 @@ export function PlexAccountsManager({
               {t('pages:settings.plex.noAccountsLinkedHint')}
             </p>
           </div>
-          <Button onClick={startPlexOAuth} disabled={isLinking}>
+          <Button onClick={startPlexOAuth} disabled={oauthBusy}>
             {isLinking ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="animate-spin" />
                 {t('pages:settings.plex.linking')}
               </>
             ) : (
@@ -250,13 +298,16 @@ export function PlexAccountsManager({
                 key={account.id}
                 account={account}
                 onUnlink={() => setShowUnlinkConfirm(account.id)}
+                onReauthorize={() => void startReauthorize(account.id)}
+                isReauthorizing={reauthorizingId === account.id}
+                oauthBusy={oauthBusy}
               />
             ))}
           </div>
-          <Button variant="outline" onClick={startPlexOAuth} disabled={isLinking}>
+          <Button variant="outline" onClick={startPlexOAuth} disabled={oauthBusy}>
             {isLinking ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="animate-spin" />
                 {t('pages:settings.plex.linking')}
               </>
             ) : (
@@ -288,7 +339,19 @@ export function PlexAccountsManager({
   );
 }
 
-function PlexAccountCard({ account, onUnlink }: { account: PlexAccount; onUnlink: () => void }) {
+function PlexAccountCard({
+  account,
+  onUnlink,
+  onReauthorize,
+  isReauthorizing,
+  oauthBusy,
+}: {
+  account: PlexAccount;
+  onUnlink: () => void;
+  onReauthorize: () => void;
+  isReauthorizing: boolean;
+  oauthBusy: boolean;
+}) {
   const { t } = useTranslation(['pages', 'common']);
   const canUnlink = account.serverCount === 0;
 
@@ -316,19 +379,36 @@ function PlexAccountCard({ account, onUnlink }: { account: PlexAccount; onUnlink
           </div>
         </div>
       </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onUnlink}
-        disabled={!canUnlink}
-        title={
-          canUnlink
-            ? t('pages:settings.plex.unlinkAccount')
-            : t('pages:settings.plex.deleteServersFirst')
-        }
-      >
-        <Unlink className="h-4 w-4" />
-      </Button>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onReauthorize}
+          disabled={oauthBusy}
+          title={t('pages:settings.plex.reauthorizeAccount')}
+          aria-label={t('pages:settings.plex.reauthorizeAccount')}
+        >
+          {isReauthorizing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onUnlink}
+          disabled={!canUnlink}
+          title={
+            canUnlink
+              ? t('pages:settings.plex.unlinkAccount')
+              : t('pages:settings.plex.deleteServersFirst')
+          }
+          aria-label={t('pages:settings.plex.unlinkAccount')}
+        >
+          <Unlink className="h-4 w-4" />
+        </Button>
+      </div>
     </div>
   );
 }
@@ -339,18 +419,24 @@ function ManageDialog({
   accounts,
   isLoading,
   isLinking,
+  oauthBusy,
   linkError,
   onLink,
   onUnlink,
+  onReauthorize,
+  reauthorizingId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   accounts: PlexAccount[];
   isLoading: boolean;
   isLinking: boolean;
+  oauthBusy: boolean;
   linkError: string | null;
   onLink: () => void;
   onUnlink: (id: string) => void;
+  onReauthorize: (id: string) => void;
+  reauthorizingId: string | null;
 }) {
   const { t } = useTranslation(['pages', 'common']);
   return (
@@ -379,6 +465,9 @@ function ManageDialog({
                 key={account.id}
                 account={account}
                 onUnlink={() => onUnlink(account.id)}
+                onReauthorize={() => onReauthorize(account.id)}
+                isReauthorizing={reauthorizingId === account.id}
+                oauthBusy={oauthBusy}
               />
             ))
           )}
@@ -393,10 +482,10 @@ function ManageDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t('common:actions.close')}
           </Button>
-          <Button onClick={onLink} disabled={isLinking}>
+          <Button onClick={onLink} disabled={oauthBusy}>
             {isLinking ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="animate-spin" />
                 {t('pages:settings.plex.linking')}
               </>
             ) : (

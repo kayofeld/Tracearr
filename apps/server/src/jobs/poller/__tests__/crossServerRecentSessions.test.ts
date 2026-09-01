@@ -11,9 +11,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { Session, Condition, RuleV2, ServerUser, Server } from '@tracearr/shared';
-import { evaluatorRegistry } from '../../../services/rules/evaluators/index.js';
-import type { EvaluationContext } from '../../../services/rules/types.js';
+import type { Session, Condition, EngineAutomation, ServerUser, Server } from '@tracearr/shared';
+import { synthesizeTriggers } from '../../../services/automations/triggers.js';
+import { evaluatorRegistry } from '../../../services/automations/evaluators/index.js';
+import type { SessionEvaluationContext } from '../../../services/automations/types.js';
 
 // ============================================================================
 // DB mock - only exercised by widenRecentSessionsForMergedIdentities'
@@ -28,7 +29,9 @@ vi.mock('../../../db/client.js', () => ({
       from: () => ({
         where: () => {
           const promise = Promise.resolve(supplementalRows);
-          return Object.assign(promise, { orderBy: () => promise });
+          return Object.assign(promise, {
+            orderBy: () => Object.assign(promise, { limit: () => promise }),
+          });
         },
       }),
     }),
@@ -59,6 +62,14 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
     year: 2024,
     thumbPath: null,
     ratingKey: 'rk-1',
+    serverVersionKey: null,
+    parentRatingKey: null,
+    grandparentRatingKey: null,
+    mediaId: null,
+    showMediaId: null,
+    imdbId: null,
+    tmdbId: null,
+    tvdbId: null,
     externalSessionId: 'ext-1',
     startedAt: new Date(),
     stoppedAt: null,
@@ -123,7 +134,6 @@ function createMockServerUser(overrides: Partial<ServerUser> = {}): ServerUser {
     email: 'test@example.com',
     thumbUrl: null,
     isServerAdmin: false,
-    sessionCount: 10,
     joinedAt: new Date(),
     lastActivityAt: new Date(),
     trustScore: 100,
@@ -147,7 +157,8 @@ function createMockServer(overrides: Partial<Server> = {}): Server {
   };
 }
 
-function createMockRule(overrides: Partial<RuleV2> = {}): RuleV2 {
+function createMockRule(overrides: Partial<EngineAutomation> = {}): EngineAutomation {
+  const conditions = overrides.conditions ?? { groups: [] };
   return {
     id: 'rule-1',
     name: 'Test Rule',
@@ -158,11 +169,16 @@ function createMockRule(overrides: Partial<RuleV2> = {}): RuleV2 {
     enforceAcrossServers: false,
     isActive: true,
     severity: 'warning',
-    conditions: { groups: [] },
+    kind: 'policy',
+    conditions,
     actions: { actions: [] },
+    currentVersionId: null,
+    cooldownMinutes: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
+    triggers:
+      overrides.triggers !== undefined ? overrides.triggers : synthesizeTriggers(conditions),
   };
 }
 
@@ -278,7 +294,9 @@ describe('widenRecentSessionsForMergedIdentities', () => {
 // Full pipeline: widened recentSessions feeding the real evaluators
 // ============================================================================
 
-function createTestContext(overrides: Partial<EvaluationContext> = {}): EvaluationContext {
+function createTestContext(
+  overrides: Partial<SessionEvaluationContext> = {}
+): SessionEvaluationContext {
   const server = createMockServer();
   const serverUser = createMockServerUser({ serverId: server.id });
   const session = createMockSession({ serverId: server.id, serverUserId: serverUser.id });
@@ -287,6 +305,8 @@ function createTestContext(overrides: Partial<EvaluationContext> = {}): Evaluati
     session,
     serverUser,
     server,
+    media: null,
+    subjectKey: session.id,
     activeSessions: [session],
     recentSessions: [session],
     rule: createMockRule(),

@@ -1,5 +1,5 @@
 # Build stage
-FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436 AS builder
+FROM node:24-alpine3.23@sha256:244cc2b53f46f9e876304391d17682b0ddae9ac33491f4857e25e35a36ba7995 AS builder
 
 # Build arguments for version info
 ARG APP_VERSION=0.0.0
@@ -15,7 +15,6 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/server/package.json ./apps/server/
 COPY apps/web/package.json ./apps/web/
-COPY apps/mobile/package.json ./apps/mobile/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/translations/package.json ./packages/translations/
 COPY packages/test-utils/package.json ./packages/test-utils/
@@ -26,11 +25,11 @@ RUN pnpm install --frozen-lockfile
 # Copy source code
 COPY . .
 
-# Build only production packages (excludes test-utils, mobile)
+# Build only production packages (excludes test-utils)
 RUN pnpm turbo run build --filter=@tracearr/shared --filter=@tracearr/server --filter=@tracearr/web
 
 # Production stage
-FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436 AS runner
+FROM node:24-alpine3.23@sha256:244cc2b53f46f9e876304391d17682b0ddae9ac33491f4857e25e35a36ba7995 AS runner
 
 # Build arguments for version info (must redeclare in each stage)
 ARG APP_VERSION=0.0.0
@@ -82,6 +81,8 @@ COPY --from=builder /app/apps/server/src/db/migrations ./apps/server/src/db/migr
 # GeoIP database (if exists in build context)
 COPY data/GeoLite2-City.mmdb ./data/GeoLite2-City.mmdb
 COPY data/GeoLite2-ASN.mmdb ./data/GeoLite2-ASN.mmdb
+COPY data/basemap.pmtiles ./data/basemap.pmtiles
+COPY data/BASEMAP_NOTICE.txt ./data/BASEMAP_NOTICE.txt
 
 # Create image cache and backup directories
 RUN mkdir -p /app/data/image-cache /data/backup

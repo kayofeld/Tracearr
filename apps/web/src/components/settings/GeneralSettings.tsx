@@ -1,8 +1,10 @@
 /**
- * General settings section - appearance, application settings, network, and API key.
+ * General settings section - appearance, application settings, network, API key, and public API.
  */
 import { useState } from 'react';
 import { Link as RouterLink } from 'react-router';
+import { UpdateChecksCard } from '@/components/settings/UpdateChecksCard';
+import { ImageCacheCard } from '@/components/settings/ImageCacheCard';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,11 +24,11 @@ import {
   SaveStatusIndicator,
 } from '@/components/ui/autosave-field';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { CopyButton } from '@/components/ui/copy-button';
 import {
   RefreshCw,
   ExternalLink,
   Loader2,
-  Copy,
   Globe,
   AlertTriangle,
   KeyRound,
@@ -39,9 +41,9 @@ import {
   Settings as SettingsIcon,
   Languages,
   Clock,
+  Gauge,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
 import { useTheme, ACCENT_PRESETS } from '@/components/theme-provider';
 import { useDebouncedSave, TEXT_INPUT_DELAY } from '@/hooks/useDebouncedSave';
 import { useSettings, useApiKey, useRegenerateApiKey } from '@/hooks/queries';
@@ -65,24 +67,13 @@ const THEME_MODES = [
 ];
 
 function ApiKeyCard() {
-  const { t } = useTranslation(['settings', 'common', 'notifications']);
+  const { t } = useTranslation(['settings', 'common']);
   const { data: apiKeyData, isLoading } = useApiKey();
   const regenerateApiKey = useRegenerateApiKey();
   const [showConfirm, setShowConfirm] = useState(false);
 
   const token = apiKeyData?.token;
   const hasKey = !!token;
-
-  const handleCopy = async () => {
-    if (token) {
-      try {
-        await navigator.clipboard.writeText(token);
-        toast.success(t('notifications:toast.success.copiedToClipboard.title'));
-      } catch {
-        toast.error(t('notifications:toast.error.copyFailed'));
-      }
-    }
-  };
 
   const handleRegenerate = () => {
     if (hasKey) {
@@ -129,15 +120,11 @@ function ApiKeyCard() {
                   placeholder={t('general.noApiKeyGenerated')}
                   className="font-mono text-sm"
                 />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={handleCopy}
+                <CopyButton
+                  value={token ?? ''}
+                  label={t('general.copyToClipboard')}
                   disabled={!hasKey}
-                  title={t('general.copyToClipboard')}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
+                />
               </div>
               <div className="flex items-center justify-between">
                 <p className="text-muted-foreground text-sm">
@@ -150,7 +137,7 @@ function ApiKeyCard() {
                   disabled={regenerateApiKey.isPending}
                 >
                   {regenerateApiKey.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="animate-spin" />
                   ) : (
                     <RefreshCw className="mr-2 h-4 w-4" />
                   )}
@@ -272,6 +259,28 @@ export function GeneralSettings() {
     delay: TEXT_INPUT_DELAY,
   });
   const intervalSeconds = Math.round((pollerIntervalField.value ?? 15000) / 1000);
+
+  // Public API settings fields
+  const watchedThresholdMovieField = useDebouncedSave(
+    'watchedThresholdMovie',
+    settings?.watchedThresholdMovie,
+    { delay: TEXT_INPUT_DELAY, transform: (v) => Math.max(1, Math.min(100, v)) }
+  );
+  const watchedThresholdTvField = useDebouncedSave(
+    'watchedThresholdTv',
+    settings?.watchedThresholdTv,
+    { delay: TEXT_INPUT_DELAY, transform: (v) => Math.max(1, Math.min(100, v)) }
+  );
+  const watchedThresholdMusicField = useDebouncedSave(
+    'watchedThresholdMusic',
+    settings?.watchedThresholdMusic,
+    { delay: TEXT_INPUT_DELAY, transform: (v) => Math.max(1, Math.min(100, v)) }
+  );
+  const apiRateLimitField = useDebouncedSave(
+    'publicApiRateLimitPerMinute',
+    settings?.publicApiRateLimitPerMinute,
+    { delay: TEXT_INPUT_DELAY, transform: (v) => Math.max(1, v) }
+  );
 
   const handleIntervalChange = (seconds: number) => {
     pollerIntervalField.setValue(seconds * 1000);
@@ -576,8 +585,87 @@ export function GeneralSettings() {
         </CardContent>
       </Card>
 
+      {/* Update checks */}
+      <UpdateChecksCard />
+
+      {/* Poster cache */}
+      <ImageCacheCard />
+
       {/* API Key */}
       <ApiKeyCard />
+
+      {/* Public API */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Gauge className="h-5 w-5" />
+            {t('general.publicApiSettings')}
+          </CardTitle>
+          <CardDescription>{t('general.publicApiSettingsDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup>
+            <AutosaveNumberField
+              id="watchedThresholdMovie"
+              label={t('general.watchedThresholdMovie')}
+              description={t('general.watchedThresholdMovieDesc')}
+              value={watchedThresholdMovieField.value ?? 85}
+              onChange={(v) => watchedThresholdMovieField.setValue(v)}
+              min={1}
+              max={100}
+              suffix={t('general.watchedThresholdSuffix')}
+              status={watchedThresholdMovieField.status}
+              errorMessage={watchedThresholdMovieField.errorMessage}
+              onRetry={watchedThresholdMovieField.retry}
+              onReset={watchedThresholdMovieField.reset}
+            />
+
+            <AutosaveNumberField
+              id="watchedThresholdTv"
+              label={t('general.watchedThresholdTv')}
+              description={t('general.watchedThresholdTvDesc')}
+              value={watchedThresholdTvField.value ?? 85}
+              onChange={(v) => watchedThresholdTvField.setValue(v)}
+              min={1}
+              max={100}
+              suffix={t('general.watchedThresholdSuffix')}
+              status={watchedThresholdTvField.status}
+              errorMessage={watchedThresholdTvField.errorMessage}
+              onRetry={watchedThresholdTvField.retry}
+              onReset={watchedThresholdTvField.reset}
+            />
+
+            <AutosaveNumberField
+              id="watchedThresholdMusic"
+              label={t('general.watchedThresholdMusic')}
+              description={t('general.watchedThresholdMusicDesc')}
+              value={watchedThresholdMusicField.value ?? 85}
+              onChange={(v) => watchedThresholdMusicField.setValue(v)}
+              min={1}
+              max={100}
+              suffix={t('general.watchedThresholdSuffix')}
+              status={watchedThresholdMusicField.status}
+              errorMessage={watchedThresholdMusicField.errorMessage}
+              onRetry={watchedThresholdMusicField.retry}
+              onReset={watchedThresholdMusicField.reset}
+            />
+
+            <AutosaveNumberField
+              id="publicApiRateLimitPerMinute"
+              label={t('general.apiRateLimit')}
+              description={t('general.apiRateLimitDesc')}
+              value={apiRateLimitField.value ?? 240}
+              onChange={(v) => apiRateLimitField.setValue(v)}
+              min={1}
+              suffix={t('general.apiRateLimitSuffix')}
+              status={apiRateLimitField.status}
+              errorMessage={apiRateLimitField.errorMessage}
+              onRetry={apiRateLimitField.retry}
+              onReset={apiRateLimitField.reset}
+            />
+          </FieldGroup>
+        </CardContent>
+      </Card>
     </div>
   );
 }

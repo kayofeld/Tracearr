@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Kunne ikke oppdatere agent",
       "apiKeyGenerateFailed": "Kunne ikke generere API-nøkkel",
       "authFailed": "Godkjenning mislyktes",
+      "automationCreateFailed": "",
+      "automationDeleteFailed": "",
+      "automationUpdateFailed": "",
       "clipboardFailed": "Kan ikke kopiere til utklippstavlen",
       "copyFailed": "Kunne ikke kopiere til utklippstavlen",
+      "destinationDeleteFailed": "",
+      "destinationInUse": "",
+      "destinationSaveFailed": "",
+      "destinationTestFailed": "",
       "deviceRemoveFailed": "Kan ikke fjerne enheten",
       "deviceRenameFailed": "Kunne ikke gi enheten nytt navn",
       "dismissFailed": "Kunne ikke avvise brudd",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "plex.direkte URL-er er relay adresser som ikke kan brukes her. Vennligst bruk en direkte IP-adresse eller vertsnavn i stedet.",
+      "plexReauthorizeFailed": "",
       "plexUnlinkFailed": "Klarte ikke koble fra Plex konto",
       "routingUpdateFailed": "Kunne ikke oppdatere ruting",
       "ruleCreateFailed": "Kunne ikke opprette regel",
@@ -148,6 +156,18 @@
         "message": "Den nye API-nøkkelen er klar til bruk",
         "title": "API-nøkkel generert"
       },
+      "automationCreated": {
+        "title": "",
+        "message": ""
+      },
+      "automationDeleted": {
+        "title": "",
+        "message": ""
+      },
+      "automationUpdated": {
+        "title": "",
+        "message": ""
+      },
       "claimCodeValidated": {
         "message": "Nå kan du fortsette med oppsettet",
         "title": "Krever kode godkjent"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Kopiert til utklippstavle"
       },
+      "destinationDeleted": "",
+      "destinationSaved": "",
+      "destinationTestSent": "",
       "deviceRemoved": {
         "message": "Enheten har blitt frakoblet",
         "title": "Enheten ble fjernet"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "Du kan nå legge til servere fra din Plex konto",
         "title": "Plex konto lenket"
+      },
+      "plexAccountReauthorized": {
+        "title": "",
+        "message_one": "",
+        "message_other": "",
+        "messageNoServers": "",
+        "partial": "",
+        "unmatched": ""
       },
       "plexAccountUnlinked": {
         "message": "Din Plex konto har blitt frakoblet",
@@ -283,6 +314,7 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "",
         "rulesKept": "Kept target's version of: {{names}}",
         "title": "Users merged"
       },

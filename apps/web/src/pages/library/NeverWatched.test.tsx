@@ -478,7 +478,7 @@ describe('LibraryNeverWatched', () => {
 
       renderPage();
 
-      await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+      await userEvent.click(screen.getByRole('button', { name: 'common:actions.next' }));
       expect(lastItemsArgs()[4]).toBe(2);
 
       const toggle = screen.getByRole('switch', {

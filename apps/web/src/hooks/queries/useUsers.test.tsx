@@ -7,6 +7,7 @@ import { MERGE_SAME_SERVER_CONFIRMATION_REQUIRED } from '@tracearr/shared';
 vi.mock('@/lib/api', () => ({
   api: {
     users: {
+      list: vi.fn(),
       merge: vi.fn(),
     },
   },
@@ -25,8 +26,9 @@ vi.mock('react-i18next', () => ({
 
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
-import { useMergeUsers } from './useUsers';
+import { useMergeUsers, useUsers } from './useUsers';
 
+const mockList = vi.mocked(api.users.list);
 const mockMerge = vi.mocked(api.users.merge);
 const mockToastSuccess = vi.mocked(toast.success);
 const mockToastError = vi.mocked(toast.error);
@@ -37,6 +39,37 @@ function wrapper(client: QueryClient) {
   }
   return Wrapper;
 }
+
+describe('useUsers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes every roster filter through to the list endpoint untouched', async () => {
+    mockList.mockResolvedValueOnce({ data: [], meta: { page: 2, pageSize: 100, total: 0 } });
+
+    const params = {
+      page: 2,
+      pageSize: 100,
+      serverIds: ['server-1'],
+      includeRemoved: true,
+      search: 'bob',
+      joinedAfter: '2024-01-01',
+      joinedBefore: '2024-02-01',
+      activeAfter: '2024-03-01',
+      activeBefore: '2024-04-01',
+      orderBy: 'trustScore' as const,
+      orderDir: 'desc' as const,
+    };
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useUsers(params), { wrapper: wrapper(client) });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockList).toHaveBeenCalledWith(params);
+  });
+});
 
 describe('useMergeUsers', () => {
   beforeEach(() => {

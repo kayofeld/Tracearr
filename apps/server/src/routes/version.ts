@@ -78,7 +78,9 @@ async function triggerDockerRedeployWebhook(webhookUrl: string): Promise<void> {
     }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new Error(`Redeploy webhook timed out after ${DOCKER_REDEPLOY_WEBHOOK_TIMEOUT_MS}ms`);
+      throw new Error(`Redeploy webhook timed out after ${DOCKER_REDEPLOY_WEBHOOK_TIMEOUT_MS}ms`, {
+        cause: err,
+      });
     }
     throw err;
   } finally {

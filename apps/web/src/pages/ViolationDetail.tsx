@@ -3,7 +3,6 @@ import { useParams, Link, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { formatDistanceToNow, format } from 'date-fns';
 import { getFullDateTimeFormatString } from '@/lib/timeFormat';
-import type { ColumnDef } from '@tanstack/react-table';
 import type {
   ViolationSessionInfo,
   LocationStats,
@@ -14,20 +13,28 @@ import {
   getViolationDescription,
   getViolationDetails,
   collectViolationSessions,
-  CONDITION_FIELD_LABELS,
-  OPERATOR_LABELS,
   formatConditionFieldValue,
   formatUserList,
   type UnitSystem,
 } from '@tracearr/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { DataTable } from '@/components/ui/data-table';
+import {
+  createDataTableColumnHelper,
+  DataTableBody,
+  DataTableEmpty,
+  DataTableHeader,
+  DataTablePager,
+  DataTableRoot,
+  DataTableViewport,
+  useDataTable,
+} from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SeverityBadge } from '@/components/violations/SeverityBadge';
 import { ActionResultsList } from '@/components/violations/ActionResultsList';
 import { getAvatarUrl } from '@/components/users/utils';
+import { fieldLabel, operatorLabel } from '@/lib/automations';
 import { getCountryName, getMediaDisplay } from '@/lib/utils';
 import { ServerBadge } from '@/components/server';
 import { useServerColorMap } from '@/hooks/useServerColorMap';
@@ -76,8 +83,8 @@ function ConditionEvidenceRow({
   userIdToName?: Record<string, string>;
 }) {
   const { t } = useTranslation(['pages', 'common']);
-  const label = CONDITION_FIELD_LABELS[condition.field] ?? condition.field;
-  const op = OPERATOR_LABELS[condition.operator] ?? condition.operator;
+  const label = fieldLabel(t, condition.field);
+  const op = operatorLabel(t, condition.operator);
 
   const resolveValue = (value: unknown): string => {
     const str = String(value);
@@ -179,7 +186,7 @@ function EvidenceGroupCard({
           </Badge>
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent>
         <div className="divide-y">
           {group.conditions.map((condition, idx) => (
             <ConditionEvidenceRow
@@ -194,6 +201,9 @@ function EvidenceGroupCard({
     </Card>
   );
 }
+
+const sessionColumn = createDataTableColumnHelper<ViolationSessionInfo>();
+const getSessionId = (session: ViolationSessionInfo) => session.id;
 
 export function ViolationDetail() {
   const { t } = useTranslation(['pages', 'common']);
@@ -242,90 +252,91 @@ export function ViolationDetail() {
   const hasGeoData = mapLocations.length > 0;
 
   // Session table columns
-  const sessionColumns: ColumnDef<ViolationSessionInfo>[] = useMemo(
-    () => [
-      {
-        accessorKey: 'mediaTitle',
-        header: t('common:labels.media'),
-        cell: ({ row }) => {
-          const session = row.original;
-          const { title, subtitle } = getMediaDisplay(session);
-          const isTriggering = violation?.session?.id === session.id;
-          return (
-            <div className="flex items-center gap-2">
-              <div className="max-w-[200px]">
-                <p className="truncate font-medium">{title}</p>
-                {subtitle ? (
-                  <p className="text-muted-foreground text-xs">{subtitle}</p>
-                ) : (
-                  <p className="text-muted-foreground text-xs capitalize">{session.mediaType}</p>
+  const sessionColumns = useMemo(
+    () =>
+      sessionColumn.columns([
+        sessionColumn.accessor('mediaTitle', {
+          header: t('common:labels.media'),
+          cell: ({ row }) => {
+            const session = row.original;
+            const { title, subtitle } = getMediaDisplay(session);
+            const isTriggering = violation?.session?.id === session.id;
+            return (
+              <div className="flex items-center gap-2">
+                <div className="max-w-[200px]">
+                  <p className="truncate font-medium">{title}</p>
+                  {subtitle ? (
+                    <p className="text-muted-foreground text-xs">{subtitle}</p>
+                  ) : (
+                    <p className="text-muted-foreground text-xs capitalize">{session.mediaType}</p>
+                  )}
+                </div>
+                {isTriggering && (
+                  <Badge
+                    variant="outline"
+                    className="text-primary border-primary/50 shrink-0 text-xs"
+                  >
+                    {t('pages:violations.detail.trigger')}
+                  </Badge>
                 )}
               </div>
-              {isTriggering && (
-                <Badge
-                  variant="outline"
-                  className="text-primary border-primary/50 shrink-0 text-xs"
-                >
-                  {t('pages:violations.detail.trigger')}
-                </Badge>
-              )}
-            </div>
-          );
-        },
-      },
-      {
-        accessorKey: 'ipAddress',
-        header: t('common:labels.ipAddress'),
-        cell: ({ row }) => <span className="font-mono text-sm">{row.original.ipAddress}</span>,
-      },
-      {
-        accessorKey: 'geoCity',
-        header: t('common:labels.location'),
-        cell: ({ row }) => {
-          const session = row.original;
-          if (!session.geoCity && !session.geoCountry) {
-            return <span className="text-muted-foreground">—</span>;
-          }
-          return (
-            <span className="text-sm">
-              {session.geoCity && `${session.geoCity}, `}
-              {getCountryName(session.geoCountry) ?? ''}
+            );
+          },
+        }),
+        sessionColumn.accessor('ipAddress', {
+          header: t('common:labels.ipAddress'),
+          cell: ({ row }) => <span className="font-mono text-sm">{row.original.ipAddress}</span>,
+        }),
+        sessionColumn.accessor('geoCity', {
+          header: t('common:labels.location'),
+          cell: ({ row }) => {
+            const session = row.original;
+            if (!session.geoCity && !session.geoCountry) {
+              return <span className="text-muted-foreground">—</span>;
+            }
+            return (
+              <span className="text-sm">
+                {session.geoCity && `${session.geoCity}, `}
+                {getCountryName(session.geoCountry) ?? ''}
+              </span>
+            );
+          },
+        }),
+        sessionColumn.accessor('device', {
+          header: t('common:labels.device'),
+          cell: ({ row }) => {
+            const session = row.original;
+            return (
+              <div className="text-sm">
+                <p>{session.device || session.platform || t('common:labels.unknown')}</p>
+                {session.playerName && (
+                  <p className="text-muted-foreground text-xs">{session.playerName}</p>
+                )}
+              </div>
+            );
+          },
+        }),
+        sessionColumn.accessor('quality', {
+          header: t('common:labels.quality'),
+          cell: ({ row }) => <span className="text-sm">{row.original.quality ?? '—'}</span>,
+        }),
+        sessionColumn.accessor('startedAt', {
+          header: t('common:labels.started'),
+          cell: ({ row }) => (
+            <span className="text-muted-foreground text-sm">
+              {formatDistanceToNow(new Date(row.original.startedAt), { addSuffix: true })}
             </span>
-          );
-        },
-      },
-      {
-        accessorKey: 'device',
-        header: t('common:labels.device'),
-        cell: ({ row }) => {
-          const session = row.original;
-          return (
-            <div className="text-sm">
-              <p>{session.device || session.platform || t('common:labels.unknown')}</p>
-              {session.playerName && (
-                <p className="text-muted-foreground text-xs">{session.playerName}</p>
-              )}
-            </div>
-          );
-        },
-      },
-      {
-        accessorKey: 'quality',
-        header: t('common:labels.quality'),
-        cell: ({ row }) => <span className="text-sm">{row.original.quality ?? '—'}</span>,
-      },
-      {
-        accessorKey: 'startedAt',
-        header: t('common:labels.started'),
-        cell: ({ row }) => (
-          <span className="text-muted-foreground text-sm">
-            {formatDistanceToNow(new Date(row.original.startedAt), { addSuffix: true })}
-          </span>
-        ),
-      },
-    ],
+          ),
+        }),
+      ]),
     [t, violation?.session?.id]
   );
+
+  const { table: sessionsTable, pager: sessionsPager } = useDataTable<ViolationSessionInfo>({
+    columns: sessionColumns,
+    data: allSessions,
+    getRowId: getSessionId,
+  });
 
   const handleAcknowledge = () => {
     if (!violation) return;
@@ -365,7 +376,7 @@ export function ViolationDetail() {
       <div className="space-y-6">
         <Link to="/violations">
           <Button variant="ghost" size="sm">
-            <ArrowLeft className="mr-2 h-4 w-4" />
+            <ArrowLeft />
             {t('common:actions.back')}
           </Button>
         </Link>
@@ -412,7 +423,7 @@ export function ViolationDetail() {
         <div className="flex items-center gap-4">
           <Link to="/violations">
             <Button variant="ghost" size="sm">
-              <ArrowLeft className="mr-2 h-4 w-4" />
+              <ArrowLeft />
               {t('common:actions.back')}
             </Button>
           </Link>
@@ -432,14 +443,14 @@ export function ViolationDetail() {
         <div className="flex items-center gap-2">
           {isPending && (
             <Button onClick={handleAcknowledge} disabled={acknowledgeViolation.isPending}>
-              <Check className="mr-2 h-4 w-4" />
+              <Check />
               {acknowledgeViolation.isPending
                 ? t('common:states.acknowledging')
                 : t('common:actions.acknowledge')}
             </Button>
           )}
           <Button variant="destructive" onClick={() => setDismissConfirmOpen(true)}>
-            <X className="mr-2 h-4 w-4" />
+            <X />
             {t('common:actions.dismiss')}
           </Button>
         </div>
@@ -578,11 +589,32 @@ export function ViolationDetail() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <DataTable
-              columns={sessionColumns}
-              data={allSessions}
-              emptyMessage={t('pages:violations.detail.noSessions')}
-            />
+            <DataTableRoot>
+              <DataTableViewport>
+                <DataTableHeader table={sessionsTable} />
+                <DataTableBody
+                  table={sessionsTable}
+                  empty={
+                    <DataTableEmpty
+                      table={sessionsTable}
+                      title={t('pages:violations.detail.noSessions')}
+                    />
+                  }
+                />
+              </DataTableViewport>
+              <DataTablePager
+                {...sessionsPager}
+                labels={{
+                  navigation: t('common:table.pagination'),
+                  status: t('common:table.pageOf', {
+                    page: sessionsPager.page,
+                    total: sessionsPager.pageCount,
+                  }),
+                  previous: t('common:actions.previous'),
+                  next: t('common:actions.next'),
+                }}
+              />
+            </DataTableRoot>
           </CardContent>
         </Card>
       )}

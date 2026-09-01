@@ -28,7 +28,10 @@ describe('isLoginCapable', () => {
   it('is true for LOGIN_ROLES roles', () => {
     expect(isLoginCapable(snapshot({ role: 'owner' }))).toBe(true);
     expect(isLoginCapable(snapshot({ role: 'admin' }))).toBe(true);
-    expect(isLoginCapable(snapshot({ role: 'viewer' }))).toBe(true);
+  });
+
+  it('is false for viewer, which no longer carries login rights on its own', () => {
+    expect(isLoginCapable(snapshot({ role: 'viewer' }))).toBe(false);
   });
 
   it('is true when a password hash exists regardless of role', () => {

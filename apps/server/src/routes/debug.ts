@@ -10,7 +10,7 @@ import { promises as fs, createReadStream, createWriteStream } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { ZipArchive } from 'archiver';
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { getActiveAggregateNames } from '../db/timescale.js';
 import {
@@ -30,24 +30,31 @@ import {
   getBuildDate,
 } from '../utils/buildInfo.js';
 import { getInactivityCheckQueueStats } from '../jobs/inactivityCheckQueue.js';
-import { invalidateRulesCache } from '../jobs/poller/database.js';
+import { invalidateAutomationsCache, invalidateServersCache } from '../jobs/poller/database.js';
 import { getBackupQueueStats } from '../jobs/backupQueue.js';
 import { resetSettingsCache } from '../services/settings.js';
+import {
+  invalidateDestinationsCache,
+  publishDestinationsChanged,
+} from '../services/notifications/destinationStore.js';
+import { seedBuiltinDestinations } from '../services/notifications/destinationsMigration.js';
+import { violationAliasConditions } from '../services/automations/aliasFilter.js';
 import { getAllServices } from '../services/serviceTracker.js';
 import { getAuth } from '../lib/auth.js';
 import { revokeMobileDeviceSession } from './mobile.js';
 import {
   sessions,
-  violations,
+  automationRuns,
   users,
   servers,
   serverUsers,
-  rules,
+  automations,
+  automationTemplates,
   settings,
   mobileTokens,
   mobileSessions,
   notificationPreferences,
-  notificationChannelRouting,
+  destinations,
   terminationLogs,
   plexAccounts,
   libraryItems,
@@ -345,10 +352,13 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
       plexAccountCount,
     ] = await Promise.all([
       db.select({ count: sql<number>`count(*)::int` }).from(sessions),
-      db.select({ count: sql<number>`count(*)::int` }).from(violations),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(automationRuns)
+        .where(and(...violationAliasConditions())),
       db.select({ count: sql<number>`count(*)::int` }).from(users),
       db.select({ count: sql<number>`count(*)::int` }).from(servers),
-      db.select({ count: sql<number>`count(*)::int` }).from(rules),
+      db.select({ count: sql<number>`count(*)::int` }).from(automations),
       db.select({ count: sql<number>`count(*)::int` }).from(terminationLogs),
       db.select({ count: sql<number>`count(*)::int` }).from(libraryItems),
       db.select({ count: sql<number>`count(*)::int` }).from(plexAccounts),
@@ -367,11 +377,13 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
         pg_total_relation_size(relid) as size_bytes
       FROM pg_catalog.pg_statio_user_tables
       WHERE relname IN (
-        'sessions', 'users', 'servers', 'server_users', 'rules', 'violations',
+        'sessions', 'users', 'servers', 'server_users',
+        'automations', 'automation_runs', 'automation_versions',
+        'automation_templates', 'automation_template_versions',
         'termination_logs', 'plex_accounts', 'settings',
-        'notification_preferences', 'notification_channel_routing',
+        'notification_preferences', 'destinations',
         'mobile_sessions', 'mobile_tokens',
-        'library_items', 'library_snapshots'
+        'library_items', 'library_item_versions', 'library_snapshots'
       )
       ORDER BY pg_total_relation_size(relid) DESC
     `);
@@ -422,7 +434,7 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
    */
   app.delete('/sessions', async () => {
     // Delete violations first (FK constraint)
-    const violationsDeleted = await db.delete(violations).returning({ id: violations.id });
+    const violationsDeleted = await db.delete(automationRuns).returning({ id: automationRuns.id });
     // Delete termination logs (references sessions but no FK due to TimescaleDB)
     const terminationLogsDeleted = await db
       .delete(terminationLogs)
@@ -443,7 +455,7 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
    * DELETE /debug/violations - Clear all violations
    */
   app.delete('/violations', async () => {
-    const deleted = await db.delete(violations).returning({ id: violations.id });
+    const deleted = await db.delete(automationRuns).returning({ id: automationRuns.id });
     return {
       success: true,
       deleted: deleted.length,
@@ -481,7 +493,7 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
       );
 
       // Delete violations for these server users
-      await db.delete(violations).where(sql`server_user_id = ANY(${serverUserIdArray})`);
+      await db.delete(automationRuns).where(sql`server_user_id = ANY(${serverUserIdArray})`);
 
       // Delete termination logs for these server users
       await db.delete(terminationLogs).where(sql`server_user_id = ANY(${serverUserIdArray})`);
@@ -507,6 +519,7 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
    */
   app.delete('/servers', async () => {
     const deleted = await db.delete(servers).returning({ id: servers.id });
+    invalidateServersCache();
     return {
       success: true,
       deleted: deleted.length,
@@ -514,13 +527,15 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /**
-   * DELETE /debug/rules - Clear all rules
+   * DELETE /debug/automations - Clear all automations and their runs
    */
-  app.delete('/rules', async () => {
-    // Delete violations first (FK constraint)
-    await db.delete(violations);
-    const deleted = await db.delete(rules).returning({ id: rules.id });
-    invalidateRulesCache();
+  app.delete('/automations', async () => {
+    // Delete runs first (FK constraint)
+    await db.delete(automationRuns);
+    const deleted = await db.delete(automations).returning({ id: automations.id });
+    // Builtin templates come back at boot; imported and local ones do not.
+    await db.delete(automationTemplates).where(eq(automationTemplates.builtin, false));
+    invalidateAutomationsCache();
     return {
       success: true,
       deleted: deleted.length,
@@ -585,11 +600,11 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
 
     // Delete everything in order respecting FK constraints
     // Start with tables that have FK dependencies on other tables
-    await db.delete(violations);
+    await db.delete(automationRuns);
     await db.delete(terminationLogs);
     await db.delete(sessions);
-    await db.delete(rules);
-    await db.delete(notificationChannelRouting);
+    await db.delete(automations);
+    await db.delete(destinations);
     await db.delete(notificationPreferences);
     await db.delete(mobileSessions);
     await db.delete(mobileTokens);
@@ -597,14 +612,18 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
     await db.delete(libraryItems); // Library data (references servers)
     await db.delete(serverUsers);
     await db.delete(servers); // servers references plex_accounts
+    invalidateServersCache();
     await db.delete(plexAccounts); // plex_accounts references users
     await db.delete(users);
 
     // Reset settings to defaults (KV store — just delete all rows; service uses defaults for missing keys)
     await db.delete(settings);
 
-    invalidateRulesCache();
+    invalidateAutomationsCache();
     resetSettingsCache();
+    invalidateDestinationsCache();
+    await seedBuiltinDestinations();
+    await publishDestinationsChanged();
 
     return {
       success: true,

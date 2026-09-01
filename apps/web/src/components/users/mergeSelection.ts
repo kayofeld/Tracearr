@@ -16,19 +16,22 @@ export interface MergeActionState {
   reasonKey?: MergeDisableReasonKey;
 }
 
+/**
+ * `selectedRows` carries every picked row, including ones from pages that are no
+ * longer loaded, so its length is the selection count.
+ */
 export function deriveMergeActionState(
   selectedRows: MergeSelectableRow[],
-  selectAllMode: boolean,
-  selectedCount: number
+  selectAllMode: boolean
 ): MergeActionState {
   if (selectAllMode) {
     return { disabled: true, reasonKey: 'pages:users.mergeSelectAllActive' };
   }
-  if (selectedCount !== 2) {
+  if (selectedRows.length !== 2) {
     return { disabled: true, reasonKey: 'pages:users.mergeSelectTwo' };
   }
   const [first, second] = selectedRows;
-  if (selectedRows.length === 2 && first?.userId === second?.userId) {
+  if (first?.userId === second?.userId) {
     return { disabled: true, reasonKey: 'pages:users.mergeSameIdentity' };
   }
   return { disabled: false };

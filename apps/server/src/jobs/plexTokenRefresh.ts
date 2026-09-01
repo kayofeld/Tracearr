@@ -16,11 +16,13 @@
  */
 
 import { Queue, Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { getRedisPrefix, TIME_MS } from '@tracearr/shared';
+import { TIME_MS } from '@tracearr/shared';
 import { and, eq, lte, isNotNull } from 'drizzle-orm';
+import { getBullPrefix, queueConnectionOptions } from './queueConnection.js';
 import { isMaintenance } from '../serverState.js';
 import { db } from '../db/client.js';
 import { authAccounts, plexAccounts, servers } from '../db/schema.js';
+import { invalidateServersCache } from './poller/database.js';
 import { PlexClient } from '../services/mediaServer/index.js';
 
 const QUEUE_NAME = 'plex-token-refresh';
@@ -46,8 +48,8 @@ export function initPlexTokenRefreshQueue(redisUrl: string): void {
     return;
   }
 
-  connectionOptions = { url: redisUrl };
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  connectionOptions = queueConnectionOptions(redisUrl);
+  const bullPrefix = getBullPrefix();
 
   refreshQueue = new Queue<PlexTokenRefreshJobData>(QUEUE_NAME, {
     connection: connectionOptions,
@@ -90,7 +92,7 @@ export function startPlexTokenRefreshWorker(): void {
     return;
   }
 
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  const bullPrefix = getBullPrefix();
 
   refreshWorker = new Worker<PlexTokenRefreshJobData>(
     QUEUE_NAME,
@@ -133,12 +135,10 @@ export async function schedulePlexTokenRefresh(): Promise<void> {
     return;
   }
 
-  // Remove any existing job schedulers (repeatable jobs)
+  // Remove any existing job schedulers; BullMQ reports them by key, not id.
   const schedulers = await refreshQueue.getJobSchedulers();
   for (const scheduler of schedulers) {
-    if (scheduler.id) {
-      await refreshQueue.removeJobScheduler(scheduler.id);
-    }
+    await refreshQueue.removeJobScheduler(scheduler.key);
   }
 
   await refreshQueue.add(
@@ -232,6 +232,9 @@ export async function processPlexTokenRefresh(): Promise<PlexTokenRefreshResult>
           .update(servers)
           .set({ token: refreshedToken.accessToken, updatedAt: new Date() })
           .where(eq(servers.plexAccountId, plexAccount.id));
+        // A stale cached token means failed polls until the TTL expires,
+        // which is enough consecutive failures to fire a server_down push
+        invalidateServersCache();
       }
 
       refreshed++;

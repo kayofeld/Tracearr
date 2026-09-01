@@ -1,163 +1,178 @@
 {
-  "actionsExecuted": "Actions Executed",
-  "activity": {
-    "concurrentStreams": "Concurrent Streams",
-    "platforms": "Platforms",
-    "playbackQuality": "Playback Quality",
-    "playsOverTime": "Plays Over Time"
-  },
-  "alerts": {
-    "clearFilters": "Clear Filters",
-    "done": "Done"
-  },
-  "dashboard": {
-    "hrs": "hrs",
-    "today": "TODAY"
+  "pair": {
+    "welcome": "歡迎來到 Tracearr",
+    "addServer": "新增伺服器",
+    "connectToServer": "連接至伺服器",
+    "enterServerDetails": "請輸入你的 Tracearr 網址和手機存取憑證",
+    "serverUrl": "伺服器網址",
+    "accessToken": "存取憑證",
+    "scanQrCodeInstead": "改為掃描 QR 碼",
+    "enterManually": "請手動輸入網址和憑證",
+    "cameraPermissionRequired": "掃描 QR 碼需要相機權限",
+    "scanQrInstructions": "在你的 Tracearr 儀表板中打開設定 → 手機應用程式，並掃描 QR 碼",
+    "urlPlaceholder": "",
+    "tokenPlaceholder": "",
+    "missingToken": "",
+    "pleaseEnterToken": ""
   },
   "errors": {
-    "componentStack": "Component Stack:",
-    "connectionLost": "Connection lost",
-    "errorDetails": "Error Details:",
-    "failedToLoadSession": "Failed to load session",
-    "invalidOrExpiredToken": "配对令牌无效或过期。",
-    "invalidPairingRequest": "无效配对请求。请检查您的令牌。",
-    "invalidQrCode": "无效的二维码",
-    "invalidQrCodeFormat": "无效的二维码格式。请生成一个新的代码。",
-    "invalidQrCodeMissingData": "无效的二维码：缺少配对数据",
-    "invalidQrCodeMissingToken": "无效的二维码：缺少配对令牌",
-    "invalidQrCodeMissingUrl": "无效的二维码：缺少服务器 URL",
-    "invalidServerUrlInQr": "QR码中无效的服务器 URL",
-    "invalidUrl": "地址无效",
-    "missingFields": "缺失必填字段",
-    "pairingFailed": "配对失败",
-    "pleaseEnterBothFields": "请同时输入服务器 URL 和令牌",
-    "pleaseEnterValidUrl": "请输入一个有效的服务器 URL",
-    "serverUrlMustStartWith": "服务器 URL 必须以 http:// 或 https:// 开头",
-    "tooManyPairingAttempts": "尝试配对太多。请等待几分钟。",
-    "unableToPair": "Unable to pair with server"
-  },
-  "history": {
-    "adjustFilters": "Try adjusting your filters",
-    "historyWillAppear": "Session history will appear here once users start streaming",
-    "noHistoryFound": "No History Found"
-  },
-  "navigation": {
-    "home": "Home",
-    "navigation": "导航栏",
-    "selectServer": "选择服务器",
-    "server": "服务器"
-  },
-  "notifications": {
-    "allViolationTypes": "All Violation Types",
-    "criticalOverrideDescription": "High-severity violations still notify during quiet hours",
-    "endTime": "End Time",
-    "exceededStreamLimit": "User exceeded stream limit",
-    "failedToSendTest": "发送测试通知失败",
-    "loadingPreferences": "正在加载首选项……",
-    "newDeviceDetected": "New device detected for user",
-    "newPlaybackBegan": "New playback began",
-    "notifyForEveryRule": "Notify for every rule type",
-    "playbackEnded": "Playback ended",
-    "quietHoursDescription": "Pause non-critical notifications during set hours",
-    "rateLimitDescription": "Rate limits prevent notification spam. Current limits: {{perMinute}}/min, {{perHour}}/hour.",
-    "receiveAlerts": "Receive alerts on this device",
-    "ruleViolationTriggered": "Rule violation triggered",
-    "sendTestNotification": "Send Test Notification",
-    "serverBackOnline": "Media server back online",
-    "serverUnreachable": "Media server unreachable",
-    "severityDescription": "Only notify for violations at or above this severity level",
-    "startTime": "Start Time",
-    "testDescription": "Verify that push notifications are working correctly",
-    "testFailed": "测试失败",
-    "testSent": "测试发送",
-    "timezoneLabel": "Timezone: {{timezone}}",
-    "to": "to",
-    "trustScoreDegraded": "User trust score degraded",
-    "unableToLoadPreferences": "无法加载首选项"
-  },
-  "pair": {
-    "accessToken": "访问口令",
-    "addServer": "添加服务器",
-    "cameraPermissionRequired": "请授予相机权限以扫描二维码",
-    "connectToServer": "连接到服务器",
-    "enterManually": "手动输入 URL 和令牌",
-    "enterServerDetails": "输入您的 Tracearr 服务器 URL 和移动访问令牌",
-    "missingToken": "Missing Token",
-    "pleaseEnterToken": "Please enter your access token",
-    "scanQrCodeInstead": "改为扫描二维码",
-    "scanQrInstructions": "在您的 Tracearr 仪表盘中打开设置 -> 移动应用程序并扫描二维码",
-    "serverUrl": "服务器 URL",
-    "tokenPlaceholder": "trr_mob_...",
-    "urlPlaceholder": "https://tracearr.example.com",
-    "welcome": "欢迎使用 Tracearr"
-  },
-  "reconnected": "Reconnected",
-  "resources": {
-    "cpu": "處理器",
-    "ram": "内存"
-  },
-  "serverSelector": {
-    "selectServers": "Select Servers",
-    "servers": "Servers",
-    "serversSelected": "{{selected}} of {{total}} servers selected"
-  },
-  "session": {
-    "failedToTerminate": "Failed to Terminate",
-    "sessionStopped": "The playback session has been stopped.",
-    "streamTerminated": "Stream Terminated"
+    "missingFields": "缺少欄位",
+    "pleaseEnterBothFields": "請輸入伺服器網址和憑證",
+    "invalidUrl": "無效的網址",
+    "serverUrlMustStartWith": "伺服器網址必須以 http:// 或 https:// 開頭",
+    "pleaseEnterValidUrl": "請輸入有效的伺服器網址",
+    "pairingFailed": "配對失敗",
+    "unableToPair": "",
+    "invalidQrCode": "無效的 QR 碼",
+    "invalidQrCodeMissingData": "無效的 QR 碼: 缺少配對資料",
+    "invalidQrCodeFormat": "無效的 QR 碼格式，請生成新的 QR 碼。",
+    "invalidQrCodeMissingUrl": "無效的 QR 碼: 缺少伺服器網址",
+    "invalidQrCodeMissingToken": "無效的 QR 碼: 缺少配對憑證",
+    "invalidServerUrlInQr": "QR 碼中具有無效的伺服器網址",
+    "tooManyPairingAttempts": "配對嘗試次數過多，請稍候幾分鐘。",
+    "invalidOrExpiredToken": "無效或過期的配對憑證。",
+    "invalidPairingRequest": "無效的配對請求，請確認你的憑證。",
+    "errorDetails": "",
+    "componentStack": "",
+    "connectionLost": "",
+    "failedToLoadSession": ""
   },
   "settings": {
-    "account": "帐户",
-    "build": "Build {{build}}",
-    "community": "社区",
-    "configureNotifications": "Configure push notification preferences",
-    "currentlyConnected": "当前连接到 {{serverName}}",
-    "disconnect": "Disconnect",
-    "disconnectConfirm": "您确定要断开与“{{serverName}}”的连接吗？您需要重新配对才能使用该应用。",
-    "disconnectConfirmGeneric": "您确定要断开连接？您需要再次配对才能使用应用程序。",
-    "disconnectServer": "断开服务器",
-    "discord": "Discord",
-    "docs": "Docs",
-    "github": "GitHub",
-    "joinCommunity": "加入社区",
-    "language": "Language",
-    "notifications": "Notifications",
-    "preferences": "首选项",
-    "readDocs": "Read the documentation",
-    "sponsor": "Sponsor",
-    "supportDevelopment": "Support development",
-    "version": "Version {{version}}",
-    "viewSourceCode": "查看源代码",
-    "visitWebsite": "Visit tracearr.com",
-    "website": "Website"
+    "preferences": "偏好設定",
+    "notifications": "",
+    "configureNotifications": "",
+    "language": "",
+    "community": "社群",
+    "discord": "",
+    "joinCommunity": "加入社群",
+    "docs": "",
+    "readDocs": "",
+    "website": "",
+    "visitWebsite": "",
+    "github": "",
+    "viewSourceCode": "檢視原始碼",
+    "sponsor": "",
+    "supportDevelopment": "",
+    "account": "帳號",
+    "disconnect": "",
+    "disconnectServer": "斷開伺服器",
+    "disconnectConfirm": "你確定要與 {{serverName}} 斷開連線嗎？你需要重新配對才能使用這個應用程式。",
+    "disconnectConfirmGeneric": "你確定要斷開連線嗎？你需要重新配對才能使用這個應用程式。",
+    "currentlyConnected": "目前連接到 {{serverName}}",
+    "version": "",
+    "build": ""
   },
-  "unauthenticated": {
-    "accessRevoked": "Your access to {{serverName}} was revoked. Ask the server owner for a new pairing code.",
-    "connectionLost": "Connection Lost",
-    "scanQrCode": "Scan QR Code"
+  "navigation": {
+    "home": "",
+    "selectServer": "選擇伺服器",
+    "server": "伺服器",
+    "navigation": "導覽"
+  },
+  "resources": {
+    "cpu": "處理器",
+    "ram": "記憶體"
+  },
+  "notifications": {
+    "testSent": "已發送測試",
+    "testFailed": "測試失敗",
+    "failedToSendTest": "發送測試通知失敗",
+    "loadingPreferences": "載入偏好設定中……",
+    "unableToLoadPreferences": "無法載入偏好設定",
+    "receiveAlerts": "",
+    "ruleViolationTriggered": "",
+    "newPlaybackBegan": "",
+    "playbackEnded": "",
+    "exceededStreamLimit": "",
+    "newDeviceDetected": "",
+    "trustScoreDegraded": "",
+    "serverUnreachable": "",
+    "serverBackOnline": "",
+    "allViolationTypes": "",
+    "notifyForEveryRule": "",
+    "severityDescription": "",
+    "quietHoursDescription": "",
+    "startTime": "",
+    "endTime": "",
+    "to": "",
+    "timezoneLabel": "",
+    "criticalOverrideDescription": "",
+    "rateLimitDescription": "",
+    "sendTestNotification": "",
+    "testDescription": ""
+  },
+  "dashboard": {
+    "today": "",
+    "hrs": ""
+  },
+  "session": {
+    "streamTerminated": "",
+    "sessionStopped": "",
+    "failedToTerminate": ""
   },
   "userDetail": {
-    "moreDevices": "+{{count}} more devices",
-    "moreLocations": "+{{count}} more locations",
-    "noDevicesRecorded": "No devices recorded",
-    "noLocationsRecorded": "No locations recorded",
-    "noTerminations": "No stream terminations",
-    "noViolations": "No violations",
-    "trustHigh": "High",
-    "trustLow": "Low",
-    "trustMedium": "Medium",
-    "userMayBeRemoved": "This user may have been removed."
-  },
-  "users": {
-    "noUsers": "No Users",
-    "noUsersMatch": "No users match \"{{query}}\"",
-    "owner": "Owner",
-    "usersWillAppear": "Users will appear here after syncing with your media server"
+    "userMayBeRemoved": "",
+    "noLocationsRecorded": "",
+    "noDevicesRecorded": "",
+    "moreLocations": "",
+    "moreDevices": "",
+    "noViolations": "",
+    "noTerminations": "",
+    "trustLow": "",
+    "trustMedium": "",
+    "trustHigh": ""
   },
   "violation": {
-    "customRule": "Custom Rule",
-    "ips": "IPs",
-    "streamComparison": "Stream Comparison",
-    "violationNotFoundDesc": "This violation may have been dismissed or is no longer available."
+    "violationNotFoundDesc": "",
+    "customRule": "",
+    "streamComparison": "",
+    "ips": ""
+  },
+  "alerts": {
+    "done": "",
+    "clearFilters": ""
+  },
+  "history": {
+    "noHistoryFound": "",
+    "adjustFilters": "",
+    "historyWillAppear": ""
+  },
+  "users": {
+    "owner": "",
+    "noUsers": "",
+    "usersWillAppear": "",
+    "noUsersMatch": ""
+  },
+  "activity": {
+    "playsOverTime": "",
+    "concurrentStreams": "",
+    "platforms": "",
+    "playbackQuality": ""
+  },
+  "unauthenticated": {
+    "connectionLost": "",
+    "accessRevoked": "",
+    "scanQrCode": ""
+  },
+  "serverSelector": {
+    "servers": "",
+    "selectServers": "",
+    "serversSelected": "",
+    "allServers": ""
+  },
+  "reconnected": "",
+  "actionsExecuted": "",
+  "serverScope": {
+    "single": ""
+  },
+  "a11y": {
+    "selectServer": "",
+    "alerts": "",
+    "alertsCount": "",
+    "settings": "",
+    "trustScore": ""
+  },
+  "map": {
+    "noData": "",
+    "unavailable": ""
   }
 }

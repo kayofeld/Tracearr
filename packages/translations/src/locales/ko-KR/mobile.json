@@ -1,163 +1,178 @@
 {
-  "actionsExecuted": "Actions Executed",
-  "activity": {
-    "concurrentStreams": "Concurrent Streams",
-    "platforms": "Platforms",
-    "playbackQuality": "Playback Quality",
-    "playsOverTime": "Plays Over Time"
-  },
-  "alerts": {
-    "clearFilters": "Clear Filters",
-    "done": "Done"
-  },
-  "dashboard": {
-    "hrs": "hrs",
-    "today": "TODAY"
+  "pair": {
+    "welcome": "Tracearr에 오신 것을 환영합니다",
+    "addServer": "서버 추가",
+    "connectToServer": "서버에 연결",
+    "enterServerDetails": "Tracearr 서버 URL과 모바일 접근 토큰을 입력하세요",
+    "serverUrl": "서버 URL",
+    "accessToken": "접근 토큰",
+    "scanQrCodeInstead": "대신 QR 코드 스캔",
+    "enterManually": "URL과 토큰 직접 입력",
+    "cameraPermissionRequired": "QR 코드를 스캔하려면 카메라 권한이 필요합니다",
+    "scanQrInstructions": "Tracearr 대시보드에서 설정 > 모바일 앱을 열고 QR 코드를 스캔하세요",
+    "urlPlaceholder": "",
+    "tokenPlaceholder": "",
+    "missingToken": "토큰 없음",
+    "pleaseEnterToken": "접근 토큰을 입력하세요"
   },
   "errors": {
-    "componentStack": "Component Stack:",
-    "connectionLost": "Connection lost",
-    "errorDetails": "Error Details:",
-    "failedToLoadSession": "Failed to load session",
-    "invalidOrExpiredToken": "Invalid or expired pairing token.",
-    "invalidPairingRequest": "Invalid pairing request. Check your token.",
-    "invalidQrCode": "Invalid QR code",
-    "invalidQrCodeFormat": "Invalid QR code format. Please generate a new code.",
-    "invalidQrCodeMissingData": "Invalid QR code: missing pairing data",
-    "invalidQrCodeMissingToken": "Invalid QR code: missing pairing token",
-    "invalidQrCodeMissingUrl": "Invalid QR code: missing server URL",
-    "invalidServerUrlInQr": "Invalid server URL in QR code",
-    "invalidUrl": "Invalid URL",
-    "missingFields": "Missing Fields",
-    "pairingFailed": "Pairing Failed",
-    "pleaseEnterBothFields": "Please enter both server URL and token",
-    "pleaseEnterValidUrl": "Please enter a valid server URL",
-    "serverUrlMustStartWith": "Server URL must start with http:// or https://",
-    "tooManyPairingAttempts": "Too many pairing attempts. Please wait a few minutes.",
-    "unableToPair": "Unable to pair with server"
-  },
-  "history": {
-    "adjustFilters": "Try adjusting your filters",
-    "historyWillAppear": "Session history will appear here once users start streaming",
-    "noHistoryFound": "No History Found"
-  },
-  "navigation": {
-    "home": "Home",
-    "navigation": "Navigation",
-    "selectServer": "Select Server",
-    "server": "Server"
-  },
-  "notifications": {
-    "allViolationTypes": "All Violation Types",
-    "criticalOverrideDescription": "High-severity violations still notify during quiet hours",
-    "endTime": "End Time",
-    "exceededStreamLimit": "User exceeded stream limit",
-    "failedToSendTest": "Failed to send test notification",
-    "loadingPreferences": "Loading preferences...",
-    "newDeviceDetected": "New device detected for user",
-    "newPlaybackBegan": "New playback began",
-    "notifyForEveryRule": "Notify for every rule type",
-    "playbackEnded": "Playback ended",
-    "quietHoursDescription": "Pause non-critical notifications during set hours",
-    "rateLimitDescription": "Rate limits prevent notification spam. Current limits: {{perMinute}}/min, {{perHour}}/hour.",
-    "receiveAlerts": "Receive alerts on this device",
-    "ruleViolationTriggered": "Rule violation triggered",
-    "sendTestNotification": "Send Test Notification",
-    "serverBackOnline": "Media server back online",
-    "serverUnreachable": "Media server unreachable",
-    "severityDescription": "Only notify for violations at or above this severity level",
-    "startTime": "Start Time",
-    "testDescription": "Verify that push notifications are working correctly",
-    "testFailed": "Test Failed",
-    "testSent": "Test Sent",
-    "timezoneLabel": "Timezone: {{timezone}}",
-    "to": "to",
-    "trustScoreDegraded": "User trust score degraded",
-    "unableToLoadPreferences": "Unable to Load Preferences"
-  },
-  "pair": {
-    "accessToken": "Access Token",
-    "addServer": "Add Server",
-    "cameraPermissionRequired": "Camera permission is required to scan QR codes",
-    "connectToServer": "Connect to Server",
-    "enterManually": "Enter URL and Token Manually",
-    "enterServerDetails": "Enter your Tracearr server URL and mobile access token",
-    "missingToken": "Missing Token",
-    "pleaseEnterToken": "Please enter your access token",
-    "scanQrCodeInstead": "Scan QR Code Instead",
-    "scanQrInstructions": "Open Settings → Mobile App in your Tracearr dashboard and scan the QR code",
-    "serverUrl": "Server URL",
-    "tokenPlaceholder": "trr_mob_...",
-    "urlPlaceholder": "https://tracearr.example.com",
-    "welcome": "Welcome to Tracearr"
-  },
-  "reconnected": "Reconnected",
-  "resources": {
-    "cpu": "CPU",
-    "ram": "RAM"
-  },
-  "serverSelector": {
-    "selectServers": "Select Servers",
-    "servers": "Servers",
-    "serversSelected": "{{selected}} of {{total}} servers selected"
-  },
-  "session": {
-    "failedToTerminate": "Failed to Terminate",
-    "sessionStopped": "The playback session has been stopped.",
-    "streamTerminated": "Stream Terminated"
+    "missingFields": "누락된 항목",
+    "pleaseEnterBothFields": "서버 URL과 토큰을 모두 입력하세요",
+    "invalidUrl": "올바르지 않은 URL입니다",
+    "serverUrlMustStartWith": "서버 URL은 http:// 또는 https://로 시작해야 합니다",
+    "pleaseEnterValidUrl": "올바른 서버 URL을 입력하세요",
+    "pairingFailed": "페어링 실패",
+    "unableToPair": "서버와 페어링할 수 없습니다",
+    "invalidQrCode": "올바르지 않은 QR 코드입니다",
+    "invalidQrCodeMissingData": "QR 코드에 페어링 데이터가 없습니다",
+    "invalidQrCodeFormat": "QR 코드 형식이 올바르지 않습니다. 새 코드를 생성하세요.",
+    "invalidQrCodeMissingUrl": "QR 코드에 서버 URL이 없습니다",
+    "invalidQrCodeMissingToken": "QR 코드에 페어링 토큰이 없습니다",
+    "invalidServerUrlInQr": "QR 코드의 서버 URL이 올바르지 않습니다",
+    "tooManyPairingAttempts": "페어링 시도가 너무 많습니다. 몇 분 후 다시 시도하세요.",
+    "invalidOrExpiredToken": "페어링 토큰이 올바르지 않거나 만료되었습니다.",
+    "invalidPairingRequest": "페어링 요청이 올바르지 않습니다. 토큰을 확인하세요.",
+    "errorDetails": "오류 상세:",
+    "componentStack": "컴포넌트 스택:",
+    "connectionLost": "연결이 끊겼습니다",
+    "failedToLoadSession": "세션을 불러오지 못했습니다"
   },
   "settings": {
-    "account": "Account",
-    "build": "Build {{build}}",
-    "community": "Community",
-    "configureNotifications": "Configure push notification preferences",
-    "currentlyConnected": "Currently connected to {{serverName}}",
-    "disconnect": "Disconnect",
-    "disconnectConfirm": "Are you sure you want to disconnect from \"{{serverName}}\"? You will need to pair again to use the app.",
-    "disconnectConfirmGeneric": "Are you sure you want to disconnect? You will need to pair again to use the app.",
-    "disconnectServer": "Disconnect Server",
-    "discord": "Discord",
-    "docs": "Docs",
-    "github": "GitHub",
-    "joinCommunity": "Join the community",
-    "language": "Language",
-    "notifications": "Notifications",
-    "preferences": "Preferences",
-    "readDocs": "Read the documentation",
-    "sponsor": "Sponsor",
-    "supportDevelopment": "Support development",
-    "version": "Version {{version}}",
-    "viewSourceCode": "View source code",
-    "visitWebsite": "Visit tracearr.com",
-    "website": "Website"
+    "preferences": "환경설정",
+    "notifications": "알림",
+    "configureNotifications": "푸시 알림 환경설정 구성",
+    "language": "언어",
+    "community": "커뮤니티",
+    "discord": "",
+    "joinCommunity": "커뮤니티 참여",
+    "docs": "문서",
+    "readDocs": "문서 보기",
+    "website": "웹사이트",
+    "visitWebsite": "tracearr.com 방문",
+    "github": "",
+    "viewSourceCode": "소스 코드 보기",
+    "sponsor": "후원",
+    "supportDevelopment": "개발 지원",
+    "account": "계정",
+    "disconnect": "연결 해제",
+    "disconnectServer": "서버 연결 해제",
+    "disconnectConfirm": "\"{{serverName}}\"에서 연결을 해제할까요? 앱을 사용하려면 다시 페어링해야 합니다.",
+    "disconnectConfirmGeneric": "연결을 해제할까요? 앱을 사용하려면 다시 페어링해야 합니다.",
+    "currentlyConnected": "현재 {{serverName}}에 연결됨",
+    "version": "버전 {{version}}",
+    "build": "빌드 {{build}}"
   },
-  "unauthenticated": {
-    "accessRevoked": "Your access to {{serverName}} was revoked. Ask the server owner for a new pairing code.",
-    "connectionLost": "Connection Lost",
-    "scanQrCode": "Scan QR Code"
+  "navigation": {
+    "home": "홈",
+    "selectServer": "서버 선택",
+    "server": "서버",
+    "navigation": "탐색"
+  },
+  "resources": {
+    "cpu": "",
+    "ram": ""
+  },
+  "notifications": {
+    "testSent": "테스트 전송됨",
+    "testFailed": "테스트 실패",
+    "failedToSendTest": "테스트 알림을 보내지 못했습니다",
+    "loadingPreferences": "환경설정을 불러오는 중...",
+    "unableToLoadPreferences": "환경설정을 불러올 수 없습니다",
+    "receiveAlerts": "이 기기에서 알림 받기",
+    "ruleViolationTriggered": "규칙 위반이 발생했습니다",
+    "newPlaybackBegan": "새 재생이 시작되었습니다",
+    "playbackEnded": "재생이 종료되었습니다",
+    "exceededStreamLimit": "사용자가 스트림 제한을 초과했습니다",
+    "newDeviceDetected": "사용자에게 새 기기가 감지되었습니다",
+    "trustScoreDegraded": "사용자 신뢰 점수가 낮아졌습니다",
+    "serverUnreachable": "미디어 서버에 연결할 수 없습니다",
+    "serverBackOnline": "미디어 서버가 다시 온라인입니다",
+    "allViolationTypes": "모든 위반 유형",
+    "notifyForEveryRule": "모든 규칙 유형에 대해 알림 받기",
+    "severityDescription": "이 심각도 이상인 위반만 알림으로 받습니다",
+    "quietHoursDescription": "설정한 시간 동안 중요하지 않은 알림을 일시 중지합니다",
+    "startTime": "시작 시간",
+    "endTime": "종료 시간",
+    "to": "~",
+    "timezoneLabel": "시간대: {{timezone}}",
+    "criticalOverrideDescription": "심각도가 높은 위반은 방해 금지 시간에도 알림을 보냅니다",
+    "rateLimitDescription": "전송 제한은 알림 과다 발송을 방지합니다. 현재 제한: 분당 {{perMinute}}개, 시간당 {{perHour}}개.",
+    "sendTestNotification": "테스트 알림 보내기",
+    "testDescription": "푸시 알림이 정상적으로 작동하는지 확인합니다"
+  },
+  "dashboard": {
+    "today": "오늘",
+    "hrs": "시간"
+  },
+  "session": {
+    "streamTerminated": "스트림 종료됨",
+    "sessionStopped": "재생 세션이 중지되었습니다.",
+    "failedToTerminate": "종료 실패"
   },
   "userDetail": {
-    "moreDevices": "+{{count}} more devices",
-    "moreLocations": "+{{count}} more locations",
-    "noDevicesRecorded": "No devices recorded",
-    "noLocationsRecorded": "No locations recorded",
-    "noTerminations": "No stream terminations",
-    "noViolations": "No violations",
-    "trustHigh": "High",
-    "trustLow": "Low",
-    "trustMedium": "Medium",
-    "userMayBeRemoved": "This user may have been removed."
-  },
-  "users": {
-    "noUsers": "No Users",
-    "noUsersMatch": "No users match \"{{query}}\"",
-    "owner": "Owner",
-    "usersWillAppear": "Users will appear here after syncing with your media server"
+    "userMayBeRemoved": "이 사용자는 삭제되었을 수 있습니다.",
+    "noLocationsRecorded": "위치 기록이 없습니다",
+    "noDevicesRecorded": "기기 기록이 없습니다",
+    "moreLocations": "위치 {{count}}곳 더 보기",
+    "moreDevices": "기기 {{count}}대 더 보기",
+    "noViolations": "위반이 없습니다",
+    "noTerminations": "스트림 종료 기록이 없습니다",
+    "trustLow": "낮음",
+    "trustMedium": "보통",
+    "trustHigh": "높음"
   },
   "violation": {
-    "customRule": "Custom Rule",
-    "ips": "IPs",
-    "streamComparison": "Stream Comparison",
-    "violationNotFoundDesc": "This violation may have been dismissed or is no longer available."
+    "violationNotFoundDesc": "이 위반은 해제되었거나 더 이상 사용할 수 없을 수 있습니다.",
+    "customRule": "사용자 지정 규칙",
+    "streamComparison": "스트림 비교",
+    "ips": "IP"
+  },
+  "alerts": {
+    "done": "완료",
+    "clearFilters": "필터 지우기"
+  },
+  "history": {
+    "noHistoryFound": "기록이 없습니다",
+    "adjustFilters": "필터를 조정해 보세요",
+    "historyWillAppear": "사용자가 스트리밍을 시작하면 세션 기록이 여기에 표시됩니다"
+  },
+  "users": {
+    "owner": "소유자",
+    "noUsers": "사용자 없음",
+    "usersWillAppear": "미디어 서버와 동기화하면 사용자가 여기에 표시됩니다",
+    "noUsersMatch": "\"{{query}}\"와 일치하는 사용자가 없습니다"
+  },
+  "activity": {
+    "playsOverTime": "시간별 재생",
+    "concurrentStreams": "동시 스트림",
+    "platforms": "플랫폼",
+    "playbackQuality": "재생 품질"
+  },
+  "unauthenticated": {
+    "connectionLost": "연결 끊김",
+    "accessRevoked": "{{serverName}} 접근 권한이 취소되었습니다. 서버 소유자에게 새 페어링 코드를 요청하세요.",
+    "scanQrCode": "QR 코드 스캔"
+  },
+  "serverSelector": {
+    "servers": "서버",
+    "selectServers": "서버 선택",
+    "serversSelected": "전체 {{total}}대 중 {{selected}}대 선택됨",
+    "allServers": ""
+  },
+  "reconnected": "다시 연결됨",
+  "actionsExecuted": "실행된 작업",
+  "serverScope": {
+    "single": ""
+  },
+  "a11y": {
+    "selectServer": "",
+    "alerts": "",
+    "alertsCount": "",
+    "settings": "",
+    "trustScore": ""
+  },
+  "map": {
+    "noData": "",
+    "unavailable": ""
   }
 }

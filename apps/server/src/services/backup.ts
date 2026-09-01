@@ -30,9 +30,14 @@ import { Open } from 'unzipper';
 import type { BackupListItem, BackupMetadata, BackupType } from '@tracearr/shared';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { sessions, users, servers, rules, libraryItems } from '../db/schema.js';
+import { sessions, users, servers, automations, libraryItems } from '../db/schema.js';
 
-import { getCurrentVersion, getCurrentCommit, getCurrentTag } from '../jobs/versionCheckQueue.js';
+import {
+  getCurrentVersion,
+  getCurrentCommit,
+  getCurrentTag,
+  compareVersions,
+} from '../jobs/versionCheckQueue.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -296,13 +301,13 @@ async function buildMetadata(pgEnv: Record<string, string>): Promise<BackupMetad
   const toolkitVersion = toolkitResult.stdout.trim() || null;
 
   // Query database size and record counts
-  const [dbSizeResult, sessionCount, userCount, serverCount, ruleCount, libraryItemCount] =
+  const [dbSizeResult, sessionCount, userCount, serverCount, automationCount, libraryItemCount] =
     await Promise.all([
       db.execute<{ size: string }>(sql`SELECT pg_database_size(current_database()) AS size`),
       db.select({ count: sql<number>`count(*)::int` }).from(sessions),
       db.select({ count: sql<number>`count(*)::int` }).from(users),
       db.select({ count: sql<number>`count(*)::int` }).from(servers),
-      db.select({ count: sql<number>`count(*)::int` }).from(rules),
+      db.select({ count: sql<number>`count(*)::int` }).from(automations),
       db.select({ count: sql<number>`count(*)::int` }).from(libraryItems),
     ]);
   const databaseSize = Number(dbSizeResult.rows[0]?.size ?? 0);
@@ -330,7 +335,7 @@ async function buildMetadata(pgEnv: Record<string, string>): Promise<BackupMetad
       sessions: sessionCount[0]?.count ?? 0,
       users: userCount[0]?.count ?? 0,
       servers: serverCount[0]?.count ?? 0,
-      rules: ruleCount[0]?.count ?? 0,
+      automations: automationCount[0]?.count ?? 0,
       libraryItems: libraryItemCount[0]?.count ?? 0,
     },
   };
@@ -353,6 +358,12 @@ const MAX_UNCOMPRESSED_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB sanity limit
  * Validate a backup zip file. Checks structure, entry names, sizes,
  * and metadata format without extracting to disk.
  */
+/** Digit-splitting broke on v-prefixed and prerelease tags (v2.0.0-beta.1 read
+ * as [NaN, 0, NaN]), so this must go through the real semver comparator. */
+export function backupVersionIsNewer(backupVersion: string, currentVersion: string): boolean {
+  return compareVersions(backupVersion, currentVersion) > 0;
+}
+
 export async function validateBackup(zipPath: string): Promise<ValidationResult> {
   const errors: string[] = [];
 
@@ -449,20 +460,11 @@ export async function validateBackup(zipPath: string): Promise<ValidationResult>
   }
 
   // Version check: backup version must be <= current
-  if (metadata.app?.version) {
-    const currentParts = getCurrentVersion().split('.').map(Number);
-    const backupParts = metadata.app.version.split('.').map(Number);
-
-    for (let i = 0; i < 3; i++) {
-      if ((backupParts[i] ?? 0) > (currentParts[i] ?? 0)) {
-        errors.push(
-          `Backup version ${metadata.app.version} is newer than current version ${getCurrentVersion()}. ` +
-            `Update Tracearr before restoring this backup.`
-        );
-        break;
-      }
-      if ((backupParts[i] ?? 0) < (currentParts[i] ?? 0)) break;
-    }
+  if (metadata.app?.version && backupVersionIsNewer(metadata.app.version, getCurrentVersion())) {
+    errors.push(
+      `Backup version ${metadata.app.version} is newer than current version ${getCurrentVersion()}. ` +
+        `Update Tracearr before restoring this backup.`
+    );
   }
 
   return {

@@ -10,6 +10,7 @@ import { db } from '../db/client.js';
 import { servers, serverUsers } from '../db/schema.js';
 import { createMediaServerClient, PlexClient, type MediaUser } from './mediaServer/index.js';
 import { syncUserFromMediaServer, type SyncUserOptions } from './userService.js';
+import { ensureServerIdentifier } from './serverIdentity.js';
 
 export interface SyncResult {
   usersAdded: number;
@@ -256,6 +257,10 @@ export async function syncServer(
   const token = server.token;
   const serverUrl = server.url.replace(/\/$/, '');
 
+  await ensureServerIdentifier(server, {
+    debug: (obj, msg) => console.log(`[Sync] ${msg}`, obj),
+  });
+
   // Sync users
   if (options.syncUsers) {
     if (server.type === 'plex') {
@@ -294,22 +299,4 @@ export async function syncServer(
   }
 
   return result;
-}
-
-/**
- * Sync all configured servers
- */
-export async function syncAllServers(
-  options: SyncOptions = { syncUsers: true, syncLibraries: true }
-): Promise<Map<string, SyncResult>> {
-  const results = new Map<string, SyncResult>();
-
-  const allServers = await db.select().from(servers);
-
-  for (const server of allServers) {
-    const result = await syncServer(server.id, options);
-    results.set(server.id, result);
-  }
-
-  return results;
 }

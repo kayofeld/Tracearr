@@ -11,12 +11,20 @@
  * - Sync operations handle auto-linking by email
  */
 
-import { eq, and, sql, inArray } from 'drizzle-orm';
+import { eq, and, sql, inArray, isNull, type SQL } from 'drizzle-orm';
 import type { MediaUser } from './mediaServer/index.js';
 import type { UserRole } from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { users, serverUsers, servers, sessions } from '../db/schema.js';
+import {
+  users,
+  serverUsers,
+  serverUserExternalAliases,
+  servers,
+  sessions,
+  automationRuns,
+} from '../db/schema.js';
 import { NotFoundError } from '../utils/errors.js';
+import { violationAliasConditions } from './automations/aliasFilter.js';
 
 // Type for user identity table row
 export type User = typeof users.$inferSelect;
@@ -38,7 +46,6 @@ export interface ServerUserWithDetails {
   thumbUrl: string | null;
   isServerAdmin: boolean;
   trustScore: number;
-  sessionCount: number;
   createdAt: Date;
   updatedAt: Date;
   // User identity info
@@ -78,7 +85,6 @@ export interface UserWithStats {
     username: string;
     thumbUrl: string | null;
     trustScore: number;
-    sessionCount: number;
   }>;
   stats: {
     totalSessions: number;
@@ -269,6 +275,28 @@ export async function getServerUserByExternalId(
 }
 
 /**
+ * Whether a same-server merge folded this external id into another account.
+ *
+ * Deliberately separate from getServerUserByExternalId: sync uses that one to
+ * decide what to write, and resolving an alias there would overwrite the
+ * surviving account's username, email and plex linkage with the absorbed
+ * account's whenever both still exist on the media server.
+ */
+export async function isAliasedExternalId(serverId: string, externalId: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: serverUserExternalAliases.id })
+    .from(serverUserExternalAliases)
+    .where(
+      and(
+        eq(serverUserExternalAliases.serverId, serverId),
+        eq(serverUserExternalAliases.externalId, externalId)
+      )
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
  * Get server user by server ID and Plex account ID (plex.tv ID)
  * Used for Plex sync which uses plex.tv IDs instead of local PMS IDs
  */
@@ -315,7 +343,6 @@ export async function getServerUserWithDetails(id: string): Promise<ServerUserWi
       thumbUrl: serverUsers.thumbUrl,
       isServerAdmin: serverUsers.isServerAdmin,
       trustScore: serverUsers.trustScore,
-      sessionCount: serverUsers.sessionCount,
       createdAt: serverUsers.createdAt,
       updatedAt: serverUsers.updatedAt,
       userName: users.name,
@@ -345,7 +372,6 @@ export async function getServerUserWithDetails(id: string): Promise<ServerUserWi
     thumbUrl: row.thumbUrl,
     isServerAdmin: row.isServerAdmin,
     trustScore: row.trustScore,
-    sessionCount: row.sessionCount,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     user: {
@@ -478,46 +504,62 @@ export async function updateServerUser(
   return serverUser;
 }
 
-/**
- * Update server user trust score
- */
-export async function updateServerUserTrustScore(
-  serverUserId: string,
-  trustScore: number
-): Promise<ServerUser> {
-  // The identity rollup recompute runs in the same transaction as the trust
-  // write so the two never commit out of sync with each other.
-  return db.transaction(async (tx) => {
-    const rows = await tx
-      .update(serverUsers)
-      .set({
-        trustScore,
-        updatedAt: new Date(),
-      })
-      .where(eq(serverUsers.id, serverUserId))
-      .returning();
+/** How a trust write names its new value; `adjust` is a delta, the other two are absolute. */
+export type TrustChange =
+  { mode: 'adjust'; amount: number } | { mode: 'set'; value: number } | { mode: 'reset' };
 
-    const serverUser = rows[0];
-    if (!serverUser) {
-      throw new ServerUserNotFoundError(serverUserId);
-    }
+/** One account's score before and after a write, read off the row the write returned. */
+export interface TrustMove {
+  previous: number;
+  serverUser: ServerUser;
+}
 
-    await recalculateAggregateTrustScore(serverUser.userId, tx);
+/** Kept for the callers that read the whole row back, which is every one of them. */
+export type TrustChangeResult = TrustMove;
 
-    return serverUser;
-  });
+const TRUST_BASELINE = 100;
+
+/** The clamped expression each mode writes; the clamp is SQL so a delta cannot overshoot. */
+export function trustValueSql(change: TrustChange): SQL {
+  if (change.mode === 'adjust') {
+    return sql`LEAST(100, GREATEST(0, ${serverUsers.trustScore} + ${change.amount}))`;
+  }
+  return sql`${change.mode === 'set' ? Math.min(100, Math.max(0, change.value)) : TRUST_BASELINE}`;
 }
 
 /**
- * Increment server user session count
+ * Every trust write goes through this statement: the self-join returns both sides at once, so
+ * nothing can read a value another write already moved. The caller owns the transaction and
+ * announces the moves after it commits.
  */
-export async function incrementServerUserSessionCount(serverUserId: string): Promise<void> {
-  await db
+export async function moveTrust(executor: Tx, next: SQL, match: SQL): Promise<TrustMove[]> {
+  const rows = await executor
     .update(serverUsers)
-    .set({
-      sessionCount: sql`${serverUsers.sessionCount} + 1`,
-    })
-    .where(eq(serverUsers.id, serverUserId));
+    .set({ trustScore: next, updatedAt: new Date() })
+    .from(sql`${serverUsers} AS before`)
+    .where(sql`before.id = ${serverUsers.id} AND ${match}`)
+    // Aliased: an unaliased before.trust_score would collide with the row's own column.
+    .returning({
+      previous: sql<number>`before.trust_score`.as('previous_trust'),
+      row: serverUsers,
+    });
+  return rows.map((row) => ({ previous: row.previous, serverUser: row.row }));
+}
+
+/**
+ * One account, in a transaction of its own, with the identity rollup committing alongside it.
+ * Callers already holding a transaction use `moveTrust` directly.
+ */
+export async function applyTrustChange(
+  serverUserId: string,
+  change: TrustChange
+): Promise<TrustMove | null> {
+  return db.transaction(async (tx) => {
+    const [moved] = await moveTrust(tx, trustValueSql(change), eq(serverUsers.id, serverUserId));
+    if (!moved) return null;
+    await recomputeIdentityAggregates(moved.serverUser.userId, tx);
+    return moved;
+  });
 }
 
 // ============================================================================
@@ -527,6 +569,18 @@ export async function incrementServerUserSessionCount(serverUserId: string): Pro
 export interface SyncUserOptions {
   /** Set to true when syncing from Plex (uses plex.tv IDs) */
   isPlexServer?: boolean;
+}
+
+/**
+ * Server-reported activity only ever advances ours. Jellyfin and Emby report
+ * LastActivityDate for any interaction, including ones that never produce a
+ * session, but a server that has been rebuilt can report something older than
+ * the sessions we already recorded.
+ */
+function advancedActivityAt(reported: Date | undefined, current: Date | null): Date | undefined {
+  if (!reported) return undefined;
+  if (current && reported <= current) return undefined;
+  return reported;
 }
 
 /**
@@ -572,15 +626,23 @@ export async function syncUserFromMediaServer(
     }
 
     if (existing) {
+      const nextJoinedAt = mediaUser.joinedAt ?? existing.joinedAt;
+      const advancedActivity = advancedActivityAt(
+        mediaUser.lastActivityAt,
+        existing.lastActivityAt
+      );
       const updateData: Partial<typeof serverUsers.$inferInsert> = {
         username: mediaUser.username,
         email: mediaUser.email ?? null,
         thumbUrl: mediaUser.thumb ?? null,
         isServerAdmin: mediaUser.isAdmin,
         plexAccountId: mediaUser.id, // Set plex.tv ID
-        joinedAt: mediaUser.joinedAt ?? existing.joinedAt,
+        joinedAt: nextJoinedAt,
         updatedAt: new Date(),
       };
+      if (advancedActivity) {
+        updateData.lastActivityAt = advancedActivity;
+      }
 
       // Update existing server user and set plexAccountId
       const updated = await db
@@ -589,8 +651,21 @@ export async function syncUserFromMediaServer(
         .where(eq(serverUsers.id, existing.id))
         .returning();
 
+      // Sync is the only thing that moves joined_at from the server side, so
+      // the identity rollups have to follow it. Guarded because this runs for
+      // every user on every sync tick and the rollup is three more queries.
+      if (advancedActivity || nextJoinedAt?.getTime() !== existing.joinedAt?.getTime()) {
+        await recomputeIdentityAggregates(existing.userId);
+      }
+
       const user = await requireUserById(existing.userId);
       return { serverUser: updated[0]!, user, created: false };
+    }
+
+    // Already folded into another account by a same-server merge. Creating it
+    // again is what the alias table exists to prevent.
+    if (await isAliasedExternalId(serverId, mediaUser.id)) {
+      return null;
     }
 
     // Create new Plex user
@@ -610,6 +685,7 @@ export async function syncUserFromMediaServer(
           .limit(1);
         user = existingUser;
       }
+      const attachedToExistingIdentity = !!user;
 
       // No match - create new user identity
       if (!user) {
@@ -620,6 +696,9 @@ export async function syncUserFromMediaServer(
             name: null,
             email: mediaUser.email ?? null,
             thumbnail: mediaUser.thumb ?? null,
+            // Sole account, so its own dates are the identity rollups.
+            firstJoinedAt: mediaUser.joinedAt ?? null,
+            lastActivityAt: mediaUser.lastActivityAt ?? null,
           })
           .returning();
         user = newUser!;
@@ -638,8 +717,13 @@ export async function syncUserFromMediaServer(
           thumbUrl: mediaUser.thumb ?? null,
           isServerAdmin: mediaUser.isAdmin,
           joinedAt: mediaUser.joinedAt ?? null,
+          lastActivityAt: mediaUser.lastActivityAt ?? null,
         })
         .returning();
+
+      if (attachedToExistingIdentity) {
+        await recomputeIdentityAggregates(user.id, tx);
+      }
 
       return { serverUser: serverUser!, user };
     });
@@ -658,11 +742,26 @@ export async function syncUserFromMediaServer(
       isServerAdmin: mediaUser.isAdmin,
     };
 
+    const advancedActivity = advancedActivityAt(mediaUser.lastActivityAt, existing.lastActivityAt);
+    if (advancedActivity) {
+      updatePayload.lastActivityAt = advancedActivity;
+    }
+
     // Update existing server user
     const updated = await updateServerUser(existing.id, updatePayload);
 
+    if (advancedActivity) {
+      await recomputeIdentityAggregates(existing.userId);
+    }
+
     const user = await requireUserById(existing.userId);
     return { serverUser: updated, user, created: false };
+  }
+
+  // Already folded into another account by a same-server merge. Creating it
+  // again is what the alias table exists to prevent.
+  if (await isAliasedExternalId(serverId, mediaUser.id)) {
+    return null;
   }
 
   // Use transaction to prevent orphaned users if server user creation fails
@@ -679,6 +778,7 @@ export async function syncUserFromMediaServer(
         .limit(1);
       user = existingUser;
     }
+    const attachedToExistingIdentity = !!user;
 
     // No match - create new user identity
     if (!user) {
@@ -689,6 +789,9 @@ export async function syncUserFromMediaServer(
           name: null,
           email: mediaUser.email ?? null,
           thumbnail: mediaUser.thumb ?? null,
+          // Sole account, so its own dates are the identity rollups.
+          firstJoinedAt: mediaUser.joinedAt ?? null,
+          lastActivityAt: mediaUser.lastActivityAt ?? null,
         })
         .returning();
       user = newUser!; // Insert always returns a row
@@ -706,8 +809,15 @@ export async function syncUserFromMediaServer(
         thumbUrl: mediaUser.thumb ?? null,
         isServerAdmin: mediaUser.isAdmin,
         joinedAt: mediaUser.joinedAt ?? null,
+        lastActivityAt: mediaUser.lastActivityAt ?? null,
       })
       .returning();
+
+    // Only when the account joined a person who already had others: a fresh
+    // identity's rollups were seeded by its own insert above.
+    if (attachedToExistingIdentity) {
+      await recomputeIdentityAggregates(user.id, tx);
+    }
 
     return { serverUser: serverUser!, user };
   });
@@ -765,7 +875,6 @@ export async function getUserWithStats(userId: string): Promise<UserWithStats | 
       username: serverUsers.username,
       thumbUrl: serverUsers.thumbUrl,
       trustScore: serverUsers.trustScore,
-      sessionCount: serverUsers.sessionCount,
     })
     .from(serverUsers)
     .innerJoin(servers, eq(serverUsers.serverId, servers.id))
@@ -819,45 +928,110 @@ export async function getUserWithStats(userId: string): Promise<UserWithStats | 
 }
 
 /**
- * Recalculate aggregate trust score for a user (the person's overall trust
- * across all their server accounts, weighted by each account's session count).
+ * Recompute a user's identity-level rollups from their server accounts:
+ * aggregate trust, total violation count, earliest join and latest activity.
  *
- * Called after every write to serverUsers.trustScore - there is no database
- * trigger backing this, so every call site that changes a server account's
- * trust score is responsible for calling this too (ideally with the same `tx`
- * it used for the write, so the two updates commit together). Corrects the
- * identity's rollup going forward; it does not backfill trust changes made
- * before this recompute existed.
+ * Identity trust is the WORST active account's score, not an average. Trust
+ * penalties land only on the account where the behavior happened
+ * (enforceAcrossServers extends kills, never scores), so with several
+ * accounts an average would dilute the one signal the system writes.
+ * Removed accounts only count when the identity has no active ones left.
  *
- * Pass the transaction handle already in use so this participates in the
- * same write instead of racing it.
+ * The dates deliberately do not follow that rule: they span every account,
+ * removed included, because removing an account does not un-happen its
+ * history. That matches how a merge combines two accounts on one server.
+ *
+ * Called after every write to serverUsers.trustScore and every violation
+ * insert - there is no database trigger backing this, so every call site
+ * that changes either input is responsible for calling this too. Pass the
+ * transaction handle already in use so this participates in the same write
+ * instead of racing it.
  */
-export async function recalculateAggregateTrustScore(
+export async function recomputeIdentityAggregates(
   userId: string,
   executor: Tx = db
 ): Promise<void> {
-  // Calculate weighted average by session count
-  const result = await executor
+  const accountResult = await executor
     .select({
-      weightedSum: sql<number>`coalesce(sum(${serverUsers.trustScore}::numeric * ${serverUsers.sessionCount}), 0)`,
-      totalSessions: sql<number>`coalesce(sum(${serverUsers.sessionCount}), 0)`,
+      trust: sql<number | null>`coalesce(
+        min(${serverUsers.trustScore}) filter (where ${serverUsers.removedAt} is null),
+        min(${serverUsers.trustScore})
+      )`,
+      // The driver hands timestamps back as strings; mapWith borrows the
+      // column's decoder so these are Dates the users columns can be set to.
+      firstJoinedAt: sql<Date | null>`min(${serverUsers.joinedAt})`.mapWith(serverUsers.joinedAt),
+      lastActivityAt: sql<Date | null>`max(${serverUsers.lastActivityAt})`.mapWith(
+        serverUsers.lastActivityAt
+      ),
     })
     .from(serverUsers)
     .where(eq(serverUsers.userId, userId));
 
-  const { weightedSum, totalSessions } = result[0] ?? { weightedSum: 0, totalSessions: 0 };
+  const violationResult = await executor
+    .select({ count: sql<number>`count(*)::int` })
+    .from(automationRuns)
+    .innerJoin(serverUsers, eq(automationRuns.serverUserId, serverUsers.id))
+    .where(
+      and(
+        eq(serverUsers.userId, userId),
+        isNull(automationRuns.dismissedAt),
+        ...violationAliasConditions()
+      )
+    );
 
-  // Calculate aggregate score (default to 100 if no sessions)
-  const aggregateScore =
-    totalSessions > 0 ? Math.round(Number(weightedSum) / Number(totalSessions)) : 100;
+  const accounts = accountResult[0];
 
   await executor
     .update(users)
     .set({
-      aggregateTrustScore: aggregateScore,
+      aggregateTrustScore: accounts?.trust ?? 100,
+      totalViolations: violationResult[0]?.count ?? 0,
+      firstJoinedAt: accounts?.firstJoinedAt ?? null,
+      lastActivityAt: accounts?.lastActivityAt ?? null,
       updatedAt: new Date(),
     })
     .where(eq(users.id, userId));
+}
+
+/**
+ * Bulk version of the identity date rollups, for jobs that rewrite joined_at or
+ * last_activity_at across the whole server_users table at once. The DISTINCT
+ * FROM guard keeps a second pass from rewriting rows the first one settled.
+ */
+export async function recomputeAllIdentityDates(executor: Tx = db): Promise<number> {
+  const result = await executor.execute(sql`
+    UPDATE ${users} u SET
+      first_joined_at = agg.min_joined,
+      last_activity_at = agg.max_activity,
+      updated_at = now()
+    FROM (
+      SELECT user_id, MIN(joined_at) AS min_joined, MAX(last_activity_at) AS max_activity
+      FROM ${serverUsers}
+      GROUP BY user_id
+    ) agg
+    WHERE u.id = agg.user_id
+      AND (
+        u.first_joined_at IS DISTINCT FROM agg.min_joined
+        OR u.last_activity_at IS DISTINCT FROM agg.max_activity
+      )
+  `);
+  return Number(result.rowCount ?? 0);
+}
+
+/** Same recompute, addressed by the account id a violation write already has in hand. */
+export async function recomputeIdentityAggregatesForServerUser(
+  serverUserId: string,
+  executor: Tx = db
+): Promise<void> {
+  const rows = await executor
+    .select({ userId: serverUsers.userId })
+    .from(serverUsers)
+    .where(eq(serverUsers.id, serverUserId))
+    .limit(1);
+  const userId = rows[0]?.userId;
+  if (userId) {
+    await recomputeIdentityAggregates(userId, executor);
+  }
 }
 
 // ============================================================================

@@ -2,22 +2,22 @@ import {
   LayoutDashboard,
   Map,
   History,
-  BarChart3,
   Users,
-  Shield,
+  Workflow,
   AlertTriangle,
   Settings,
-  TrendingUp,
   UserCircle,
-  ClipboardList,
-  Gauge,
   Smartphone,
   Activity,
-  BookOpen,
+  ArrowUpDown,
+  Library,
   Sparkles,
   HardDrive,
   Eye,
   EyeOff,
+  ClipboardList,
+  LayoutGrid,
+  Tags,
 } from 'lucide-react';
 import type { NavKey } from '@tracearr/translations';
 
@@ -27,36 +27,41 @@ export interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-export interface NavGroup {
-  nameKey: NavKey;
-  icon: React.ComponentType<{ className?: string }>;
-  children: NavItem[];
+export interface NavSection {
+  labelKey: NavKey;
+  items: NavItem[];
 }
 
-export type NavEntry = NavItem | NavGroup;
-
-export function isNavGroup(entry: NavEntry): entry is NavGroup {
-  return 'children' in entry;
-}
-
-export const navigation: NavEntry[] = [
-  { nameKey: 'dashboard', href: '/', icon: LayoutDashboard },
-  { nameKey: 'map', href: '/map', icon: Map },
-  { nameKey: 'history', href: '/history', icon: History },
+/**
+ * Static sections rather than collapsibles: a collapsible's children live in
+ * SidebarMenuSub, which is `group-data-[collapsible=icon]:hidden`, so an icon
+ * rail would drop every child destination.
+ */
+export const navigation: NavSection[] = [
   {
-    nameKey: 'stats',
-    icon: BarChart3,
-    children: [
-      { nameKey: 'activity', href: '/stats/activity', icon: TrendingUp },
-      { nameKey: 'users', href: '/stats/users', icon: UserCircle },
+    labelKey: 'monitor',
+    items: [
+      { nameKey: 'dashboard', href: '/', icon: LayoutDashboard },
+      { nameKey: 'map', href: '/map', icon: Map },
+      { nameKey: 'history', href: '/history', icon: History },
+    ],
+  },
+  {
+    labelKey: 'stats',
+    items: [
+      { nameKey: 'activity', href: '/stats/activity', icon: Activity },
+      { nameKey: 'userStats', href: '/stats/users', icon: UserCircle },
+      { nameKey: 'devices', href: '/stats/devices', icon: Smartphone },
+      { nameKey: 'bandwidth', href: '/stats/bandwidth', icon: ArrowUpDown },
       { nameKey: 'requesters', href: '/stats/requesters', icon: ClipboardList },
     ],
   },
   {
-    nameKey: 'library',
-    icon: BookOpen,
-    children: [
-      { nameKey: 'overview', href: '/library', icon: LayoutDashboard },
+    labelKey: 'media',
+    items: [
+      { nameKey: 'overview', href: '/media', icon: Library },
+      { nameKey: 'mediaBrowse', href: '/media/browse', icon: LayoutGrid },
+      { nameKey: 'mediaGenres', href: '/media/genres', icon: Tags },
       { nameKey: 'quality', href: '/library/quality', icon: Sparkles },
       { nameKey: 'storage', href: '/library/storage', icon: HardDrive },
       { nameKey: 'watch', href: '/library/watch', icon: Eye },
@@ -64,15 +69,31 @@ export const navigation: NavEntry[] = [
     ],
   },
   {
-    nameKey: 'performance',
-    icon: Gauge,
-    children: [
-      { nameKey: 'devices', href: '/stats/devices', icon: Smartphone },
-      { nameKey: 'bandwidth', href: '/stats/bandwidth', icon: Activity },
+    labelKey: 'manage',
+    items: [
+      { nameKey: 'users', href: '/users', icon: Users },
+      { nameKey: 'automations', href: '/automations', icon: Workflow },
+      { nameKey: 'violations', href: '/violations', icon: AlertTriangle },
+      { nameKey: 'settings', href: '/settings', icon: Settings },
     ],
   },
-  { nameKey: 'users', href: '/users', icon: Users },
-  { nameKey: 'rules', href: '/rules', icon: Shield },
-  { nameKey: 'violations', href: '/violations', icon: AlertTriangle },
-  { nameKey: 'settings', href: '/settings', icon: Settings },
 ];
+
+const allItems: NavItem[] = navigation.flatMap((section) => section.items);
+
+/**
+ * An entry whose href prefixes another entry's (e.g. /media beside
+ * /media/browse) matches exactly, so the parent doesn't light up alongside its
+ * own descendants. Checked against every destination, not just section peers,
+ * because sections no longer scope the comparison.
+ */
+export function isNavItemActive(pathname: string, item: NavItem): boolean {
+  if (item.href === '/') return pathname === '/';
+
+  const prefixesAnother = allItems.some(
+    (other) => other !== item && other.href.startsWith(item.href + '/')
+  );
+  if (prefixesAnother) return pathname === item.href;
+
+  return pathname === item.href || pathname.startsWith(item.href + '/');
+}

@@ -1,10 +1,10 @@
+import type { ConditionField } from './automations/index.js';
 import type {
   ViolationWithDetails,
   ViolationSessionInfo,
   UnitSystem,
   GroupEvidence,
   ConditionEvidence,
-  ConditionField,
 } from './types.js';
 import { formatSpeed, formatDistance } from './constants.js';
 
@@ -32,8 +32,14 @@ const CONDITION_FIELD_LABELS: Record<ConditionField, string> = {
   country: 'Country',
   ip_in_range: 'IP Range',
   server_id: 'Server',
-  library_id: 'Library',
   media_type: 'Media Type',
+  library_item_type: 'Item Type',
+  library_name: 'Library',
+  resolution_after: 'Resolution',
+  dynamic_range_after: 'Dynamic Range',
+  video_codec_after: 'Video Codec',
+  audio_channels_after: 'Audio Channels',
+  file_size_after: 'File Size',
 };
 
 const OPERATOR_LABELS: Record<string, string> = {

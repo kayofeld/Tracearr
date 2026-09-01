@@ -1,7 +1,9 @@
-import { useEffect, useMemo } from 'react';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
-import { StreamMap } from '@/components/map';
+const StreamMap = lazy(() =>
+  import('@/components/map/StreamMap').then((m) => ({ default: m.StreamMap }))
+);
 import { ServerLegend } from '@/components/server';
 import {
   Select,
@@ -295,15 +297,17 @@ export function Map() {
           />
         ) : (
           <>
-            <StreamMap
-              locations={locations}
-              isLoading={locationsLoading}
-              viewMode={filters.viewMode}
-              filterKey={filterKey}
-              serverColorMap={serverColorMap}
-              serverNameMap={serverNameMap}
-              isMultiServer={isMultiServer}
-            />
+            <Suspense fallback={<div className="bg-muted/30 h-full w-full animate-pulse" />}>
+              <StreamMap
+                locations={locations}
+                isLoading={locationsLoading}
+                viewMode={filters.viewMode}
+                filterKey={filterKey}
+                serverColorMap={serverColorMap}
+                serverNameMap={serverNameMap}
+                isMultiServer={isMultiServer}
+              />
+            </Suspense>
             {isMultiServer && hasData && filters.viewMode === 'circles' && (
               <ServerLegend variant="floating" servers={selectedServers} />
             )}

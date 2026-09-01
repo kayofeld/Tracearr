@@ -11,29 +11,33 @@
  * 4. Broadcast updates via WebSocket
  */
 
-import {
-  SESSION_WRITE_RETRY,
-  type PlexPlaySessionNotification,
-  type Session,
-} from '@tracearr/shared';
+import { SESSION_WRITE_RETRY, type PlexPlaySessionNotification } from '@tracearr/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
-import { servers, serverUsers, sessions, users } from '../db/schema.js';
+import { servers, serverUserExternalAliases, serverUsers, sessions, users } from '../db/schema.js';
 import { getGeoIPSettings } from '../routes/settings.js';
 import type { CacheService, PubSubService } from '../services/cache.js';
 import { createMediaServerClient } from '../services/mediaServer/index.js';
 import { extractLiveUuid } from '../services/mediaServer/plex/plexUtils.js';
 import { lookupGeoIP } from '../services/plexGeoip.js';
+import {
+  assembleEvaluationInputs,
+  loadEvaluationContext,
+  loadEvaluationServerUser,
+  toRuleSession,
+} from '../services/automations/events/contextAssembly.js';
+import { dispatch } from '../services/automations/events/dispatcher.js';
+import { dispatchServerHealthById } from '../services/automations/events/producers.js';
 import { registerService, unregisterService } from '../services/serviceTracker.js';
+import { getWatchedThreshold } from '../services/settings.js';
 import { sseManager } from '../services/sseManager.js';
 import { getIdentityServerUserIds } from '../services/userService.js';
-import { enqueueNotification } from './notificationQueue.js';
+import { createLogger } from '../utils/logger.js';
 import {
-  batchGetRecentUserSessions,
-  getActiveRulesV2,
+  batchGetLibraryItemIdentity,
+  getActiveAutomations,
   getServerUserIdByExternalId,
-  mergeRecentSessionsForIdentity,
 } from './poller/database.js';
 import {
   clearDbWriteTracking,
@@ -41,7 +45,6 @@ import {
   shouldFlushDbWrite,
 } from './poller/dbWriteThrottle.js';
 import { triggerReconciliationPoll } from './poller/index.js';
-import { gracePeriodSessionIds } from './poller/processor.js';
 import {
   buildActiveSession,
   buildPendingActiveSession,
@@ -50,11 +53,13 @@ import {
   findActiveSessionsAll,
   handleMediaChangeAtomic,
   handleQualityChangeFallout,
-  reEvaluateRulesOnPauseState,
-  reEvaluateRulesOnTranscodeChange,
   stopSessionAtomic,
 } from './poller/sessionLifecycle.js';
-import { mapMediaSession, pickStreamDetailFields } from './poller/sessionMapper.js';
+import {
+  mapMediaSession,
+  pickLiveSessionFields,
+  pickStreamDetailFields,
+} from './poller/sessionMapper.js';
 import {
   calculatePauseAccumulation,
   checkWatchCompletion,
@@ -64,57 +69,13 @@ import {
   updateConfirmationState,
 } from './poller/stateTracker.js';
 import { PENDING_STOP_PERSIST_MIN_PROGRESS_MS, type PendingSessionData } from './poller/types.js';
-import { excludeUncountableSessions } from './poller/utils.js';
 import { broadcastViolations } from './poller/violations.js';
+
+const sseLogger = createLogger('SSEProcessor');
 
 let cacheService: CacheService | null = null;
 let pubSubService: PubSubService | null = null;
 let isRunning = false;
-
-/**
- * Resolve the sibling server_user ids for an identity, for cross-server rule
- * aggregation. Falls back to no siblings (single server_user behavior) if the
- * lookup fails, so a transient DB error degrades detection instead of
- * blocking this event.
- */
-async function resolveIdentityServerUserIds(userId: string, context: string): Promise<string[]> {
-  try {
-    return await getIdentityServerUserIds(userId);
-  } catch (error) {
-    console.error(
-      `[SSEProcessor] Failed to resolve identity server users for ${userId} (${context}), ` +
-        'evaluating rules for this server only:',
-      error
-    );
-    return [];
-  }
-}
-
-/**
- * Fetch recent sessions for windowed rule evaluation (unique_ips_in_window,
- * unique_devices_in_window, travel_speed_kmh), widened to every server_user
- * id of the same identity when merged (identityServerUserIds.length > 1).
- * Falls back to this server_user's own recent sessions if the widened fetch
- * fails, so a transient DB error degrades detection instead of blocking
- * this event.
- */
-async function fetchRecentSessionsForRules(
-  serverUserId: string,
-  identityServerUserIds: string[]
-): Promise<Session[]> {
-  const ids = identityServerUserIds.length > 1 ? identityServerUserIds : [serverUserId];
-  try {
-    const recentSessionsMap = await batchGetRecentUserSessions(ids);
-    return mergeRecentSessionsForIdentity(recentSessionsMap, ids);
-  } catch (error) {
-    console.error(
-      `[SSEProcessor] Failed to fetch recent sessions for ${serverUserId}, falling back to this server only:`,
-      error
-    );
-    const fallbackMap = await batchGetRecentUserSessions([serverUserId]);
-    return fallbackMap.get(serverUserId) ?? [];
-  }
-}
 
 // Server down notification threshold in milliseconds
 // Delay prevents false alarms from brief connection blips
@@ -124,6 +85,13 @@ const SERVER_DOWN_THRESHOLD_MS = 60 * 1000;
 // Orphan sweep threshold in milliseconds
 // Pending sessions older than this are considered orphaned and will be swept
 const ORPHAN_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
+
+// Playing notifications carry no user, so the repeat-tick fast path could
+// latch onto a stale foreign row that matches sessionKey+ratingKey+deviceId.
+// Each session gets a bounded fast-path window; expiry forces one full pass
+// whose server-user check unlatches any foreign row.
+const FAST_PATH_REVALIDATE_MS = 60 * 1000;
+const fastPathWindowStart = new Map<string, number>();
 
 // Track pending server down notifications (can be cancelled if server comes back up)
 const pendingServerDownNotifications = new Map<string, NodeJS.Timeout>();
@@ -285,6 +253,7 @@ export function stopSSEProcessor(): void {
 
   console.log('[SSEProcessor] Stopping');
   isRunning = false;
+  fastPathWindowStart.clear();
   unregisterService('sse-processor');
 
   sseManager.off('plex:session:playing', wrappedHandlers.playing);
@@ -362,13 +331,6 @@ async function handlePlaying(event: {
       }
     }
 
-    const result = await fetchFullSession(serverId, notification.sessionKey);
-    if (!result) {
-      return;
-    }
-
-    const { session, server } = result;
-
     // Look up by sessionKey alone. Passing the incoming ratingKey would filter
     // out the still-active old row on a real media change (same sessionKey, new
     // ratingKey), leaving detectMediaChange below unreachable.
@@ -376,6 +338,38 @@ async function handlePlaying(event: {
       serverId,
       sessionKey: notification.sessionKey,
     });
+
+    // Plex delivers its progress stream as repeated 'playing' notifications
+    // with an advancing viewOffset. When the active row already matches this
+    // exact playback (same device, same media, already playing), take the
+    // throttled progress path: no /status/sessions fetch, one DB write per
+    // throttle window. The window expires after FAST_PATH_REVALIDATE_MS so
+    // the full path re-checks the server user. Everything else (new play,
+    // resume, media change, live TV) falls through to the full path, and the
+    // 30s reconciliation poll covers mid-stream transcode flips.
+    if (
+      existingRow?.state === 'playing' &&
+      existingRow.mediaType !== 'live' &&
+      existingRow.ratingKey === notification.ratingKey &&
+      existingRow.deviceId === notification.clientIdentifier
+    ) {
+      const windowStart = fastPathWindowStart.get(existingRow.id);
+      if (windowStart === undefined || Date.now() - windowStart < FAST_PATH_REVALIDATE_MS) {
+        if (windowStart === undefined) {
+          fastPathWindowStart.set(existingRow.id, Date.now());
+        }
+        await applySessionProgress(existingRow, notification.viewOffset);
+        return;
+      }
+      fastPathWindowStart.delete(existingRow.id);
+    }
+
+    const result = await fetchFullSession(serverId, notification.sessionKey);
+    if (!result) {
+      return;
+    }
+
+    const { session, server } = result;
 
     // Plex resets sessionKey counters on PMS restart, so within the
     // reconciliation window a stale open row from one user can carry the same
@@ -462,9 +456,32 @@ async function handlePaused(event: {
     }
 
     const result = await fetchFullSession(serverId, notification.sessionKey);
-    if (result) {
-      await updateExistingSession(existingSession, result.session, 'paused');
+    if (!result) {
+      return;
     }
+
+    // Same cross-user guard as handlePlaying: after a PMS restart this
+    // sessionKey can still be held by a stale row from another user. Updating
+    // that row would splice this user's stream into it and refresh its
+    // lastSeenAt on every pause, so it never ages out of the stale sweep.
+    // Leave the foreign row to its own cleanup instead.
+    const incomingServerUserId = await getServerUserIdByExternalId(
+      serverId,
+      result.session.externalUserId
+    );
+    if (incomingServerUserId !== existingSession.serverUserId) {
+      if (incomingServerUserId === null) {
+        // Lookup miss, not a foreign row: reachable mid-stream after a user
+        // merge re-points the account. Reconciliation applies the pause ~30s
+        // later; log so the gap is diagnosable.
+        console.log(
+          `[SSEProcessor] Pause dropped: no server user for external id on server ${serverId}`
+        );
+      }
+      return;
+    }
+
+    await updateExistingSession(existingSession, result.session, 'paused');
   } catch (error) {
     console.error('[SSEProcessor] Error handling paused event:', error);
   }
@@ -531,11 +548,30 @@ async function handleStopped(event: {
       }
     }
 
-    // Query without limit to handle any duplicate sessions that may exist
-    const existingSessions = await findActiveSessionsAll({
+    // Query without limit to handle any duplicate sessions that may exist.
+    // The stopping user's identity is unknowable here (the session is already
+    // gone from Plex), so the ratingKey is the only guard against closing a
+    // foreign row that shares this sessionKey after a PMS restart. Live TV is
+    // exempt: its ratingKey changes per channel and the row never re-syncs,
+    // so live rows match on sessionKey alone.
+    const candidateSessions = await findActiveSessionsAll({
       serverId,
       sessionKey: notification.sessionKey,
     });
+    const existingSessions =
+      notification.ratingKey == null
+        ? candidateSessions
+        : candidateSessions.filter(
+            (s) =>
+              s.ratingKey === notification.ratingKey ||
+              // Live rows can't match on ratingKey (channel changes rotate it),
+              // so they close on device instead; without the device check a
+              // non-live stop sharing this sessionKey after a PMS restart
+              // would close a foreign live stream
+              (s.mediaType === 'live' &&
+                (notification.clientIdentifier == null ||
+                  s.deviceId === notification.clientIdentifier))
+          );
 
     if (existingSessions.length === 0) {
       return;
@@ -551,9 +587,85 @@ async function handleStopped(event: {
 }
 
 /**
+ * Apply a position update to a confirmed session at throttled DB cost: the
+ * Redis cache updates on every call so dashboards stay live, while the DB
+ * write coalesces through shouldFlushDbWrite. Watched transitions flush
+ * immediately. Production reaches this from handlePlaying's repeat-tick fast
+ * path; Plex SSE has no distinct progress state.
+ */
+async function applySessionProgress(
+  existingSession: typeof sessions.$inferSelect,
+  viewOffset: number
+): Promise<void> {
+  const now = new Date();
+  let watched = existingSession.watched;
+  if (!watched && existingSession.totalDurationMs) {
+    const elapsedMs = now.getTime() - existingSession.startedAt.getTime();
+    const pausedMs = existingSession.pausedDurationMs || 0;
+    // Account for ongoing pause if currently paused
+    const ongoingPauseMs = existingSession.lastPausedAt
+      ? now.getTime() - existingSession.lastPausedAt.getTime()
+      : 0;
+    const currentWatchTimeMs = Math.max(0, elapsedMs - pausedMs - ongoingPauseMs);
+    watched = checkWatchCompletion(
+      currentWatchTimeMs,
+      viewOffset,
+      existingSession.totalDurationMs,
+      await getWatchedThreshold(existingSession.mediaType)
+    );
+  }
+
+  const watchedTransition = watched && !existingSession.watched;
+  let wasStoppedConcurrently = false;
+  if (watchedTransition || shouldFlushDbWrite(existingSession.id, now.getTime())) {
+    // Guarded by isNull(stoppedAt): a stop racing this write must not
+    // resurrect the session into the cache.
+    const updateResult = await db
+      .update(sessions)
+      .set({
+        progressMs: viewOffset,
+        lastSeenAt: now, // Update for stale session detection
+        watched,
+      })
+      .where(and(eq(sessions.id, existingSession.id), isNull(sessions.stoppedAt)))
+      .returning({ id: sessions.id });
+
+    if (updateResult.length === 0) {
+      wasStoppedConcurrently = true;
+      console.log(
+        `[SSEProcessor] Session ${existingSession.id} already stopped, skipping progress resurrection`
+      );
+    } else {
+      recordDbWrite(existingSession.id, now.getTime());
+    }
+  }
+
+  if (wasStoppedConcurrently) {
+    return;
+  }
+
+  if (cacheService) {
+    const cached = await cacheService.getSessionById(existingSession.id);
+    if (cached) {
+      cached.progressMs = viewOffset;
+      cached.watched = watched;
+      await cacheService.updateActiveSession(cached);
+
+      // Only broadcast on watched status change (progress events are frequent)
+      if (watchedTransition && pubSubService) {
+        await pubSubService.publish('session:updated', cached);
+      }
+    }
+  }
+}
+
+/**
  * Handle progress event (periodic position updates)
  * Also handles pending session confirmation - if viewOffset exceeds 30s threshold,
  * the session is persisted to DB and rules are evaluated.
+ * Plex SSE never emits a distinct progress state, so in production this logic
+ * runs via handlePlaying's fast path; the subscription stays for the relay
+ * interface and any event source that does emit it.
  */
 async function handleProgress(event: {
   serverId: string;
@@ -587,65 +699,7 @@ async function handleProgress(event: {
       return;
     }
 
-    const now = new Date();
-    let watched = existingSession.watched;
-    if (!watched && existingSession.totalDurationMs) {
-      const elapsedMs = now.getTime() - existingSession.startedAt.getTime();
-      const pausedMs = existingSession.pausedDurationMs || 0;
-      // Account for ongoing pause if currently paused
-      const ongoingPauseMs = existingSession.lastPausedAt
-        ? now.getTime() - existingSession.lastPausedAt.getTime()
-        : 0;
-      const currentWatchTimeMs = Math.max(0, elapsedMs - pausedMs - ongoingPauseMs);
-      watched = checkWatchCompletion(
-        currentWatchTimeMs,
-        notification.viewOffset,
-        existingSession.totalDurationMs
-      );
-    }
-
-    const watchedTransition = watched && !existingSession.watched;
-    let wasStoppedConcurrently = false;
-    if (watchedTransition || shouldFlushDbWrite(existingSession.id, now.getTime())) {
-      // Guarded by isNull(stoppedAt): a stop racing this write must not
-      // resurrect the session into the cache.
-      const updateResult = await db
-        .update(sessions)
-        .set({
-          progressMs: notification.viewOffset,
-          lastSeenAt: now, // Update for stale session detection
-          watched,
-        })
-        .where(and(eq(sessions.id, existingSession.id), isNull(sessions.stoppedAt)))
-        .returning({ id: sessions.id });
-
-      if (updateResult.length === 0) {
-        wasStoppedConcurrently = true;
-        console.log(
-          `[SSEProcessor] Session ${existingSession.id} already stopped, skipping progress resurrection`
-        );
-      } else {
-        recordDbWrite(existingSession.id, now.getTime());
-      }
-    }
-
-    if (wasStoppedConcurrently) {
-      return;
-    }
-
-    if (cacheService) {
-      const cached = await cacheService.getSessionById(existingSession.id);
-      if (cached) {
-        cached.progressMs = notification.viewOffset;
-        cached.watched = watched;
-        await cacheService.updateActiveSession(cached);
-
-        // Only broadcast on watched status change (progress events are frequent)
-        if (watchedTransition && pubSubService) {
-          await pubSubService.publish('session:updated', cached);
-        }
-      }
-    }
+    await applySessionProgress(existingSession, notification.viewOffset);
   } catch (error) {
     console.error('[SSEProcessor] Error handling progress event:', error);
   }
@@ -655,7 +709,7 @@ async function handleProgress(event: {
  * Handle reconciliation request - triggers a light poll to catch missed events
  */
 async function handleReconciliation(): Promise<void> {
-  console.log('[SSEProcessor] Triggering reconciliation poll');
+  sseLogger.debug('Triggering reconciliation poll');
   await triggerReconciliationPoll();
 
   // Run maintenance tasks during reconciliation
@@ -832,12 +886,8 @@ function handleFallbackActivated(event: FallbackEvent): void {
     notifiedDownServers.add(serverId); // Mark as down so we know to send server_up later
     console.log(`[SSEProcessor] Server ${serverName} is DOWN (threshold exceeded)`);
 
-    enqueueNotification({
-      type: 'server_down',
-      payload: { serverName, serverId },
-    }).catch((error: unknown) => {
-      console.error(`[SSEProcessor] Error enqueueing server_down notification:`, error);
-    });
+    // The closure holds no row: the automations and the server are read when the timer fires.
+    void dispatchServerHealthById('server.down', serverId, new Date());
   }, SERVER_DOWN_THRESHOLD_MS);
 
   pendingServerDownNotifications.set(serverId, timeout);
@@ -882,14 +932,7 @@ async function handleFallbackDeactivated(event: FallbackEvent): Promise<void> {
   notifiedDownServers.delete(serverId);
   console.log(`[SSEProcessor] Server ${serverName} is back UP (SSE restored)`);
 
-  try {
-    await enqueueNotification({
-      type: 'server_up',
-      payload: { serverName, serverId },
-    });
-  } catch (error) {
-    console.error(`[SSEProcessor] Error enqueueing server_up notification:`, error);
-  }
+  await dispatchServerHealthById('server.up', serverId, new Date());
 }
 
 /**
@@ -929,14 +972,49 @@ async function fetchFullSession(
       return null;
     }
 
-    return {
-      session: mapMediaSession(targetSession, server.type),
-      server,
-    };
+    const session = mapMediaSession(targetSession, server.type);
+    // Stamp identity like the poller does or SSE session rows insert with null media columns
+    if (session.ratingKey) {
+      const identityMap = await batchGetLibraryItemIdentity(server.id, [session.ratingKey]);
+      session.identity = identityMap.get(session.ratingKey) ?? null;
+    } else {
+      session.identity = null;
+    }
+
+    return { session, server };
   } catch (error) {
     console.error(`[SSEProcessor] Error fetching session ${sessionKey}:`, error);
     return null;
   }
+}
+
+/**
+ * An external id a same-server merge folded into another account. Only hit
+ * when the direct lookup misses, so the common path stays one query.
+ */
+async function resolveAliasedServerUser(serverId: string, externalId: string) {
+  const rows = await db
+    .select({
+      id: serverUsers.id,
+      userId: serverUsers.userId,
+      username: serverUsers.username,
+      thumbUrl: serverUsers.thumbUrl,
+      identityName: users.name,
+      trustScore: serverUsers.trustScore,
+      lastActivityAt: serverUsers.lastActivityAt,
+      createdAt: serverUsers.createdAt,
+    })
+    .from(serverUserExternalAliases)
+    .innerJoin(serverUsers, eq(serverUserExternalAliases.serverUserId, serverUsers.id))
+    .innerJoin(users, eq(serverUsers.userId, users.id))
+    .where(
+      and(
+        eq(serverUserExternalAliases.serverId, serverId),
+        eq(serverUserExternalAliases.externalId, externalId)
+      )
+    )
+    .limit(1);
+  return rows[0];
 }
 
 /**
@@ -979,7 +1057,6 @@ async function createNewSession(
       thumbUrl: serverUsers.thumbUrl,
       identityName: users.name,
       trustScore: serverUsers.trustScore,
-      sessionCount: serverUsers.sessionCount,
       lastActivityAt: serverUsers.lastActivityAt,
       createdAt: serverUsers.createdAt,
     })
@@ -990,7 +1067,8 @@ async function createNewSession(
     )
     .limit(1);
 
-  const serverUserFromDb = serverUserRows[0];
+  const serverUserFromDb =
+    serverUserRows[0] ?? (await resolveAliasedServerUser(serverId, processed.externalUserId));
   if (!serverUserFromDb) {
     console.warn(`[SSEProcessor] Server user not found for ${processed.externalUserId}, skipping`);
     return;
@@ -1005,7 +1083,6 @@ async function createNewSession(
     thumbUrl: serverUserFromDb.thumbUrl,
     identityName: serverUserFromDb.identityName,
     trustScore: serverUserFromDb.trustScore,
-    sessionCount: serverUserFromDb.sessionCount,
     lastActivityAt: serverUserFromDb.lastActivityAt,
     createdAt: serverUserFromDb.createdAt,
     identityServerUserIds,
@@ -1103,7 +1180,6 @@ async function createNewSession(
   // Note: Rules are NOT evaluated yet - that happens after confirmation
   if (pubSubService) {
     await pubSubService.publish('session:started', activeSession);
-    await enqueueNotification({ type: 'session_started', payload: activeSession });
   }
 
   console.log(
@@ -1120,24 +1196,7 @@ async function handleMediaChange(
   processed: ReturnType<typeof mapMediaSession>,
   server: typeof servers.$inferSelect
 ): Promise<void> {
-  const serverUserRows = await db
-    .select({
-      id: serverUsers.id,
-      userId: serverUsers.userId,
-      username: serverUsers.username,
-      thumbUrl: serverUsers.thumbUrl,
-      identityName: users.name,
-      trustScore: serverUsers.trustScore,
-      sessionCount: serverUsers.sessionCount,
-      lastActivityAt: serverUsers.lastActivityAt,
-      createdAt: serverUsers.createdAt,
-    })
-    .from(serverUsers)
-    .innerJoin(users, eq(serverUsers.userId, users.id))
-    .where(eq(serverUsers.id, existingSession.serverUserId))
-    .limit(1);
-
-  const serverUser = serverUserRows[0];
+  const serverUser = await loadEvaluationServerUser(existingSession.serverUserId);
   if (!serverUser) {
     console.warn(
       `[SSEProcessor] Server user not found for media change on session ${existingSession.id}`
@@ -1152,26 +1211,24 @@ async function handleMediaChange(
     return;
   }
 
-  const activeRulesV2 = await getActiveRulesV2();
-  const activeSessions = excludeUncountableSessions(
-    await cacheService.getAllActiveSessions(),
-    gracePeriodSessionIds()
-  );
-  const identityServerUserIds = await resolveIdentityServerUserIds(
-    serverUser.userId,
-    'media change'
-  );
-  const recentSessions = await fetchRecentSessionsForRules(serverUser.id, identityServerUserIds);
+  const activeAutomations = await getActiveAutomations();
+  const serverRef = { id: server.id, name: server.name, type: server.type };
+  const inputs = await assembleEvaluationInputs({
+    rules: activeAutomations,
+    server: serverRef,
+    serverUser: { ...serverUser, identityServerUserIds: [] },
+  });
+  const identityServerUserIds = inputs.identityServerUserIds ?? [];
 
   const result = await handleMediaChangeAtomic({
     existingSession,
     processed,
-    server: { id: server.id, name: server.name, type: server.type },
+    server: serverRef,
     serverUser: { ...serverUser, identityServerUserIds },
     geo,
-    activeRulesV2,
-    activeSessions,
-    recentSessions,
+    activeAutomations,
+    activeSessions: inputs.activeSessions,
+    recentSessions: inputs.recentSessions,
   });
 
   if (!result) {
@@ -1182,6 +1239,7 @@ async function handleMediaChange(
     result;
 
   clearDbWriteTracking(stoppedSession.id);
+  fastPathWindowStart.delete(stoppedSession.id);
 
   // Update cache for stopped session
   await cacheService.removeActiveSession(stoppedSession.id);
@@ -1220,7 +1278,6 @@ async function handleMediaChange(
 
   if (pubSubService) {
     await pubSubService.publish('session:started', activeSession);
-    await enqueueNotification({ type: 'session_started', payload: activeSession });
   }
 
   console.log(
@@ -1264,7 +1321,8 @@ async function updateExistingSession(
     watched = checkWatchCompletion(
       currentWatchTimeMs,
       processed.progressMs,
-      processed.totalDurationMs
+      processed.totalDurationMs,
+      await getWatchedThreshold(processed.mediaType)
     );
   }
 
@@ -1308,151 +1366,85 @@ async function updateExistingSession(
     return;
   }
 
-  // Re-evaluate transcode-related V2 rules when transcode state changes.
-  // At session creation (especially via SSE), transcode state may not be known yet,
-  // so rules like "block 4K transcoding" need re-evaluation when transcoding starts.
-  if (transcodeStateChanged) {
+  const pauseEdge = previousState !== 'paused' && newState === 'paused';
+
+  if (transcodeStateChanged || pauseEdge) {
     try {
-      const activeRulesV2 = await getActiveRulesV2();
-      if (activeRulesV2.length > 0 && cacheService) {
-        // Load server user details for rule evaluation context
-        const serverUserRows = await db
-          .select({
-            id: serverUsers.id,
-            userId: serverUsers.userId,
-            username: serverUsers.username,
-            thumbUrl: serverUsers.thumbUrl,
-            identityName: users.name,
-            trustScore: serverUsers.trustScore,
-            sessionCount: serverUsers.sessionCount,
-            lastActivityAt: serverUsers.lastActivityAt,
-            createdAt: serverUsers.createdAt,
-          })
-          .from(serverUsers)
-          .innerJoin(users, eq(serverUsers.userId, users.id))
-          .where(eq(serverUsers.id, existingSession.serverUserId))
-          .limit(1);
+      const activeAutomations = await getActiveAutomations();
+      if (activeAutomations.length > 0) {
+        const ctx = await loadEvaluationContext(
+          existingSession.serverId,
+          existingSession.serverUserId,
+          activeAutomations
+        );
 
-        const serverUserDetail = serverUserRows[0];
-        if (serverUserDetail) {
-          // Load server info
-          const serverRows = await db
-            .select()
-            .from(servers)
-            .where(eq(servers.id, existingSession.serverId))
-            .limit(1);
+        if (ctx) {
+          const { server: serverRef, serverUser: serverUserRef, inputs } = ctx;
 
-          const server = serverRows[0];
-          if (server) {
-            const activeSessions = excludeUncountableSessions(
-              await cacheService.getAllActiveSessions(),
-              gracePeriodSessionIds()
+          if (transcodeStateChanged) {
+            const { violations } = await dispatch(
+              {
+                type: 'session.transcode_changed',
+                at: now,
+                server: serverRef,
+                serverUser: serverUserRef,
+                previous: {
+                  videoDecision: existingSession.videoDecision,
+                  audioDecision: existingSession.audioDecision,
+                },
+                next: {
+                  videoDecision: processed.videoDecision,
+                  audioDecision: processed.audioDecision,
+                },
+                session: toRuleSession(existingSession, pickLiveSessionFields(processed)),
+              },
+              inputs
             );
-            const identityServerUserIds = await resolveIdentityServerUserIds(
-              serverUserDetail.userId,
-              'transcode re-eval'
-            );
-            const recentSessions = await fetchRecentSessionsForRules(
-              serverUserDetail.id,
-              identityServerUserIds
-            );
+            if (violations.length > 0 && pubSubService) {
+              await broadcastViolations(violations, existingSession.id, pubSubService);
+            }
+          }
 
-            const violationResults = await reEvaluateRulesOnTranscodeChange({
-              existingSession,
-              processed,
-              server: { id: server.id, name: server.name, type: server.type },
-              serverUser: { ...serverUserDetail, identityServerUserIds },
-              activeRulesV2,
-              activeSessions,
-              recentSessions,
-            });
-
-            if (violationResults.length > 0 && pubSubService) {
-              await broadcastViolations(violationResults, existingSession.id, pubSubService);
+          if (pauseEdge) {
+            const { violations } = await dispatch(
+              {
+                type: 'session.paused',
+                at: now,
+                server: serverRef,
+                serverUser: serverUserRef,
+                pauseData: {
+                  lastPausedAt: pauseResult.lastPausedAt,
+                  pausedDurationMs: pauseResult.pausedDurationMs,
+                },
+                session: toRuleSession(existingSession, {
+                  ...pickLiveSessionFields(processed),
+                  lastPausedAt: pauseResult.lastPausedAt,
+                  pausedDurationMs: pauseResult.pausedDurationMs,
+                }),
+              },
+              inputs
+            );
+            if (violations.length > 0 && pubSubService) {
+              await broadcastViolations(violations, existingSession.id, pubSubService);
             }
           }
         }
       }
     } catch (error) {
       console.error(
-        `[SSEProcessor] Error re-evaluating rules on transcode change for session ${existingSession.id}:`,
+        `[SSEProcessor] Error re-evaluating rules for session ${existingSession.id}:`,
         error
       );
     }
   }
 
-  // Re-evaluate pause-related V2 rules when the session is currently paused.
-  // Runs every update cycle because pause duration grows over time.
-  if (newState === 'paused') {
-    try {
-      const activeRulesV2 = await getActiveRulesV2();
-      if (activeRulesV2.length > 0 && cacheService) {
-        const serverUserRows = await db
-          .select({
-            id: serverUsers.id,
-            userId: serverUsers.userId,
-            username: serverUsers.username,
-            thumbUrl: serverUsers.thumbUrl,
-            identityName: users.name,
-            trustScore: serverUsers.trustScore,
-            sessionCount: serverUsers.sessionCount,
-            lastActivityAt: serverUsers.lastActivityAt,
-            createdAt: serverUsers.createdAt,
-          })
-          .from(serverUsers)
-          .innerJoin(users, eq(serverUsers.userId, users.id))
-          .where(eq(serverUsers.id, existingSession.serverUserId))
-          .limit(1);
-
-        const serverUserDetail = serverUserRows[0];
-        if (serverUserDetail) {
-          const serverRows = await db
-            .select()
-            .from(servers)
-            .where(eq(servers.id, existingSession.serverId))
-            .limit(1);
-
-          const server = serverRows[0];
-          if (server) {
-            const activeSessions = excludeUncountableSessions(
-              await cacheService.getAllActiveSessions(),
-              gracePeriodSessionIds()
-            );
-            const identityServerUserIds = await resolveIdentityServerUserIds(
-              serverUserDetail.userId,
-              'pause re-eval'
-            );
-            const recentSessions = await fetchRecentSessionsForRules(
-              serverUserDetail.id,
-              identityServerUserIds
-            );
-
-            const violationResults = await reEvaluateRulesOnPauseState({
-              existingSession,
-              processed,
-              pauseData: {
-                lastPausedAt: pauseResult.lastPausedAt,
-                pausedDurationMs: pauseResult.pausedDurationMs,
-              },
-              server: { id: server.id, name: server.name, type: server.type },
-              serverUser: { ...serverUserDetail, identityServerUserIds },
-              activeRulesV2,
-              activeSessions,
-              recentSessions,
-            });
-
-            if (violationResults.length > 0 && pubSubService) {
-              await broadcastViolations(violationResults, existingSession.id, pubSubService);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error(
-        `[SSEProcessor] Error re-evaluating pause rules for session ${existingSession.id}:`,
-        error
-      );
-    }
+  if (previousState === 'paused' && newState === 'playing') {
+    await dispatch({
+      type: 'session.resumed',
+      at: now,
+      sessionId: existingSession.id,
+      serverId: existingSession.serverId,
+    });
   }
 
   if (cacheService) {
@@ -1701,21 +1693,18 @@ async function confirmPendingSessionAndPersist(
       return null;
     }
 
-    const activeRulesV2 = await getActiveRulesV2();
-    const activeSessions = excludeUncountableSessions(
-      await cache.getAllActiveSessions(),
-      gracePeriodSessionIds()
-    );
-    const recentSessions = await fetchRecentSessionsForRules(
-      pendingData.serverUser.id,
-      pendingData.serverUser.identityServerUserIds
-    );
+    const activeAutomations = await getActiveAutomations();
+    const inputs = await assembleEvaluationInputs({
+      rules: activeAutomations,
+      server: pendingData.server,
+      serverUser: pendingData.serverUser,
+    });
 
     const persisted = await confirmAndPersistSession({
       pendingData,
-      activeRulesV2,
-      activeSessions,
-      recentSessions,
+      activeAutomations,
+      activeSessions: inputs.activeSessions,
+      recentSessions: inputs.recentSessions,
     });
 
     await cache.deletePendingSession(serverId, sessionKey);
@@ -1784,14 +1773,13 @@ async function confirmPendingSessionAndPersist(
  * Stop a session
  */
 async function stopSession(existingSession: typeof sessions.$inferSelect): Promise<void> {
-  const cachedSession = await cacheService?.getSessionById(existingSession.id);
-
-  const { wasUpdated, durationMs, needsRetry, retryData } = await stopSessionAtomic({
+  const { wasUpdated, needsRetry, retryData } = await stopSessionAtomic({
     session: existingSession,
     stoppedAt: new Date(),
   });
 
   clearDbWriteTracking(existingSession.id);
+  fastPathWindowStart.delete(existingSession.id);
 
   if (needsRetry && retryData && cacheService) {
     await cacheService.addSessionWriteRetry(existingSession.id, retryData);
@@ -1808,12 +1796,6 @@ async function stopSession(existingSession: typeof sessions.$inferSelect): Promi
 
   if (pubSubService) {
     await pubSubService.publish('session:stopped', existingSession.id);
-    if (cachedSession) {
-      await enqueueNotification({
-        type: 'session_stopped',
-        payload: { ...cachedSession, durationMs },
-      });
-    }
   }
 
   console.log(`[SSEProcessor] Stopped session ${existingSession.id}`);

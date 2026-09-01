@@ -1,0 +1,1 @@
+CREATE INDEX "idx_library_items_replaces_active" ON "library_items" USING btree ("replaces_library_item_id") WHERE "library_items"."replaces_library_item_id" IS NOT NULL AND "library_items"."removed_at" IS NULL;

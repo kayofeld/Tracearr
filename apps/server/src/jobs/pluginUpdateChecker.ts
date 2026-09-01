@@ -1,8 +1,9 @@
 import { fetchJson } from '../utils/http.js';
+import { startPeriodic, type PeriodicTimers } from '../utils/periodic.js';
 import { maxVersion, compareVersions } from '../utils/pluginVersion.js';
 import { sseManager } from '../services/sseManager.js';
 import { getSettings } from '../services/settings.js';
-import { enqueueNotification } from './notificationQueue.js';
+import { dispatchPluginUpdate } from '../services/automations/events/producers.js';
 import { db } from '../db/client.js';
 import { servers } from '../db/schema.js';
 
@@ -16,8 +17,7 @@ interface ManifestEntry {
   versions?: { version?: string }[];
 }
 
-let checkTimer: NodeJS.Timeout | null = null;
-let initialTimer: NodeJS.Timeout | null = null;
+let timers: PeriodicTimers | null = null;
 // serverId -> latest version already nudged for; re-arms when latest changes
 const nudgedVersions = new Map<string, string>();
 
@@ -65,16 +65,11 @@ export async function runPluginUpdateCheck(): Promise<void> {
       if (nudgedVersions.get(server.id) === latest) continue;
 
       nudgedVersions.set(server.id, latest);
-      await enqueueNotification({
-        type: 'plugin_update_available',
-        payload: {
-          serverId: server.id,
-          serverName: server.name,
-          serverType: server.type,
-          installedVersion: installed,
-          latestVersion: latest,
-          downloadUrl: RELEASES_URL,
-        },
+      await dispatchPluginUpdate({
+        server: { id: server.id, name: server.name, type: server.type },
+        installedVersion: installed,
+        latestVersion: latest,
+        downloadUrl: RELEASES_URL,
       });
       console.log(
         `[PluginUpdate] ${server.name}: plugin ${installed ?? 'pre-0.2.0'} -> ${latest} available`
@@ -86,23 +81,13 @@ export async function runPluginUpdateCheck(): Promise<void> {
 }
 
 export function startPluginUpdateChecker(): void {
-  if (checkTimer || initialTimer) return;
-  // Wait for SSE connections and their hello frames to land before the first check
-  initialTimer = setTimeout(() => {
-    initialTimer = null;
-    void runPluginUpdateCheck();
-  }, INITIAL_DELAY_MS);
-  checkTimer = setInterval(() => void runPluginUpdateCheck(), CHECK_INTERVAL_MS);
+  if (timers) return;
+  // The initial delay waits for SSE connections and their hello frames to land
+  timers = startPeriodic(INITIAL_DELAY_MS, CHECK_INTERVAL_MS, runPluginUpdateCheck);
   console.log('[PluginUpdate] Checker started (every 6h)');
 }
 
 export function stopPluginUpdateChecker(): void {
-  if (initialTimer) {
-    clearTimeout(initialTimer);
-    initialTimer = null;
-  }
-  if (checkTimer) {
-    clearInterval(checkTimer);
-    checkTimer = null;
-  }
+  timers?.stop();
+  timers = null;
 }

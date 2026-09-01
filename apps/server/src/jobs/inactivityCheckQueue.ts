@@ -1,27 +1,21 @@
 /**
- * Inactivity Check Queue - BullMQ-based periodic account inactivity checking
- *
- * Monitors user accounts for periods of no activity and creates violations
- * when accounts have been inactive for configurable time periods.
+ * Inactivity Check Queue - hourly dispatch of account.inactive_for.
+ * Rules carrying an account.inactive_for trigger are evaluated, recorded and acted
+ * on by the shared rule pipeline; this file only finds the candidate accounts.
  */
 
 import { Queue, Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { getRedisPrefix } from '@tracearr/shared';
+import { eq, and, isNull, lte, or, type SQL } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
-import { isMaintenance } from '../serverState.js';
-import { eq, and, isNull } from 'drizzle-orm';
-import type {
-  Rule,
-  AccountInactivityParams,
-  ViolationWithDetails,
-  RuleConditions,
-  Operator,
-} from '@tracearr/shared';
-import { WS_EVENTS, TIME_MS } from '@tracearr/shared';
+import { TIME_MS, type EngineAutomation } from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { rules, serverUsers, violations, users, servers } from '../db/schema.js';
-import { ruleEngine } from '../services/rules.js';
-import { enqueueNotification } from './notificationQueue.js';
+import { serverUsers, users, servers } from '../db/schema.js';
+import { dispatch } from '../services/automations/events/dispatcher.js';
+import { matchesTrigger, triggerNodeFor } from '../services/automations/events/evaluate.js';
+import { isMaintenance } from '../serverState.js';
+import { batchGetIdentityServerUserIds, getActiveAutomations } from './poller/database.js';
+import { broadcastViolations } from './poller/violations.js';
+import { getBullPrefix, queueConnectionOptions } from './queueConnection.js';
 
 // Queue name
 const QUEUE_NAME = 'inactivity-check';
@@ -36,34 +30,6 @@ const STARTUP_DELAY_MS = 5 * TIME_MS.MINUTE;
 interface InactivityCheckJobData {
   type: 'check';
   ruleId?: string; // If set, only check this specific rule
-}
-
-/**
- * Check if V2 rule conditions contain an inactive_days field.
- */
-export function hasInactivityCondition(conditions: RuleConditions | null): boolean {
-  if (!conditions?.groups) return false;
-  return conditions.groups.some((group) =>
-    group.conditions.some((c) => c.field === 'inactive_days')
-  );
-}
-
-/**
- * Extract the inactive_days threshold and operator from V2 conditions.
- * Returns the value and operator of the first inactive_days condition found, or null.
- */
-export function extractInactiveDaysFromConditions(
-  conditions: RuleConditions | null
-): { value: number; operator: Operator } | null {
-  if (!conditions?.groups) return null;
-  for (const group of conditions.groups) {
-    for (const c of group.conditions) {
-      if (c.field === 'inactive_days' && typeof c.value === 'number') {
-        return { value: c.value, operator: c.operator };
-      }
-    }
-  }
-  return null;
 }
 
 // Connection options (set during initialization)
@@ -92,10 +58,10 @@ export function initInactivityCheckQueue(
     return;
   }
 
-  connectionOptions = { url: redisUrl };
+  connectionOptions = queueConnectionOptions(redisUrl);
   _redisClient = redis;
   pubSubPublish = publishFn;
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  const bullPrefix = getBullPrefix();
 
   // Create the inactivity check queue
   inactivityQueue = new Queue<InactivityCheckJobData>(QUEUE_NAME, {
@@ -137,7 +103,7 @@ export function startInactivityCheckWorker(): void {
     return;
   }
 
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  const bullPrefix = getBullPrefix();
 
   inactivityWorker = new Worker<InactivityCheckJobData>(
     QUEUE_NAME,
@@ -180,21 +146,12 @@ export async function scheduleInactivityChecks(): Promise<void> {
   // Remove any existing job schedulers
   const schedulers = await inactivityQueue.getJobSchedulers();
   for (const scheduler of schedulers) {
-    if (scheduler.id) {
-      await inactivityQueue.removeJobScheduler(scheduler.id);
-    }
+    await inactivityQueue.removeJobScheduler(scheduler.key);
   }
 
-  // Get all active rules and filter for inactivity conditions in app code
-  const candidateRules = await db
-    .select({
-      id: rules.id,
-      conditions: rules.conditions,
-    })
-    .from(rules)
-    .where(eq(rules.isActive, true));
-
-  const activeRules = candidateRules.filter((r) => hasInactivityCondition(r.conditions));
+  const activeRules = (await getActiveAutomations()).filter((r) =>
+    matchesTrigger(r, 'account.inactive_for')
+  );
 
   if (activeRules.length === 0) {
     console.log('[Inactivity] No active inactivity rules found');
@@ -227,20 +184,25 @@ export async function scheduleInactivityChecks(): Promise<void> {
   console.log(`[Inactivity] Scheduled hourly checks for ${activeRules.length} rule(s)`);
 }
 
-/**
- * Trigger an immediate inactivity check for all rules or a specific rule
- */
-export async function triggerInactivityCheck(ruleId?: string): Promise<void> {
-  if (!inactivityQueue) {
-    console.error('[Inactivity] Queue not initialized');
-    return;
-  }
+interface CandidateRow {
+  id: string;
+  userId: string;
+  username: string;
+  thumbUrl: string | null;
+  identityName: string | null;
+  lastActivityAt: Date | null;
+  trustScore: number;
+  createdAt: Date;
+  serverId: string;
+  serverName: string;
+  serverType: 'plex' | 'jellyfin' | 'emby';
+}
 
-  await inactivityQueue.add(
-    'manual-check',
-    { type: 'check', ruleId },
-    { jobId: `manual-${Date.now()}` }
-  );
+/** The trigger's own threshold, so an automation only ever sees accounts idle long enough for it. */
+function inactiveSince(rule: EngineAutomation, now: number): Date | null {
+  const node = triggerNodeFor(rule, 'account.inactive_for');
+  if (node?.type !== 'account.inactive_for') return null;
+  return new Date(now - node.params.days * TIME_MS.DAY);
 }
 
 /**
@@ -249,185 +211,100 @@ export async function triggerInactivityCheck(ruleId?: string): Promise<void> {
 async function processInactivityCheck(job: Job<InactivityCheckJobData>): Promise<void> {
   console.log(`[Inactivity] Processing check (job ${job.id})`);
 
-  // Get all active rules and filter for inactivity conditions
-  const candidateRules = await db
-    .select()
-    .from(rules)
-    .where(job.data.ruleId ? eq(rules.id, job.data.ruleId) : eq(rules.isActive, true));
-
-  const activeRules = candidateRules.filter((r) => hasInactivityCondition(r.conditions));
-
+  const activeRules = (await getActiveAutomations()).filter(
+    (r) =>
+      matchesTrigger(r, 'account.inactive_for') && (!job.data.ruleId || r.id === job.data.ruleId)
+  );
   if (activeRules.length === 0) {
     console.log('[Inactivity] No active inactivity rules to check');
     return;
   }
 
-  let totalViolations = 0;
-
+  // One dispatch per distinct account across every rule's scope; the engine's own
+  // per-rule scope filters decide which rules apply to which account.
+  const candidates = new Map<string, CandidateRow>();
+  const now = Date.now();
   for (const rule of activeRules) {
-    const inactivityCondition = extractInactiveDaysFromConditions(rule.conditions);
-    if (inactivityCondition === null) {
-      console.warn(
-        `[Inactivity] Could not extract inactive_days from rule ${rule.name} (${rule.id}), skipping`
+    const since = inactiveSince(rule, now);
+    const scopeFilters: (SQL | undefined)[] = [isNull(serverUsers.removedAt)];
+    if (rule.serverUserId) scopeFilters.push(eq(serverUsers.id, rule.serverUserId));
+    if (rule.serverId) scopeFilters.push(eq(serverUsers.serverId, rule.serverId));
+    if (rule.userId) scopeFilters.push(eq(serverUsers.userId, rule.userId));
+    if (since) {
+      scopeFilters.push(
+        or(isNull(serverUsers.lastActivityAt), lte(serverUsers.lastActivityAt, since))
       );
-      continue;
-    }
-    const params: AccountInactivityParams = {
-      inactivityValue: inactivityCondition.value,
-      inactivityUnit: 'days',
-    };
-    const { operator } = inactivityCondition;
-
-    console.log(`[Inactivity] Checking rule: ${rule.name} (${rule.id})`);
-
-    // Get users to check based on rule scope (exclude removed users)
-    let usersToCheck;
-    if (rule.serverUserId) {
-      // Per-user rule - only check this specific user (if not removed)
-      usersToCheck = await db
-        .select({
-          id: serverUsers.id,
-          username: serverUsers.username,
-          lastActivityAt: serverUsers.lastActivityAt,
-          serverId: serverUsers.serverId,
-        })
-        .from(serverUsers)
-        .where(and(eq(serverUsers.id, rule.serverUserId), isNull(serverUsers.removedAt)));
-    } else {
-      // Global rule - check all active users
-      usersToCheck = await db
-        .select({
-          id: serverUsers.id,
-          username: serverUsers.username,
-          lastActivityAt: serverUsers.lastActivityAt,
-          serverId: serverUsers.serverId,
-        })
-        .from(serverUsers)
-        .where(isNull(serverUsers.removedAt));
     }
 
-    console.log(`[Inactivity] Checking ${usersToCheck.length} users for rule ${rule.name}`);
+    const rows = await db
+      .select({
+        id: serverUsers.id,
+        userId: serverUsers.userId,
+        username: serverUsers.username,
+        thumbUrl: serverUsers.thumbUrl,
+        identityName: users.name,
+        lastActivityAt: serverUsers.lastActivityAt,
+        trustScore: serverUsers.trustScore,
+        createdAt: serverUsers.createdAt,
+        serverId: serverUsers.serverId,
+        serverName: servers.name,
+        serverType: servers.type,
+      })
+      .from(serverUsers)
+      .innerJoin(users, eq(serverUsers.userId, users.id))
+      .innerJoin(servers, eq(servers.id, serverUsers.serverId))
+      .where(and(...scopeFilters));
+    for (const row of rows) candidates.set(row.id, row);
+  }
 
-    for (const user of usersToCheck) {
-      // Evaluate inactivity for this user
-      const result = ruleEngine.evaluateAccountInactivity(user, params, operator);
+  const identityIdsByUser = await batchGetIdentityServerUserIds([
+    ...new Set([...candidates.values()].map((c) => c.userId)),
+  ]);
 
-      if (result.violated) {
-        // Only create violation if no existing unacknowledged violation exists
-        const shouldCreate = await shouldCreateViolation(user.id, rule.id);
-
-        if (shouldCreate) {
-          await createInactivityViolation(rule as unknown as Rule, user, result);
-          totalViolations++;
+  let totalViolations = 0;
+  for (const c of candidates.values()) {
+    const identityServerUserIds = identityIdsByUser.get(c.userId) ?? [];
+    try {
+      const { violations } = await dispatch(
+        {
+          type: 'account.inactive_for',
+          at: new Date(),
+          server: { id: c.serverId, name: c.serverName, type: c.serverType },
+          serverUser: {
+            id: c.id,
+            userId: c.userId,
+            username: c.username,
+            thumbUrl: c.thumbUrl,
+            identityName: c.identityName,
+            trustScore: c.trustScore,
+            lastActivityAt: c.lastActivityAt,
+            createdAt: c.createdAt,
+            identityServerUserIds,
+          },
+          session: null,
+        },
+        {
+          activeAutomations: activeRules,
+          activeSessions: [],
+          recentSessions: [],
+          identityServerUserIds,
+        }
+      );
+      if (violations.length > 0) {
+        totalViolations += violations.length;
+        if (pubSubPublish) {
+          await broadcastViolations(violations, { serverUserId: c.id }, { publish: pubSubPublish });
         }
       }
+    } catch (error) {
+      console.error(`[Inactivity] Failed to evaluate ${c.username}:`, error);
     }
   }
 
   console.log(`[Inactivity] Check complete. Created ${totalViolations} violations.`);
 }
 
-/** Skip if any violation already exists for this user+rule (dismissed ones are deleted, so those won't block) */
-async function shouldCreateViolation(serverUserId: string, ruleId: string): Promise<boolean> {
-  const existing = await db
-    .select({ id: violations.id })
-    .from(violations)
-    .where(and(eq(violations.serverUserId, serverUserId), eq(violations.ruleId, ruleId)))
-    .limit(1);
-
-  return existing.length === 0;
-}
-
-/**
- * Create an inactivity violation (no associated session)
- */
-async function createInactivityViolation(
-  rule: Rule,
-  user: { id: string; username: string; serverId: string },
-  result: { severity: string; data: Record<string, unknown> }
-): Promise<void> {
-  // Insert violation without session reference
-  const created = await db.transaction(async (tx) => {
-    const insertedRows = await tx
-      .insert(violations)
-      .values({
-        ruleId: rule.id,
-        serverUserId: user.id,
-        sessionId: null, // No session for inactivity violations
-        severity: result.severity as 'low' | 'warning' | 'high',
-        ruleType: 'account_inactivity',
-        data: result.data,
-      })
-      .onConflictDoNothing()
-      .returning();
-
-    return insertedRows[0];
-  });
-
-  if (!created) {
-    console.log(`[Inactivity] Duplicate violation prevented for user ${user.username}`);
-    return;
-  }
-
-  // Get user and server details for broadcasting
-  const [details] = await db
-    .select({
-      userId: serverUsers.id,
-      username: serverUsers.username,
-      thumbUrl: serverUsers.thumbUrl,
-      identityName: users.name,
-      serverId: servers.id,
-      serverName: servers.name,
-      serverType: servers.type,
-    })
-    .from(serverUsers)
-    .innerJoin(users, eq(serverUsers.userId, users.id))
-    .innerJoin(servers, eq(servers.id, serverUsers.serverId))
-    .where(eq(serverUsers.id, user.id))
-    .limit(1);
-
-  if (!details) {
-    console.warn(`[Inactivity] Could not find details for user ${user.id}`);
-    return;
-  }
-
-  // Broadcast violation event
-  if (pubSubPublish) {
-    const violationWithDetails: ViolationWithDetails = {
-      id: created.id,
-      ruleId: created.ruleId,
-      serverUserId: created.serverUserId,
-      sessionId: created.sessionId,
-      severity: created.severity,
-      data: created.data,
-      acknowledgedAt: created.acknowledgedAt,
-      createdAt: created.createdAt,
-      user: {
-        id: details.userId,
-        username: details.username,
-        thumbUrl: details.thumbUrl,
-        serverId: details.serverId,
-        identityName: details.identityName,
-      },
-      rule: {
-        id: rule.id,
-        name: rule.name,
-        type: rule.type,
-      },
-      server: {
-        id: details.serverId,
-        name: details.serverName,
-        type: details.serverType,
-      },
-    };
-
-    await pubSubPublish(WS_EVENTS.VIOLATION_NEW, violationWithDetails);
-    console.log(`[Inactivity] Violation created: ${rule.name} for user ${details.username}`);
-
-    // Enqueue notification for async dispatch (Discord, webhooks, push)
-    await enqueueNotification({ type: 'violation', payload: violationWithDetails });
-  }
-}
+export { processInactivityCheck as processInactivityCheckForTests };
 
 /**
  * Gracefully shutdown the inactivity check queue and worker
@@ -449,13 +326,6 @@ export async function shutdownInactivityCheckQueue(): Promise<void> {
   pubSubPublish = null;
 
   console.log('[Inactivity] Queue shutdown complete');
-}
-
-/**
- * Get the inactivity check queue instance (for testing or external scheduling)
- */
-export function getInactivityQueue(): Queue<InactivityCheckJobData> | null {
-  return inactivityQueue;
 }
 
 /**

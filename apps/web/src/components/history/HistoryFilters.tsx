@@ -328,7 +328,7 @@ export function HistoryFiltersBar({
         <TimeRangePicker value={timeRange} onChange={handleTimeRangeChange} />
 
         <div className="relative max-w-[400px] min-w-[200px] flex-1">
-          <Search className="text-muted-foreground absolute top-2 left-2.5 h-4 w-4" />
+          <Search className="text-muted-foreground absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2" />
           <Input
             placeholder="Search titles, users, locations, IPs..."
             value={searchInput}
@@ -341,7 +341,7 @@ export function HistoryFiltersBar({
                 setSearchInput('');
                 onFiltersChange({ ...filters, search: undefined });
               }}
-              className="text-muted-foreground hover:text-foreground absolute top-2 right-2"
+              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
             >
               <X className="h-4 w-4" />
             </button>
@@ -380,7 +380,7 @@ export function HistoryFiltersBar({
                     {filters.serverUserIds?.length ? (
                       <>
                         <DropdownMenuItem onClick={() => removeFilter('serverUserIds')}>
-                          <X className="mr-2 h-4 w-4" />
+                          <X />
                           Clear all users
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
@@ -441,7 +441,7 @@ export function HistoryFiltersBar({
                     {filters.platforms?.length ? (
                       <>
                         <DropdownMenuItem onClick={() => removeFilter('platforms')}>
-                          <X className="mr-2 h-4 w-4" />
+                          <X />
                           Clear all platforms
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
@@ -495,7 +495,7 @@ export function HistoryFiltersBar({
                     {filters.geoCountries?.length ? (
                       <>
                         <DropdownMenuItem onClick={() => removeFilter('geoCountries')}>
-                          <X className="mr-2 h-4 w-4" />
+                          <X />
                           Clear all countries
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
@@ -616,7 +616,7 @@ export function HistoryFiltersBar({
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
-                  <X className="mr-2 h-4 w-4" />
+                  <X />
                   Clear all filters
                 </DropdownMenuItem>
               </>

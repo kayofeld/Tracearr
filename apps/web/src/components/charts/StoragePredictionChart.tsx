@@ -3,7 +3,7 @@ import Highcharts from 'highcharts/highcharts-more';
 import { HighchartsReact } from 'highcharts-react-official';
 import type { LibraryStorageResponse } from '@tracearr/shared';
 import { ChartSkeleton } from '@/components/ui/skeleton';
-import { EmptyState } from '@/components/library';
+import { EmptyState } from '@/components/ui/empty-state';
 import { TrendingUp } from 'lucide-react';
 
 interface StoragePredictionChartProps {

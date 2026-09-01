@@ -7,7 +7,10 @@ import type { ActiveSession, DashboardStats, ServerConnectionStatus } from '@tra
 import { CACHE_TTL, REDIS_KEYS } from '@tracearr/shared';
 import { randomUUID } from 'node:crypto';
 import type { Redis } from 'ioredis';
+import { createLogger } from '../utils/logger.js';
 import type { PendingSessionData } from '../jobs/poller/types.js';
+
+const cacheLogger = createLogger('Cache');
 
 export interface CacheService {
   // Active sessions (legacy - JSON array, deprecated)
@@ -38,6 +41,10 @@ export interface CacheService {
   getDashboardStats(): Promise<DashboardStats | null>;
   setDashboardStats(stats: DashboardStats): Promise<void>;
   invalidateDashboardStatsCache(): Promise<void>;
+
+  // Public API v2 per-media stats/watchers (TTL-based, no active invalidation)
+  getMediaStats<T>(cacheKey: string): Promise<T | null>;
+  setMediaStats(cacheKey: string, value: unknown): Promise<void>;
 
   // Session by ID
   getSessionById(id: string): Promise<ActiveSession | null>;
@@ -187,7 +194,7 @@ export function createCacheService(redis: Redis): CacheService {
       );
       const results = await pipeline.exec();
       if (!results || results.some(([err]) => err !== null)) {
-        console.error('[Cache] addActiveSession pipeline failed:', results);
+        cacheLogger.error('addActiveSession pipeline failed', { results });
       }
       // Invalidate dashboard stats (uses pattern matching for timezone-specific keys)
       await invalidateDashboardStats();
@@ -204,7 +211,7 @@ export function createCacheService(redis: Redis): CacheService {
       pipeline.del(REDIS_KEYS.SESSION_BY_ID(sessionId));
       const results = await pipeline.exec();
       if (!results || results.some(([err]) => err !== null)) {
-        console.error('[Cache] removeActiveSession pipeline failed:', results);
+        cacheLogger.error('removeActiveSession pipeline failed', { results });
       }
       if (!opts?.skipDashboardInvalidation) {
         // Invalidate dashboard stats (uses pattern matching for timezone-specific keys)
@@ -270,7 +277,7 @@ export function createCacheService(redis: Redis): CacheService {
       pipeline.expire(REDIS_KEYS.ACTIVE_SESSION_IDS, CACHE_TTL.ACTIVE_SESSIONS);
       const results = await pipeline.exec();
       if (!results || results.some(([err]) => err !== null)) {
-        console.error('[Cache] updateActiveSession pipeline failed:', results);
+        cacheLogger.error('updateActiveSession pipeline failed', { results });
       }
     },
 
@@ -298,7 +305,7 @@ export function createCacheService(redis: Redis): CacheService {
 
       const results = await pipeline.exec();
       if (!results || results.some(([err]) => err !== null)) {
-        console.error('[Cache] syncActiveSessions pipeline failed:', results);
+        cacheLogger.error('syncActiveSessions pipeline failed', { results });
       }
       // Invalidate dashboard stats (uses pattern matching for timezone-specific keys)
       await invalidateDashboardStats();
@@ -349,7 +356,7 @@ export function createCacheService(redis: Redis): CacheService {
 
       const results = await pipeline.exec();
       if (!results || results.some(([err]) => err !== null)) {
-        console.error('[Cache] incrementalSyncActiveSessions pipeline failed:', results);
+        cacheLogger.error('incrementalSyncActiveSessions pipeline failed', { results });
       }
 
       // Progress-only ticks don't change dashboard stats, so skip the SCAN-based invalidation.
@@ -379,6 +386,24 @@ export function createCacheService(redis: Redis): CacheService {
 
     async invalidateDashboardStatsCache(): Promise<void> {
       await invalidateDashboardStats();
+    },
+
+    async getMediaStats<T>(cacheKey: string): Promise<T | null> {
+      const data = await redis.get(REDIS_KEYS.PUBLIC_MEDIA_STATS(cacheKey));
+      if (!data) return null;
+      try {
+        return JSON.parse(data) as T;
+      } catch {
+        return null;
+      }
+    },
+
+    async setMediaStats(cacheKey: string, value: unknown): Promise<void> {
+      await redis.setex(
+        REDIS_KEYS.PUBLIC_MEDIA_STATS(cacheKey),
+        CACHE_TTL.PUBLIC_MEDIA_STATS,
+        JSON.stringify(value)
+      );
     },
 
     // Session by ID
@@ -560,7 +585,7 @@ export function createCacheService(redis: Redis): CacheService {
       pipeline.expire(REDIS_KEYS.PENDING_SESSION_IDS, CACHE_TTL.PENDING_SESSIONS);
       const results = await pipeline.exec();
       if (!results || results.some(([err]) => err !== null)) {
-        console.error('[Cache] setPendingSession pipeline failed:', results);
+        cacheLogger.error('setPendingSession pipeline failed', { results });
       }
     },
 
@@ -572,7 +597,7 @@ export function createCacheService(redis: Redis): CacheService {
       pipeline.srem(REDIS_KEYS.PENDING_SESSION_IDS, memberKey);
       const results = await pipeline.exec();
       if (!results || results.some(([err]) => err !== null)) {
-        console.error('[Cache] deletePendingSession pipeline failed:', results);
+        cacheLogger.error('deletePendingSession pipeline failed', { results });
       }
     },
 

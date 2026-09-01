@@ -7,7 +7,7 @@
  * - DELETE /debug/violations - Clear all violations
  * - DELETE /debug/users - Clear all non-owner users
  * - DELETE /debug/servers - Clear all servers
- * - DELETE /debug/rules - Clear all rules
+ * - DELETE /debug/automations - Clear all automations
  * - POST /debug/reset - Full factory reset
  * - POST /debug/refresh-aggregates - Refresh TimescaleDB aggregates
  * - GET /debug/env - Safe environment info
@@ -19,6 +19,7 @@ import sensible from '@fastify/sensible';
 import { randomUUID } from 'node:crypto';
 import type { AuthUser } from '@tracearr/shared';
 import type { Redis } from 'ioredis';
+import { queryChain, renderCall } from '../../test/helpers.js';
 
 // Mock the database module
 vi.mock('../../db/client.js', () => ({
@@ -38,10 +39,21 @@ vi.mock('../mobile.js', () => ({
   revokeMobileDeviceSession: vi.fn(),
 }));
 
+vi.mock('../../services/notifications/destinationStore.js', () => ({
+  invalidateDestinationsCache: vi.fn(),
+  publishDestinationsChanged: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock('../../services/notifications/destinationsMigration.js', () => ({
+  seedBuiltinDestinations: vi.fn(),
+}));
+
 // Import mocked db and routes
 import { db } from '../../db/client.js';
+import { destinations } from '../../db/schema.js';
 import { getAuth } from '../../lib/auth.js';
 import { revokeMobileDeviceSession } from '../mobile.js';
+import { seedBuiltinDestinations } from '../../services/notifications/destinationsMigration.js';
 import { debugRoutes } from '../debug.js';
 
 /**
@@ -95,16 +107,18 @@ function createViewerUser(): AuthUser {
 }
 
 /**
- * Create a mock for db.select() with count queries (Promise.all pattern)
+ * Create a mock for db.select() with count queries (Promise.all pattern).
+ * Returns the chains in call order so a test can render the WHERE one was handed.
  */
-function mockDbSelectCounts(counts: number[]) {
+function mockDbSelectCounts(counts: number[]): any[] {
+  const chains: any[] = [];
   let callIndex = 0;
   vi.mocked(db.select).mockImplementation(() => {
-    const count = counts[callIndex++] ?? 0;
-    return {
-      from: vi.fn().mockReturnValue(Promise.resolve([{ count }])),
-    } as never;
+    const chain = queryChain(vi.fn, [{ count: counts[callIndex++] ?? 0 }]);
+    chains.push(chain);
+    return chain as never;
   });
+  return chains;
 }
 
 /**
@@ -212,7 +226,7 @@ describe('Debug Routes', () => {
         { method: 'DELETE' as const, url: '/debug/violations' },
         { method: 'DELETE' as const, url: '/debug/users' },
         { method: 'DELETE' as const, url: '/debug/servers' },
-        { method: 'DELETE' as const, url: '/debug/rules' },
+        { method: 'DELETE' as const, url: '/debug/automations' },
         { method: 'POST' as const, url: '/debug/reset' },
         { method: 'POST' as const, url: '/debug/refresh-aggregates' },
         { method: 'GET' as const, url: '/debug/env' },
@@ -264,6 +278,21 @@ describe('Debug Routes', () => {
       expect(body.database.tables).toHaveLength(2);
     });
 
+    it('counts only completed policy runs under violations', async () => {
+      app = await buildTestApp(ownerUser);
+
+      const chains = mockDbSelectCounts([0, 0, 0, 0, 0, 0, 0, 0]);
+      mockDbExecute([{ rows: [{ size: '8 KB' }] }, { rows: [] }]);
+
+      await app.inject({ method: 'GET', url: '/debug/stats' });
+
+      const where = renderCall(chains[1]);
+      expect(where.text).toContain('automation_runs.kind =');
+      expect(where.text).toContain('automation_runs.outcome =');
+      expect(where.params).toContain('policy');
+      expect(where.params).toContain('completed');
+    });
+
     it('handles empty database', async () => {
       app = await buildTestApp(ownerUser);
 
@@ -288,11 +317,7 @@ describe('Debug Routes', () => {
       app = await buildTestApp(ownerUser);
 
       // Mock count queries returning empty arrays (undefined count)
-      vi.mocked(db.select).mockImplementation(() => {
-        return {
-          from: vi.fn().mockReturnValue(Promise.resolve([])), // Empty array, no count property
-        } as never;
-      });
+      vi.mocked(db.select).mockImplementation(() => queryChain(vi.fn, []) as never);
 
       mockDbExecute([{ rows: [{ size: '8 KB' }] }, { rows: [] }]);
 
@@ -487,34 +512,34 @@ describe('Debug Routes', () => {
     });
   });
 
-  describe('DELETE /debug/rules', () => {
-    it('deletes all rules and violations first', async () => {
+  describe('DELETE /debug/automations', () => {
+    it('deletes all automations and their runs first', async () => {
       app = await buildTestApp(ownerUser);
 
-      // Mock delete - first for violations (no returning), then for rules (with returning)
+      // Runs first (no returning), then automations (with returning), then the
+      // non-builtin templates (where clause, no returning).
       let deleteCallIndex = 0;
       vi.mocked(db.delete).mockImplementation(() => {
         deleteCallIndex++;
-        if (deleteCallIndex === 1) {
-          // violations - just resolves
-          return Promise.resolve() as never;
-        } else {
-          // rules - returns deleted items
+        if (deleteCallIndex === 1) return Promise.resolve() as never;
+        if (deleteCallIndex === 2) {
           return {
-            returning: vi.fn().mockResolvedValue([{ id: 'rule-1' }, { id: 'rule-2' }]),
+            returning: vi.fn().mockResolvedValue([{ id: 'automation-1' }, { id: 'automation-2' }]),
           } as never;
         }
+        return { where: vi.fn().mockResolvedValue(undefined) } as never;
       });
 
       const response = await app.inject({
         method: 'DELETE',
-        url: '/debug/rules',
+        url: '/debug/automations',
       });
 
       expect(response.statusCode).toBe(200);
       const body = response.json();
       expect(body.success).toBe(true);
       expect(body.deleted).toBe(2);
+      expect(db.delete).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -594,9 +619,11 @@ describe('Debug Routes', () => {
       expect(getAuth).not.toHaveBeenCalled();
 
       // Verify delete was called 15 times (violations, terminationLogs, sessions, rules,
-      // notificationChannelRouting, notificationPreferences, mobileSessions, mobileTokens,
+      // destinations, notificationPreferences, mobileSessions, mobileTokens,
       // librarySnapshots, libraryItems, serverUsers, servers, plexAccounts, users, settings)
       expect(db.delete).toHaveBeenCalledTimes(15);
+      expect(db.delete).toHaveBeenCalledWith(destinations);
+      expect(seedBuiltinDestinations).toHaveBeenCalledTimes(1);
     });
 
     it('revokes every Better Auth session before deleting any row (ghost cookie rejected after reset)', async () => {
@@ -663,8 +690,8 @@ describe('Debug Routes', () => {
       expect(body.success).toBe(true);
       expect(body.message).toBe('Aggregates refreshed (last 7 days)');
 
-      // Should call execute for each of the 4 active aggregates
-      expect(db.execute).toHaveBeenCalledTimes(4);
+      // One refresh per continuous aggregate defined in timescale.ts
+      expect(db.execute).toHaveBeenCalledTimes(5);
     });
 
     it('handles individual aggregate refresh failure gracefully', async () => {

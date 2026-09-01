@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Archive, Film, Tv, Music, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Archive, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { formatMediaTech, type StaleResponse } from '@tracearr/shared';
 import type { Server } from '@tracearr/shared';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { DataTablePager } from '@/components/ui/data-table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
@@ -26,7 +26,9 @@ import { useLibraryStale } from '@/hooks/queries/useLibrary';
 import { useServerColorMap } from '@/hooks/useServerColorMap';
 import { ServerColumnCell } from '@/components/server';
 import { formatBytes } from '@/lib/formatters';
-import { EmptyState, PlayedStateCoverageBanner } from '@/components/library';
+import { EmptyState } from '@/components/ui/empty-state';
+import { MediaTypeBadge } from './badges';
+import { PlayedStateCoverageBanner } from '@/components/library';
 
 type MediaTypeFilter = 'all' | 'movie' | 'show' | 'artist';
 type SortBy = 'size' | 'title' | 'days_stale' | 'added_at';
@@ -69,37 +71,6 @@ function StaleBadge({ daysStale }: { daysStale: number }) {
   );
 }
 
-/**
- * Badge component for media type (Movie, TV, Music)
- */
-function MediaTypeBadge({ mediaType }: { mediaType: string }) {
-  switch (mediaType) {
-    case 'movie':
-      return (
-        <Badge variant="secondary" className="gap-1">
-          <Film className="h-3 w-3" />
-          Movie
-        </Badge>
-      );
-    case 'show':
-      return (
-        <Badge variant="secondary" className="gap-1 bg-blue-500/10 text-blue-500">
-          <Tv className="h-3 w-3" />
-          TV
-        </Badge>
-      );
-    case 'artist':
-      return (
-        <Badge variant="secondary" className="gap-1 bg-purple-500/10 text-purple-500">
-          <Music className="h-3 w-3" />
-          Music
-        </Badge>
-      );
-    default:
-      return null;
-  }
-}
-
 interface StaleContentTabsProps {
   serverIds: string[];
   libraryId?: string | null;
@@ -117,6 +88,8 @@ export function StaleContentTabs({
   isMultiServer,
   selectedServers,
 }: StaleContentTabsProps) {
+  const { t } = useTranslation(['common', 'pages']);
+
   const [activeTab, setActiveTab] = useState<'never-watched' | 'stale'>('never-watched');
   const [staleDays, setStaleDays] = useState('90');
   const [mediaTypeFilter, setMediaTypeFilter] = useState<MediaTypeFilter>('all');
@@ -125,7 +98,6 @@ export function StaleContentTabs({
   const [sortBy, setSortBy] = useState<SortBy>('size');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
-  const { t } = useTranslation('pages');
   const colorMap = useServerColorMap();
 
   // Reset pages when filters change
@@ -345,32 +317,21 @@ export function StaleContentTabs({
           </TableBody>
         </Table>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-2">
-            <span className="text-muted-foreground text-sm">
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onPageChange(page - 1)}
-                disabled={page <= 1}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onPageChange(page + 1)}
-                disabled={page >= totalPages}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        )}
+        <DataTablePager
+          page={page}
+          pageCount={totalPages}
+          canPrevious={page > 1}
+          canNext={page < totalPages}
+          onPrevious={() => onPageChange(page - 1)}
+          onNext={() => onPageChange(page + 1)}
+          labels={{
+            navigation: t('table.pagination'),
+            status: t('table.pageOf', { page, total: totalPages }),
+            previous: t('actions.previous'),
+            next: t('actions.next'),
+          }}
+          className="px-2"
+        />
       </div>
     );
   };
@@ -432,8 +393,8 @@ export function StaleContentTabs({
             false,
             isNoDataMode
               ? {
-                  title: t('library.neverWatched.emptyTitleNoData'),
-                  description: t('library.neverWatched.emptyDescNoData'),
+                  title: t('pages:library.neverWatched.emptyTitleNoData'),
+                  description: t('pages:library.neverWatched.emptyDescNoData'),
                 }
               : undefined
           )}

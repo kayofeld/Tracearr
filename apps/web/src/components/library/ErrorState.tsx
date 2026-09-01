@@ -14,7 +14,7 @@ export function ErrorState({ title = 'Something went wrong', message, onRetry }:
       <h3 className="mb-2 text-lg font-medium">{title}</h3>
       <p className="text-muted-foreground mb-4 max-w-md">{message}</p>
       <Button variant="outline" onClick={onRetry}>
-        <RefreshCw className="mr-2 h-4 w-4" />
+        <RefreshCw />
         Try again
       </Button>
     </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { Users } from './Users';
@@ -8,9 +8,11 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
+const { mockResetTrustMutate } = vi.hoisted(() => ({ mockResetTrustMutate: vi.fn() }));
+
 vi.mock('@/hooks/queries', () => ({
   useUsers: vi.fn(),
-  useBulkResetTrust: () => ({ mutate: vi.fn(), isPending: false }),
+  useBulkResetTrust: () => ({ mutate: mockResetTrustMutate, isPending: false }),
   useBulkRemoveUsers: () => ({ mutate: vi.fn(), isPending: false }),
   useMergeUsers: () => ({ mutate: vi.fn(), isPending: false }),
   useMergeSuggestions: () => ({ data: undefined, isLoading: false }),
@@ -34,9 +36,40 @@ const mockUseUsers = vi.mocked(useUsers);
 const mockUseServer = vi.mocked(useServer);
 const mockUseAuth = vi.mocked(useAuth);
 
-function renderUsers() {
+const aliceRow = {
+  id: 'su-1',
+  userId: 'u-1',
+  serverId: 'server-1',
+  serverName: 'Server One',
+  username: 'alice',
+  identityName: 'Alice',
+  identityTrustScore: 80,
+  trustScore: 80,
+  role: 'member',
+  identityServers: [],
+  loginCapable: true,
+  identityJoinedAt: '2024-01-02T00:00:00.000Z',
+  identityLastActivityAt: '2024-05-02T00:00:00.000Z',
+};
+
+function mockList(rows: unknown[], total: number) {
+  mockUseUsers.mockReturnValue({
+    data: { data: rows, meta: { page: 1, pageSize: 100, total } },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useUsers>);
+}
+
+function lastQueryParams() {
+  const calls = mockUseUsers.mock.calls;
+  return calls[calls.length - 1]?.[0];
+}
+
+function renderUsers(path = '/users') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <Users />
     </MemoryRouter>
   );
@@ -48,6 +81,7 @@ describe('Users', () => {
     mockUseServer.mockReturnValue({
       selectedServerIds: [],
       selectedServers: [],
+      servers: [{ id: 'server-1', name: 'Server One' }],
     } as unknown as ReturnType<typeof useServer>);
     mockUseAuth.mockReturnValue({
       user: { role: 'viewer' },
@@ -55,13 +89,7 @@ describe('Users', () => {
   });
 
   it('shows the users table once the list has loaded', () => {
-    mockUseUsers.mockReturnValue({
-      data: { data: [], total: 0, totalPages: 1 },
-      isLoading: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof useUsers>);
+    mockList([], 0);
 
     renderUsers();
 
@@ -89,38 +117,74 @@ describe('Users', () => {
   });
 
   it('wires a trust score header click into orderBy on the query, not a client-only sort', async () => {
-    mockUseUsers.mockReturnValue({
-      data: {
-        data: [
-          {
-            id: 'su-1',
-            userId: 'u-1',
-            serverId: 'server-1',
-            serverName: 'Server One',
-            username: 'alice',
-            identityName: 'Alice',
-            identityTrustScore: 80,
-            trustScore: 80,
-            role: 'member',
-            identityServers: [],
-          },
-        ],
-        total: 1,
-        totalPages: 1,
-      },
-      isLoading: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof useUsers>);
+    mockList([aliceRow], 1);
 
     renderUsers();
 
     await userEvent.click(screen.getByText('common:labels.trustScore'));
 
-    const calls = mockUseUsers.mock.calls;
-    const lastCall = calls[calls.length - 1]?.[0];
+    const lastCall = lastQueryParams();
     expect(lastCall).toMatchObject({ orderBy: 'trustScore' });
     expect(['asc', 'desc']).toContain(lastCall?.orderDir);
+  });
+
+  it('sends the search box to the server and returns to the first page once it settles', async () => {
+    mockList([aliceRow], 250);
+
+    renderUsers();
+
+    await userEvent.click(screen.getByRole('button', { name: 'common:actions.next' }));
+    expect(lastQueryParams()).toMatchObject({ page: 2 });
+
+    await userEvent.type(screen.getByPlaceholderText('pages:users.searchPlaceholder'), 'bob');
+
+    await waitFor(() => expect(lastQueryParams()).toMatchObject({ search: 'bob', page: 1 }));
+  });
+
+  it('reads a linked date filter out of the URL and sends it as calendar-date bounds', () => {
+    mockList([aliceRow], 1);
+
+    renderUsers('/users?joinedFrom=2024-01-01&joinedTo=2024-02-01&activeFrom=2024-03-04');
+
+    expect(lastQueryParams()).toMatchObject({
+      joinedAfter: '2024-01-01',
+      joinedBefore: '2024-02-01',
+      activeAfter: '2024-03-04',
+    });
+  });
+
+  it('sends every active filter with a select-all trust reset, not just the server scope', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { role: 'admin' },
+    } as unknown as ReturnType<typeof useAuth>);
+    mockList([aliceRow], 250);
+
+    renderUsers('/users?search=bob&hasAccessTo=server-1&joinedFrom=2024-01-01&showRemoved=1');
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'common:table.selectRow' }));
+    await userEvent.click(screen.getByRole('button', { name: 'pages:users.selectAllUsers' }));
+    await userEvent.click(screen.getByRole('button', { name: 'pages:users.resetTrustScore' }));
+
+    const dialog = await screen.findByRole('alertdialog');
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'pages:users.resetTrustScore' })
+    );
+
+    expect(mockResetTrustMutate).toHaveBeenCalledWith(
+      {
+        selectAll: true,
+        filters: {
+          serverIds: undefined,
+          hasAccessTo: ['server-1'],
+          includeRemoved: true,
+          search: 'bob',
+          joinedAfter: '2024-01-01',
+          joinedBefore: undefined,
+          activeAfter: undefined,
+          activeBefore: undefined,
+        },
+      },
+      expect.anything()
+    );
   });
 });

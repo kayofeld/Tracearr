@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../../src/db/client.js';
 import { servers } from '../../src/db/schema.js';
 import {
+  applyTrustChange,
   batchSyncUsersFromMediaServer,
   syncUserFromMediaServer,
   getServerUsersByServer,
@@ -191,6 +192,63 @@ describe('userService integration tests', () => {
       expect(result.has(mediaUsers[1].id)).toBe(true);
       expect(result.get(mediaUsers[0].id)?.username).toBe('mapuser1');
       expect(result.get(mediaUsers[1].id)?.isServerAdmin).toBe(true);
+    });
+  });
+
+  describe('applyTrustChange', () => {
+    /** A fresh account on the test server, at the trust score the case needs. */
+    async function account(trustScore: number): Promise<string> {
+      const synced = await syncUserFromMediaServer(testServerId, {
+        id: `trust-${randomUUID().slice(0, 8)}`,
+        username: 'trustuser',
+        isAdmin: false,
+      });
+      if (!synced) throw new Error('account was not created');
+      const applied = await applyTrustChange(synced.serverUser.id, {
+        mode: 'set',
+        value: trustScore,
+      });
+      if (!applied) throw new Error('seed write found no row');
+      return synced.serverUser.id;
+    }
+
+    it('returns the score the write replaced alongside the one it wrote', async () => {
+      const id = await account(90);
+
+      const applied = await applyTrustChange(id, { mode: 'adjust', amount: -15 });
+
+      expect(applied?.previous).toBe(90);
+      expect(applied?.serverUser.trustScore).toBe(75);
+      expect(applied?.serverUser.id).toBe(id);
+      expect(applied?.serverUser.serverId).toBe(testServerId);
+    });
+
+    it.each([
+      ['adjust', { mode: 'adjust', amount: -50 } as const, 20, 0],
+      ['adjust', { mode: 'adjust', amount: 50 } as const, 80, 100],
+      ['set', { mode: 'set', value: -10 } as const, 50, 0],
+      ['set', { mode: 'set', value: 500 } as const, 50, 100],
+    ])('a %s past the ends clamps to 0-100', async (_mode, change, from, expected) => {
+      const id = await account(from);
+
+      const applied = await applyTrustChange(id, change);
+
+      expect(applied?.previous).toBe(from);
+      expect(applied?.serverUser.trustScore).toBe(expected);
+    });
+
+    it('resets to the baseline and reports no move when it was already there', async () => {
+      const id = await account(100);
+
+      const applied = await applyTrustChange(id, { mode: 'reset' });
+
+      // previous === next is what tells the producer this write announced nothing.
+      expect(applied?.previous).toBe(100);
+      expect(applied?.serverUser.trustScore).toBe(100);
+    });
+
+    it('returns null for an account that is not there', async () => {
+      expect(await applyTrustChange(randomUUID(), { mode: 'reset' })).toBeNull();
     });
   });
 });

@@ -1,15 +1,32 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
-import type { ColumnDef } from '@tanstack/react-table';
 import type { RequesterStatsRow } from '@tracearr/shared';
-import { Users, Film, Tv, HardDrive, UserX, Settings as SettingsIcon, EyeOff } from 'lucide-react';
+import {
+  Users,
+  Film,
+  Tv,
+  HardDrive,
+  UserX,
+  Settings as SettingsIcon,
+  EyeOff,
+  ClipboardList,
+} from 'lucide-react';
 import { StatCard } from '@/components/ui/stat-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DataTable } from '@/components/ui/data-table';
+import {
+  DataTableBody,
+  DataTableEmpty,
+  DataTableHeader,
+  DataTablePager,
+  DataTableRoot,
+  DataTableViewport,
+  useDataTable,
+  type DataTableColumns,
+} from '@/components/ui/data-table';
 import { ErrorState } from '@/components/library/ErrorState';
 import { useRequesterStats } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
@@ -58,7 +75,7 @@ export function StatsRequesters() {
         ? 'statsRequesters.unattributedRowDescSeerr'
         : 'statsRequesters.unattributedRowDescBoth';
 
-  const columns = useMemo<ColumnDef<RequesterStatsRow>[]>(
+  const columns = useMemo<DataTableColumns<RequesterStatsRow>>(
     () => [
       {
         accessorKey: 'username',
@@ -126,6 +143,14 @@ export function StatsRequesters() {
     ],
     [t]
   );
+
+  const { table, pager } = useDataTable<RequesterStatsRow>({
+    columns,
+    data: stats.data?.requesters ?? [],
+    // Rows are one per requester and the unattributed bucket has no id.
+    getRowId: (row) => row.userId ?? row.username ?? 'unattributed',
+    pageSize: 20,
+  });
 
   const header = (
     <div>
@@ -285,13 +310,32 @@ export function StatsRequesters() {
           <p className="text-muted-foreground text-sm">{t('statsRequesters.tableDesc')}</p>
         </CardHeader>
         <CardContent>
-          <DataTable
-            columns={columns}
-            data={stats.data?.requesters ?? []}
-            isLoading={stats.isLoading}
-            pageSize={20}
-            emptyMessage={t('statsRequesters.noData')}
-          />
+          <DataTableRoot density="default">
+            <DataTableViewport>
+              <DataTableHeader table={table} />
+              <DataTableBody
+                table={table}
+                isLoading={stats.isLoading}
+                loadingLabel={t('common:states.loading')}
+                empty={
+                  <DataTableEmpty
+                    table={table}
+                    icon={ClipboardList}
+                    title={t('statsRequesters.noData')}
+                  />
+                }
+              />
+            </DataTableViewport>
+            <DataTablePager
+              {...pager}
+              labels={{
+                navigation: t('common:table.pagination'),
+                status: t('common:table.pageOf', { page: pager.page, total: pager.pageCount }),
+                previous: t('common:actions.previous'),
+                next: t('common:actions.next'),
+              }}
+            />
+          </DataTableRoot>
         </CardContent>
       </Card>
     </div>

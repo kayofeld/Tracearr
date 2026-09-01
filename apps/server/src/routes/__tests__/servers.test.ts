@@ -11,10 +11,10 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DrizzleQueryError } from 'drizzle-orm/errors';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import sensible from '@fastify/sensible';
 import { randomUUID } from 'node:crypto';
-import type { AuthUser } from '@tracearr/shared';
+import { WS_EVENTS, type AuthUser } from '@tracearr/shared';
 
 // Mock dependencies before imports
 vi.mock('../../db/client.js', () => ({
@@ -23,6 +23,7 @@ vi.mock('../../db/client.js', () => ({
     insert: vi.fn(),
     delete: vi.fn(),
     update: vi.fn(),
+    transaction: vi.fn(),
   },
 }));
 
@@ -62,19 +63,27 @@ vi.mock('../../services/sync.js', () => ({
   syncServer: vi.fn(),
 }));
 
+const mockPublish = vi.fn(() => Promise.resolve());
 vi.mock('../../services/cache.js', () => ({
   getCacheService: vi.fn().mockReturnValue({
     invalidateServerStats: vi.fn().mockResolvedValue(undefined),
   }),
+  getPubSubService: () => ({ publish: mockPublish }),
 }));
 
 vi.mock('../../jobs/librarySyncQueue.js', () => ({
   enqueueLibrarySync: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../../services/serverLiveStats.js', () => ({
+  getServerResourceStats: vi.fn(),
+  getServerLiveStats: vi.fn(),
+}));
+
 // Import mocked modules
 import { db } from '../../db/client.js';
 import { PlexClient, JellyfinClient, EmbyClient } from '../../services/mediaServer/index.js';
+import { getServerLiveStats, getServerResourceStats } from '../../services/serverLiveStats.js';
 import { syncServer } from '../../services/sync.js';
 import { serverRoutes } from '../servers.js';
 
@@ -245,6 +254,35 @@ describe('Server Routes', () => {
       expect(body.data[0].name).toBe('Test Plex Server');
       // Should not include token
       expect(body.data[0].token).toBeUndefined();
+    });
+
+    it('carries the installed and latest versions when they are known', async () => {
+      app = await buildTestApp(ownerUser);
+
+      mockDbSelectWhere([
+        {
+          id: mockServer.id,
+          name: mockServer.name,
+          type: mockServer.type,
+          url: mockServer.url,
+          displayOrder: 0,
+          color: '#4B8BFF',
+          version: '10.11.11',
+          latestVersion: '10.11.12',
+          createdAt: mockServer.createdAt,
+          updatedAt: mockServer.updatedAt,
+        },
+      ]);
+
+      const response = await app.inject({ method: 'GET', url: '/servers' });
+
+      expect(response.statusCode).toBe(200);
+      const selected = vi.mocked(db.select).mock.calls[0]?.[0];
+      expect(selected).toHaveProperty('version');
+      expect(selected).toHaveProperty('latestVersion');
+      const body = response.json();
+      expect(body.data[0].version).toBe('10.11.11');
+      expect(body.data[0].latestVersion).toBe('10.11.12');
     });
 
     it('returns only authorized servers for guest', async () => {
@@ -748,6 +786,115 @@ describe('Server Routes', () => {
     });
   });
 
+  describe('servers:changed', () => {
+    it('announces a created server', async () => {
+      app = await buildTestApp(ownerUser);
+
+      vi.mocked(PlexClient.verifyServerAdmin).mockResolvedValue({ success: true });
+      vi.mocked(PlexClient.getAccountInfo).mockResolvedValue({
+        id: 'plex-account-123',
+        username: 'admin',
+        isAdmin: true,
+      });
+      vi.mocked(syncServer).mockResolvedValue({
+        usersAdded: 0,
+        usersUpdated: 0,
+        usersSkipped: 0,
+        usersRemoved: 0,
+        usersRestored: 0,
+        librariesSynced: 0,
+        errors: [],
+      });
+
+      let selectCall = 0;
+      vi.mocked(db.select).mockImplementation(() => {
+        selectCall++;
+        const chain = {
+          from: vi.fn().mockReturnThis(),
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockResolvedValue([]),
+        };
+        if (selectCall === 3) {
+          chain.from = vi.fn().mockResolvedValue([]);
+        }
+        return chain as never;
+      });
+      mockDbInsert([{ ...mockServer, id: randomUUID() }]);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/servers',
+        payload: {
+          name: 'Announced Plex',
+          type: 'plex',
+          url: 'http://plex.local:32400',
+          token: 'my-plex-token',
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(mockPublish).toHaveBeenCalledWith(WS_EVENTS.SERVERS_CHANGED, {});
+    });
+
+    it('announces an updated server', async () => {
+      app = await buildTestApp(ownerUser);
+
+      mockDbSelectLimit([mockServer]);
+      mockDbUpdateReturning([{ ...mockServer, name: 'Renamed Server' }]);
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/servers/${mockServer.id}`,
+        payload: { name: 'Renamed Server' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockPublish).toHaveBeenCalledWith(WS_EVENTS.SERVERS_CHANGED, {});
+    });
+
+    it('announces a reordered server list', async () => {
+      app = await buildTestApp(ownerUser);
+
+      const ids = [randomUUID(), randomUUID()];
+      // The reorder lookup awaits .where() directly, with no orderBy or limit.
+      vi.mocked(db.select).mockReturnValue({
+        from: vi.fn().mockReturnThis(),
+        where: vi.fn().mockResolvedValue(ids.map((id) => ({ id }))),
+      } as never);
+      vi.mocked(db.transaction).mockImplementation(async (fn: unknown) =>
+        (fn as (tx: unknown) => Promise<void>)({
+          update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
+        })
+      );
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/servers/reorder',
+        payload: {
+          servers: ids.map((id, index) => ({ id, displayOrder: index })),
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockPublish).toHaveBeenCalledWith(WS_EVENTS.SERVERS_CHANGED, {});
+    });
+
+    it('announces a deleted server', async () => {
+      app = await buildTestApp(ownerUser);
+
+      mockDbSelectLimit([mockServer]);
+      mockDbDelete();
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/servers/${mockServer.id}`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockPublish).toHaveBeenCalledWith(WS_EVENTS.SERVERS_CHANGED, {});
+    });
+  });
+
   describe('POST /servers/:id/sync', () => {
     beforeEach(() => {
       vi.mocked(syncServer).mockResolvedValue({
@@ -954,6 +1101,42 @@ describe('Server Routes', () => {
       await customApp.close();
     });
 
+    it('goes through the shared authenticate guard, not a bare jwtVerify', async () => {
+      // The shared guard enforces the post-restore revocation timestamp and the
+      // mobile device blacklist; a hand-rolled jwtVerify skips both. Here the
+      // guard rejects while jwtVerify would succeed, so a 200 means the route
+      // is still bypassing it.
+      const customApp = Fastify({ logger: false });
+      await customApp.register(sensible);
+
+      customApp.decorate('authenticate', async (_request: unknown, reply: FastifyReply) => {
+        await reply.status(401).send({ message: 'Session has been revoked' });
+      });
+
+      customApp.decorateRequest('jwtVerify', async function (this: { user: AuthUser }) {
+        this.user = ownerUser;
+      });
+
+      await customApp.register(serverRoutes, { prefix: '/servers' });
+
+      mockDbSelectLimit([mockServer]);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        headers: new Map([['content-type', 'image/jpeg']]),
+        arrayBuffer: () => Promise.resolve(Buffer.from('image')),
+      });
+
+      const response = await customApp.inject({
+        method: 'GET',
+        url: `/servers/${mockServer.id}/image/thumb.jpg`,
+        headers: { authorization: 'Bearer revoked-but-well-formed' },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(mockFetch).not.toHaveBeenCalled();
+      await customApp.close();
+    });
+
     it('returns 404 for non-existent server', async () => {
       app = await buildTestApp(ownerUser);
 
@@ -1052,6 +1235,171 @@ describe('Server Routes', () => {
       });
 
       expect(response.statusCode).toBe(400);
+    });
+
+    it('returns cached resource data for a Plex server', async () => {
+      const dataPoint = {
+        timespan: 6,
+        at: 1786145464,
+        hostCpuUtilization: 2.757,
+        processCpuUtilization: 0.025,
+        hostMemoryUtilization: 12.41,
+        processMemoryUtilization: 0.371,
+      };
+
+      app = await buildTestApp(ownerUser);
+      mockDbSelectLimit([mockServer]);
+      vi.mocked(getServerResourceStats).mockResolvedValue([dataPoint]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/servers/${mockServer.id}/statistics`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.serverId).toBe(mockServer.id);
+      expect(body.data).toEqual([dataPoint]);
+      expect(getServerResourceStats).toHaveBeenCalledWith(
+        undefined,
+        expect.objectContaining({ id: mockServer.id, url: mockServer.url, token: mockServer.token })
+      );
+    });
+  });
+
+  describe('GET /servers/:id/live-stats', () => {
+    it('returns 404 for non-existent server', async () => {
+      app = await buildTestApp(ownerUser);
+
+      mockDbSelectLimit([]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/servers/${randomUUID()}/live-stats`,
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('serves non-Plex servers through the stats service (plugin buffer path)', async () => {
+      const jellyfinServer = {
+        ...mockServer,
+        type: 'jellyfin' as const,
+      };
+      const point = {
+        at: 100,
+        timespan: 6,
+        hostCpuUtilization: 1,
+        processCpuUtilization: 2,
+        hostMemoryUtilization: 3,
+        processMemoryUtilization: 4,
+      };
+
+      app = await buildTestApp(ownerUser);
+      mockDbSelectLimit([jellyfinServer]);
+      vi.mocked(getServerLiveStats).mockClear();
+      vi.mocked(getServerLiveStats).mockResolvedValue({
+        statistics: [point],
+        bandwidth: [],
+        bandwidthSamples: [],
+        bandwidthAccounts: [],
+        bandwidthDevices: [],
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/servers/${jellyfinServer.id}/live-stats`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.serverId).toBe(jellyfinServer.id);
+      expect(body.statistics).toEqual([point]);
+      expect(body.bandwidth).toEqual([]);
+      expect(getServerLiveStats).toHaveBeenCalledWith(
+        undefined,
+        expect.objectContaining({ id: jellyfinServer.id, type: 'jellyfin' })
+      );
+    });
+
+    it('returns 400 for invalid server ID', async () => {
+      app = await buildTestApp(ownerUser);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/servers/not-a-uuid/live-stats',
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('strips per-account bandwidth detail for non-owner callers', async () => {
+      app = await buildTestApp(viewerUser);
+      mockDbSelectLimit([mockServer]);
+      vi.mocked(getServerLiveStats).mockResolvedValue({
+        statistics: [],
+        bandwidth: [{ at: 101, timespan: 1, lanBytes: 28, wanBytes: 729 }],
+        bandwidthSamples: [{ at: 101, accountId: 1, deviceId: 1, lan: true, bytes: 28 }],
+        bandwidthAccounts: [{ id: 1, name: 'Gallapagos', thumb: null }],
+        bandwidthDevices: [{ id: 1, name: 'Chromecast', platform: 'Chromecast' }],
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/servers/${mockServer.id}/live-stats`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.bandwidth).toEqual([{ at: 101, timespan: 1, lanBytes: 28, wanBytes: 729 }]);
+      expect(body.bandwidthSamples).toEqual([]);
+      expect(body.bandwidthAccounts).toEqual([]);
+      expect(body.bandwidthDevices).toEqual([]);
+    });
+
+    it('returns combined statistics and bandwidth with attribution', async () => {
+      const liveStats = {
+        statistics: [
+          {
+            timespan: 6,
+            at: 1786145464,
+            hostCpuUtilization: 2.757,
+            processCpuUtilization: 0.025,
+            hostMemoryUtilization: 12.41,
+            processMemoryUtilization: 0.371,
+          },
+        ],
+        bandwidth: [{ at: 101, timespan: 1, lanBytes: 28, wanBytes: 729 }],
+        bandwidthSamples: [
+          { at: 101, accountId: 1, deviceId: 1, lan: true, bytes: 28 },
+          { at: 101, accountId: 1, deviceId: 382, lan: false, bytes: 729 },
+        ],
+        bandwidthAccounts: [{ id: 1, name: 'Gallapagos', thumb: null }],
+        bandwidthDevices: [{ id: 1, name: 'Chromecast', platform: 'Chromecast' }],
+      };
+
+      app = await buildTestApp(ownerUser);
+      mockDbSelectLimit([mockServer]);
+      vi.mocked(getServerLiveStats).mockResolvedValue(liveStats);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/servers/${mockServer.id}/live-stats`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.serverId).toBe(mockServer.id);
+      expect(body.statistics).toEqual(liveStats.statistics);
+      expect(body.bandwidth).toEqual(liveStats.bandwidth);
+      expect(body.bandwidthSamples).toEqual(liveStats.bandwidthSamples);
+      expect(body.bandwidthAccounts).toEqual(liveStats.bandwidthAccounts);
+      expect(body.bandwidthDevices).toEqual(liveStats.bandwidthDevices);
+      expect(body.fetchedAt).toBeTruthy();
+      expect(getServerLiveStats).toHaveBeenCalledWith(
+        undefined,
+        expect.objectContaining({ id: mockServer.id, url: mockServer.url, token: mockServer.token })
+      );
     });
   });
 });

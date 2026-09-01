@@ -1,0 +1,112 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import type {
+  CreateDestinationInput,
+  DestinationKind,
+  UpdateDestinationInput,
+} from '@tracearr/shared';
+import { toast } from 'sonner';
+import { api, ApiError } from '@/lib/api';
+
+export const DESTINATIONS_KEY = ['destinations'];
+
+/** Non-owners get a 403 and this mounts inside useSocket for everyone, so a retry loop would be pure noise. */
+export function useDestinations(enabled = true) {
+  return useQuery({
+    queryKey: DESTINATIONS_KEY,
+    queryFn: api.destinations.list,
+    staleTime: 1000 * 60 * 5,
+    enabled,
+    retry: false,
+  });
+}
+
+function ruleNamesFrom(error: Error): string[] | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null;
+  const rules = error.body.rules;
+  if (!Array.isArray(rules)) return null;
+  return rules.filter((name): name is string => typeof name === 'string');
+}
+
+export function useCreateDestination() {
+  const { t } = useTranslation('notifications');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CreateDestinationInput) => api.destinations.create(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: DESTINATIONS_KEY });
+      toast.success(t('toast.success.destinationSaved'));
+    },
+    onError: (err) => {
+      toast.error(t('toast.error.destinationSaveFailed', { error: err.message }));
+    },
+  });
+}
+
+export function useUpdateDestination() {
+  const { t } = useTranslation('notifications');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateDestinationInput }) =>
+      api.destinations.update(id, data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: DESTINATIONS_KEY });
+      toast.success(t('toast.success.destinationSaved'));
+    },
+    onError: (err) => {
+      toast.error(t('toast.error.destinationSaveFailed', { error: err.message }));
+    },
+  });
+}
+
+export function useDeleteDestination() {
+  const { t } = useTranslation('notifications');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.destinations.remove(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: DESTINATIONS_KEY });
+      toast.success(t('toast.success.destinationDeleted'));
+    },
+    onError: (err) => {
+      const rules = ruleNamesFrom(err);
+      if (rules) {
+        toast.error(t('toast.error.destinationInUse', { rules: rules.join(', ') }));
+        return;
+      }
+      toast.error(t('toast.error.destinationDeleteFailed', { error: err.message }));
+    },
+  });
+}
+
+export function useTestDestination() {
+  const { t } = useTranslation('notifications');
+
+  return useMutation({
+    mutationFn: (id: string) => api.destinations.test(id),
+    onSuccess: () => {
+      toast.success(t('toast.success.destinationTestSent'));
+    },
+    onError: (err) => {
+      toast.error(t('toast.error.destinationTestFailed', { error: err.message }));
+    },
+  });
+}
+
+export function useTestUnsavedDestination() {
+  const { t } = useTranslation('notifications');
+
+  return useMutation({
+    mutationFn: (data: { type: DestinationKind; config: Record<string, unknown> }) =>
+      api.destinations.testUnsaved(data),
+    onSuccess: () => {
+      toast.success(t('toast.success.destinationTestSent'));
+    },
+    onError: (err) => {
+      toast.error(t('toast.error.destinationTestFailed', { error: err.message }));
+    },
+  });
+}

@@ -8,7 +8,7 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-vi.mock('@/components/map', () => ({
+vi.mock('@/components/map/StreamMap', () => ({
   StreamMap: () => <div data-testid="stream-map" />,
 }));
 
@@ -56,7 +56,7 @@ describe('Map', () => {
     } as unknown as ReturnType<typeof useServer>);
   });
 
-  it('shows the map once locations have loaded', () => {
+  it('shows the map once locations have loaded', async () => {
     mockUseLocationStats.mockReturnValue({
       data: { data: [], summary: undefined, availableFilters: undefined },
       isLoading: false,
@@ -67,7 +67,7 @@ describe('Map', () => {
 
     renderMap();
 
-    expect(screen.getByTestId('stream-map')).toBeInTheDocument();
+    expect(await screen.findByTestId('stream-map')).toBeInTheDocument();
   });
 
   it('shows an error state instead of the map when the locations query fails, and retry refetches it', async () => {

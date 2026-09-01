@@ -86,10 +86,10 @@ describe('getMergeSuggestions', () => {
   it('suggests exact-username matches and forces a login-capable side as target', async () => {
     const serverA = await createTestServer({ type: 'plex' });
     const serverB = await createTestServer({ type: 'jellyfin' });
-    const viewer = await createTestUser({ role: 'viewer' });
+    const admin = await createTestUser({ role: 'admin' });
     const member = await createTestUser({ role: 'member' });
     await createTestServerUser({
-      userId: viewer.id,
+      userId: admin.id,
       serverId: serverA.id,
       username: 'carol',
       email: null,
@@ -105,16 +105,16 @@ describe('getMergeSuggestions', () => {
     const match = suggestions.find((s) => s.matchType === 'username' && s.matchValue === 'carol');
 
     expect(match).toBeDefined();
-    expect(match!.requiredTargetUserId).toBe(viewer.id);
-    const viewerSide = match!.users.find((u) => u.userId === viewer.id);
-    expect(viewerSide?.loginCapable).toBe(true);
+    expect(match!.requiredTargetUserId).toBe(admin.id);
+    const adminSide = match!.users.find((u) => u.userId === admin.id);
+    expect(adminSide?.loginCapable).toBe(true);
   });
 
   it('excludes pairs where both identities are login capable', async () => {
     const serverA = await createTestServer({ type: 'plex' });
     const serverB = await createTestServer({ type: 'jellyfin' });
     const admin = await createTestUser({ role: 'admin' });
-    const viewer = await createTestUser({ role: 'viewer' });
+    const owner = await createTestUser({ role: 'owner' });
     await createTestServerUser({
       userId: admin.id,
       serverId: serverA.id,
@@ -122,7 +122,7 @@ describe('getMergeSuggestions', () => {
       email: null,
     });
     await createTestServerUser({
-      userId: viewer.id,
+      userId: owner.id,
       serverId: serverB.id,
       username: 'dave',
       email: null,

@@ -12,15 +12,13 @@
       "@tracearr/shared/*": ["./packages/shared/src/*"],
       "@tracearr/translations": ["./packages/translations/src"],
       "@tracearr/translations/*": ["./packages/translations/src/*"],
-      "@/*": ["./apps/web/src/*", "./apps/mobile/src/*"]
+      "@/*": ["./apps/web/src/*"]
     }
   },
   "include": [
     "apps/server/src/**/*.ts",
     "apps/web/src/**/*.ts",
     "apps/web/src/**/*.tsx",
-    "apps/mobile/**/*.ts",
-    "apps/mobile/**/*.tsx",
     "packages/shared/src/**/*.ts",
     "packages/translations/src/**/*.ts",
     "packages/test-utils/src/**/*.ts",
@@ -28,13 +26,5 @@
     "*.config.js",
     "*.config.mjs"
   ],
-  "exclude": [
-    "node_modules",
-    "**/node_modules",
-    "**/dist",
-    "**/build",
-    "**/.turbo",
-    "**/coverage",
-    "**/.expo"
-  ]
+  "exclude": ["node_modules", "**/node_modules", "**/dist", "**/build", "**/.turbo", "**/coverage"]
 }

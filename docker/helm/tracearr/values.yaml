@@ -116,7 +116,7 @@ timescale:
     - "-c"
     - "timescaledb.license=timescale"
     - "-c"
-    - "timescaledb.max_tuples_decompressed_per_dml_transaction=0"
+    - "timescaledb.max_tuples_decompressed_per_dml_transaction=100000"
     - "-c"
     - "max_locks_per_transaction=4096"
     - "-c"
@@ -188,7 +188,7 @@ redis:
 
   image:
     repository: redis
-    tag: 8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+    tag: 8-alpine@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576
     pullPolicy: IfNotPresent
 
   service:

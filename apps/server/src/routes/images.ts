@@ -9,7 +9,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { proxyImage } from '../services/imageProxy.js';
+import { POSTER_IMAGE_SIZE } from '@tracearr/shared';
+import { posterVersionFor, proxyImage } from '../services/imageProxy.js';
 
 // Static Tracearr logo paths (check for custom logo first, then use default)
 const CUSTOM_LOGO_PATH = join(process.cwd(), 'data', 'logo.png');
@@ -31,13 +32,37 @@ const FALLBACK_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="128" h
   <text x="64" y="105" text-anchor="middle" fill="#22D3EE" font-family="system-ui" font-weight="bold" font-size="14">Tracearr</text>
 </svg>`;
 
-const proxyQuerySchema = z.object({
-  server: z.uuid({ error: 'Invalid server ID' }),
-  url: z.string().min(1, 'Image URL is required'),
-  width: z.coerce.number().int().min(10).max(2000).optional().default(300),
-  height: z.coerce.number().int().min(10).max(2000).optional().default(450),
-  fallback: z.enum(['poster', 'avatar', 'art']).optional().default('poster'),
-});
+const proxyQuerySchema = z
+  .object({
+    server: z.uuid({ error: 'Invalid server ID' }),
+    url: z.string().min(1, 'Image URL is required'),
+    width: z.coerce.number().int().min(10).max(2000).optional().default(300),
+    height: z.coerce.number().int().min(10).max(2000).optional().default(450),
+    fallback: z.enum(['poster', 'avatar', 'art']).optional().default('poster'),
+    // Cache-busting fingerprint (posterVersionFor output). Presence marks the
+    // response cache as long-lived/immutable, so only the one poster size is allowed.
+    v: z
+      .string()
+      .regex(/^[0-9a-f]{8}$/i)
+      .optional(),
+    // Web grid only: allow the LQIP placeholder race. Absent for every other consumer.
+    lqip: z.enum(['1']).optional(),
+  })
+  .refine(
+    (data) =>
+      data.v === undefined ||
+      (data.width === POSTER_IMAGE_SIZE.width && data.height === POSTER_IMAGE_SIZE.height),
+    {
+      message: `Versioned requests must be ${POSTER_IMAGE_SIZE.width}x${POSTER_IMAGE_SIZE.height}`,
+      path: ['width'],
+    }
+  )
+  // Fails closed: a v that doesn't match the path's own fingerprint never earns
+  // immutable caching, so this can't be used to mint arbitrary cache entries.
+  .refine((data) => data.v === undefined || data.v === posterVersionFor(data.url), {
+    message: 'Version fingerprint does not match the image path',
+    path: ['v'],
+  });
 
 export const imageRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -53,6 +78,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
    * - width: Resize width (default 300)
    * - height: Resize height (default 450)
    * - fallback: Placeholder type if image fails (poster, avatar, art)
+   * - v: Optional cache-busting fingerprint; when present the response is
+   *   cached as long-lived/immutable instead of the default short cache
+   * - lqip=1: Web grid only; race the miss against the LQIP placeholder
    */
   app.get('/proxy', async (request, reply) => {
     const parseResult = proxyQuerySchema.safeParse(request.query);
@@ -64,7 +92,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const { server, url, width, height, fallback } = parseResult.data;
+    const { server, url, width, height, fallback, v, lqip } = parseResult.data;
 
     const result = await proxyImage({
       serverId: server,
@@ -72,6 +100,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       width,
       height,
       fallback: fallback,
+      version: v,
+      lqip: lqip === '1',
     });
 
     // Set cache headers
@@ -81,8 +111,15 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       reply.header('X-Cache', 'MISS');
     }
 
-    // Cache for 1 hour in browser, allow CDN caching
-    reply.header('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    // A versioned request is immutable (the fingerprint changes when the
+    // poster changes); the pipeline can still override with a short-lived
+    // header for the degraded LQIP placeholder response.
+    const cacheControl =
+      result.cacheControl ??
+      (v
+        ? 'public, max-age=31536000, immutable'
+        : 'public, max-age=3600, stale-while-revalidate=86400');
+    reply.header('Cache-Control', cacheControl);
     reply.header('Content-Type', result.contentType);
 
     return reply.send(result.data);

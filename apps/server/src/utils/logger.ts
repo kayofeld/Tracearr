@@ -164,5 +164,5 @@ export function createLogger(namespace?: string): Logger {
   };
 }
 
-// Default logger for rules engine
-export const rulesLogger = createLogger('rules');
+// Default logger for the automations engine
+export const automationsLogger = createLogger('automations');

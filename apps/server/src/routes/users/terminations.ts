@@ -8,7 +8,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { eq, desc, sql, inArray } from 'drizzle-orm';
 import { userIdParamSchema, identityScopedPaginationSchema } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { terminationLogs, users, rules, sessions, servers } from '../../db/schema.js';
+import { terminationLogs, users, automations, sessions, servers } from '../../db/schema.js';
 import { resolveIdentityScopedServerUserIds } from './queries.js';
 
 export const terminationsRoutes: FastifyPluginAsync = async (app) => {
@@ -58,7 +58,7 @@ export const terminationsRoutes: FastifyPluginAsync = async (app) => {
         triggeredByUserId: terminationLogs.triggeredByUserId,
         triggeredByUsername: users.username,
         ruleId: terminationLogs.ruleId,
-        ruleName: rules.name,
+        ruleName: automations.name,
         violationId: terminationLogs.violationId,
         reason: terminationLogs.reason,
         success: terminationLogs.success,
@@ -76,7 +76,7 @@ export const terminationsRoutes: FastifyPluginAsync = async (app) => {
       })
       .from(terminationLogs)
       .leftJoin(users, eq(terminationLogs.triggeredByUserId, users.id))
-      .leftJoin(rules, eq(terminationLogs.ruleId, rules.id))
+      .leftJoin(automations, eq(terminationLogs.ruleId, automations.id))
       .leftJoin(sessions, eq(terminationLogs.sessionId, sessions.id))
       .leftJoin(servers, eq(terminationLogs.serverId, servers.id))
       .where(inArray(terminationLogs.serverUserId, ids))

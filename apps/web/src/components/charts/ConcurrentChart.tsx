@@ -3,6 +3,7 @@ import Highcharts from 'highcharts';
 import { HighchartsReact } from 'highcharts-react-official';
 import { getHour12 } from '@/lib/timeFormat';
 import { ChartSkeleton } from '@/components/ui/skeleton';
+import { ChartEmpty } from './ChartEmpty';
 import { parseChartDate } from './chartUtils';
 
 interface ConcurrentData {
@@ -128,7 +129,7 @@ export function ConcurrentChart({
           const points = this.points || [];
           const date = new Date(this.x);
 
-          let dateStr = 'Unknown';
+          let dateStr: string;
           if (period === 'all') {
             dateStr = `Week of ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
           } else if (period === 'year' || period === 'month') {
@@ -234,14 +235,7 @@ export function ConcurrentChart({
   }
 
   if (!data || data.length === 0) {
-    return (
-      <div
-        className="text-muted-foreground flex items-center justify-center rounded-lg border border-dashed"
-        style={{ height }}
-      >
-        No concurrent stream data available
-      </div>
-    );
+    return <ChartEmpty height={height} message="No concurrent stream data available" />;
   }
 
   return (

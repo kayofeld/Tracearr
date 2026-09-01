@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import Highcharts from 'highcharts';
 import { HighchartsReact } from 'highcharts-react-official';
 import { ChartSkeleton } from '@/components/ui/skeleton';
+import { ChartEmpty } from './ChartEmpty';
 
 interface TopListItem {
   name: string;
@@ -17,6 +18,8 @@ interface TopListChartProps {
   color?: string;
   /** Use distinct colors for each bar instead of single color */
   colorful?: boolean;
+  /** How many leading rows of `data` to plot; the rest is omitted. */
+  limit?: number;
 }
 
 // Colorblind-friendly palette for distinct items
@@ -40,14 +43,14 @@ export function TopListChart({
   valueLabel = 'Value',
   color = 'hsl(var(--primary))',
   colorful = false,
+  limit = 10,
 }: TopListChartProps) {
   const options = useMemo<Highcharts.Options>(() => {
     if (!data || data.length === 0) {
       return {};
     }
 
-    // Take top 10
-    const top10 = data.slice(0, 10);
+    const top10 = data.slice(0, limit);
 
     // Build series data with optional per-bar colors
     const seriesData = top10.map((d, i) => ({
@@ -142,21 +145,14 @@ export function TopListChart({
         },
       ],
     };
-  }, [data, height, valueLabel, color, colorful]);
+  }, [data, height, valueLabel, color, colorful, limit]);
 
   if (isLoading) {
     return <ChartSkeleton height={height} />;
   }
 
   if (!data || data.length === 0) {
-    return (
-      <div
-        className="text-muted-foreground flex items-center justify-center rounded-lg border border-dashed"
-        style={{ height }}
-      >
-        No data available
-      </div>
-    );
+    return <ChartEmpty height={height} message="No data available" />;
   }
 
   return (

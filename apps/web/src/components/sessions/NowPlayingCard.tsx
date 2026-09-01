@@ -25,7 +25,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useServer } from '@/hooks/useServer';
 import { ServerColorAccent } from '@/components/server';
 import { TerminateSessionDialog } from './TerminateSessionDialog';
-import type { ActiveSession } from '@tracearr/shared';
+import { POSTER_IMAGE_SIZE, type ActiveSession } from '@tracearr/shared';
 
 interface NowPlayingCardProps {
   session: ActiveSession;
@@ -80,7 +80,12 @@ export function NowPlayingCard({ session, onClick }: NowPlayingCardProps) {
 
   // Build poster URL using image proxy
   const posterUrl = session.thumbPath
-    ? imageProxyUrl(session.serverId, session.thumbPath, 200, 300)
+    ? imageProxyUrl(
+        session.serverId,
+        session.thumbPath,
+        POSTER_IMAGE_SIZE.width,
+        POSTER_IMAGE_SIZE.height
+      )
     : null;
 
   // User avatar URL (proxied for Jellyfin/Emby)

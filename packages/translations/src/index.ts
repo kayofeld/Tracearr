@@ -18,9 +18,9 @@
  * }
  *
  * // With namespaces
- * function RulesComponent() {
+ * function AutomationsHeading() {
  *   const { t } = useTranslation('pages');
- *   return <span>{t('rules.impossibleTravel')}</span>;
+ *   return <span>{t('automations.title')}</span>;
  * }
  * ```
  *

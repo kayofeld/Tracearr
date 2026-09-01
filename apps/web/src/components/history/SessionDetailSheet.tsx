@@ -3,10 +3,8 @@
  * Uses condensed info sections matching the app's design patterns.
  */
 
-import { memo, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useState } from 'react';
 import { Link } from 'react-router';
-import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -44,9 +42,9 @@ import { cn, getCountryName, getMediaDisplay } from '@/lib/utils';
 import { imageProxyUrl } from '@/lib/api';
 import { formatDuration } from '@/lib/formatters';
 import { getAvatarUrl } from '@/components/users/utils';
-import { useTheme } from '@/components/theme-provider';
 import { StreamDetailsPanel } from './StreamDetailsPanel';
 
+import { POSTER_IMAGE_SIZE } from '@tracearr/shared';
 import type {
   SessionWithDetails,
   ActiveSession,
@@ -91,12 +89,6 @@ const MEDIA_CONFIG: Record<MediaType, { icon: typeof Film; label: string }> = {
   unknown: { icon: CircleHelp, label: 'Unknown' },
 };
 
-// Map tile URLs
-const TILE_URLS = {
-  dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-};
-
 // Format transcode reason codes into human-friendly labels
 function formatReason(reason: string): string {
   return reason
@@ -126,59 +118,16 @@ function getProgress(session: SessionWithDetails): number {
   return Math.min(100, Math.round((progress / session.totalDurationMs) * 100));
 }
 
-// Updates map center when lat/lon changes without remounting the MapContainer
-function MapCenterUpdater({ lat, lon }: { lat: number; lon: number }) {
-  const map = useMap();
-  const prevRef = useRef({ lat, lon });
+const LazyMiniMap = lazy(() =>
+  import('@/components/map/MiniMap').then((m) => ({ default: m.MiniMap }))
+);
 
-  useEffect(() => {
-    if (prevRef.current.lat !== lat || prevRef.current.lon !== lon) {
-      prevRef.current = { lat, lon };
-      map.setView([lat, lon], 10, { animate: false });
-    }
-  }, [lat, lon, map]);
-
-  return null;
-}
-
-// Mini map component for session location - memoized to prevent remounts when
-// parent re-renders while the sheet is open
+// Memoized to prevent remounts while the sheet re-renders open
 const MiniMap = memo(function MiniMap({ lat, lon }: { lat: number; lon: number }) {
-  const { theme } = useTheme();
-  const resolvedTheme =
-    theme === 'system'
-      ? window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light'
-      : theme;
-  const tileUrl = TILE_URLS[resolvedTheme];
-
   return (
-    <div className="h-28 w-full overflow-hidden rounded-lg">
-      <MapContainer
-        center={[lat, lon]}
-        zoom={10}
-        className="h-full w-full"
-        scrollWheelZoom={false}
-        zoomControl={false}
-        dragging={false}
-        doubleClickZoom={false}
-        attributionControl={false}
-      >
-        <MapCenterUpdater lat={lat} lon={lon} />
-        <TileLayer url={tileUrl} />
-        <CircleMarker
-          center={[lat, lon]}
-          radius={8}
-          pathOptions={{
-            color: '#06b6d4',
-            fillColor: '#22d3ee',
-            fillOpacity: 0.8,
-            weight: 2,
-          }}
-        />
-      </MapContainer>
-    </div>
+    <Suspense fallback={<div className="bg-muted h-28 w-full animate-pulse rounded-lg" />}>
+      <LazyMiniMap lat={lat} lon={lon} />
+    </Suspense>
   );
 });
 
@@ -291,7 +240,13 @@ function SessionContent({ session }: { session: SessionWithDetails | ActiveSessi
   const geoAsnNumber = session.geoAsnNumber ? `AS${session.geoAsnNumber}` : null;
 
   const posterUrl = session.thumbPath
-    ? imageProxyUrl(session.serverId, session.thumbPath, 120, 180, 'poster')
+    ? imageProxyUrl(
+        session.serverId,
+        session.thumbPath,
+        POSTER_IMAGE_SIZE.width,
+        POSTER_IMAGE_SIZE.height,
+        'poster'
+      )
     : null;
 
   const locationParts = [session.geoCity, session.geoRegion, geoCountryName].filter(Boolean);

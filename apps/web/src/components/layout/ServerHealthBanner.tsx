@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useSocket } from '@/hooks/useSocket';
+import { LayoutBanner } from './LayoutBanner';
 
 /**
  * Banner that displays when one or more servers are unreachable.
@@ -24,13 +23,5 @@ export function ServerHealthBanner() {
           serverNames,
         });
 
-  return (
-    <Alert
-      variant="destructive"
-      className="bg-destructive/15 flex items-center rounded-none border-x-0 border-t-0 [&>svg]:!top-1/2 [&>svg]:!-translate-y-1/2 [&>svg+div]:!translate-y-0"
-    >
-      <AlertTriangle className="h-4 w-4" />
-      <AlertDescription className="ml-2 flex-1">{message}</AlertDescription>
-    </Alert>
-  );
+  return <LayoutBanner variant="destructive">{message}</LayoutBanner>;
 }

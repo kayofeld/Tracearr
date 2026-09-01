@@ -1,0 +1,36 @@
+title: 'Vouch request: '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is for people who want to open a pull request and aren't vouched yet. Read [CONTRIBUTING.md](https://github.com/connorgallopo/Tracearr/blob/main/CONTRIBUTING.md) first, especially "Getting to Yes" and "On AI-Assisted Code".
+
+        Keep it short and write it yourself. A maintainer replies with `!vouch` if it's a fit, and from then on your PRs stay open. If what you want to do is fix a specific bug, you can skip this form: say so on the bug report and you'll be vouched there.
+  - type: textarea
+    attributes:
+      label: What do you want to change?
+      description: Link the discussion or issue if one exists.
+      placeholder: I'd like to add Emby's "played percentage" to the history export, discussed in #NNN...
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Why?
+      description: What's the problem this solves for you or for other users?
+      placeholder: I run Emby with a Tautulli import and the export drops...
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Anything about you we should know?
+      description: Optional. Other projects you've contributed to, how you use Tracearr, whatever helps.
+  - type: checkboxes
+    attributes:
+      label: 'I confirm that:'
+      options:
+        - label: I read CONTRIBUTING.md and will link an agreed issue or discussion from any PR I open.
+          required: true
+        - label: I will write the code myself. AI can help with parts I name in the PR, but a PR I prompted into existence gets closed, disclosed or not.
+          required: true
+        - label: I wrote this request myself, in my own words.
+          required: true

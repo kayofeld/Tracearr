@@ -24,6 +24,7 @@ import {
   processVersionCheck,
   initVersionCheckQueue,
   resolveUpdateRepo,
+  scheduleVersionChecks,
   type GitHubRelease,
 } from '../versionCheckQueue.js';
 
@@ -46,13 +47,24 @@ describe('resolveUpdateRepo', () => {
 
 // ---- module-level mocks needed for processVersionCheck tests ----
 
+interface QueueMockShape {
+  add: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  getJobSchedulers: ReturnType<typeof vi.fn>;
+  removeJobScheduler: ReturnType<typeof vi.fn>;
+  on: ReturnType<typeof vi.fn>;
+}
+const { queueRef } = vi.hoisted(() => ({
+  queueRef: { current: null as QueueMockShape | null },
+}));
 vi.mock('bullmq', () => {
-  function MockQueue(this: Record<string, unknown>) {
+  function MockQueue(this: QueueMockShape) {
     this.add = vi.fn();
     this.close = vi.fn();
     this.getJobSchedulers = vi.fn().mockResolvedValue([]);
     this.removeJobScheduler = vi.fn();
     this.on = vi.fn();
+    queueRef.current = this;
   }
   function MockWorker(this: Record<string, unknown>) {
     this.on = vi.fn();
@@ -62,6 +74,11 @@ vi.mock('bullmq', () => {
 });
 
 vi.mock('../../serverState.js', () => ({ isMaintenance: vi.fn().mockReturnValue(false) }));
+
+const mockDispatchTracearrUpdate = vi.fn().mockResolvedValue(undefined);
+vi.mock('../../services/automations/events/producers.js', () => ({
+  dispatchTracearrUpdate: (...args: unknown[]) => mockDispatchTracearrUpdate(...args),
+}));
 
 const mockGetCurrentVersion = vi.fn().mockReturnValue('1.4.0');
 vi.mock('../../utils/buildInfo.js', () => ({
@@ -412,6 +429,19 @@ describe('findBestUpdateForPrerelease', () => {
     expect(result?.tag_name).toBe('v1.4.1-beta.18');
   });
 
+  it('should offer the newest prerelease when a new beta line exists past the latest stable', () => {
+    // User on v1.5.0-beta.7 with 2.0.0-beta.1 released: the newest release
+    // wins, not the 1.5.0 stable that merely outranks the user's own tag
+    const releases = [
+      mockRelease('v2.0.0-beta.1', true),
+      mockRelease('v1.5.0', false),
+      mockRelease('v1.5.0-beta.7', true),
+    ];
+
+    const result = findBestUpdateForPrerelease('v1.5.0-beta.7', releases);
+    expect(result?.tag_name).toBe('v2.0.0-beta.1');
+  });
+
   it('should return null when already on latest', () => {
     const releases = [mockRelease('v1.4.1-beta.17', true), mockRelease('v1.4.0', false)];
 
@@ -544,6 +574,7 @@ describe('processVersionCheck', () => {
     mockFetch.mockReset();
     sharedRedis.exists.mockReset();
     sharedRedis.set.mockReset().mockResolvedValue('OK');
+    mockDispatchTracearrUpdate.mockClear();
     mockGetCurrentVersion.mockReturnValue('1.4.0');
     mockEnqueueNotification.mockClear().mockResolvedValue('job-id');
     mockGetSetting.mockClear().mockResolvedValue(null);
@@ -615,6 +646,52 @@ describe('processVersionCheck', () => {
     );
   });
 
+  it('dispatches tracearr.update_available when the release is newer', async () => {
+    sharedRedis.exists.mockResolvedValue(0);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        tag_name: 'v1.5.0',
+        html_url: 'https://github.com/test/releases/tag/v1.5.0',
+        published_at: '2024-01-01T00:00:00Z',
+        name: 'v1.5.0',
+        body: null,
+        prerelease: false,
+        draft: false,
+      } satisfies GitHubRelease),
+    });
+
+    await processVersionCheck(makeJob(false));
+
+    expect(mockDispatchTracearrUpdate).toHaveBeenCalledWith({
+      current: '1.4.0',
+      latest: '1.5.0',
+      releaseUrl: 'https://github.com/test/releases/tag/v1.5.0',
+    });
+  });
+
+  it('dispatches nothing when the release is not newer', async () => {
+    sharedRedis.exists.mockResolvedValue(0);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        tag_name: 'v1.4.0',
+        html_url: 'https://github.com/test/releases/tag/v1.4.0',
+        published_at: '2024-01-01T00:00:00Z',
+        name: 'v1.4.0',
+        body: null,
+        prerelease: false,
+        draft: false,
+      } satisfies GitHubRelease),
+    });
+
+    await processVersionCheck(makeJob(false));
+
+    expect(mockDispatchTracearrUpdate).not.toHaveBeenCalled();
+  });
+
   it('rethrows non-rate-limit errors and does not set a cooldown', async () => {
     sharedRedis.exists.mockResolvedValue(0); // no cooldown
     mockFetch.mockResolvedValue(mockRateLimitResponse({}, 500));
@@ -623,112 +700,16 @@ describe('processVersionCheck', () => {
   });
 });
 
-// ============================================================================
-// app_update_available notification — de-dup + restart persistence
-// (Telegram/Discord/webhooks nudge, gated on the persisted
-// lastNotifiedAppUpdateVersion internal setting — see services/settings.ts)
-// ============================================================================
+describe('scheduleVersionChecks', () => {
+  it('clears existing schedulers by their key, which is what BullMQ reports', async () => {
+    const queue = queueRef.current;
+    if (!queue) throw new Error('queue mock not constructed');
+    queue.getJobSchedulers.mockResolvedValue([
+      { key: 'version-check-repeatable', name: 'scheduled-check' },
+    ]);
 
-function mockStableRelease(tagVersion: string): void {
-  const release: GitHubRelease = {
-    tag_name: tagVersion,
-    html_url: `https://github.com/test/releases/tag/${tagVersion}`,
-    published_at: '2024-01-01T00:00:00Z',
-    name: tagVersion,
-    body: null,
-    prerelease: false,
-    draft: false,
-  };
-  mockFetch.mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: vi.fn().mockResolvedValue(release),
-  });
-}
+    await scheduleVersionChecks();
 
-describe('processVersionCheck - app_update_available notification', () => {
-  beforeEach(() => {
-    mockFetch.mockReset();
-    sharedRedis.exists.mockReset().mockResolvedValue(0); // no cooldown, always fetch
-    sharedRedis.set.mockReset().mockResolvedValue('OK');
-    mockGetCurrentVersion.mockReturnValue('1.4.0');
-    mockEnqueueNotification.mockClear().mockResolvedValue('job-id');
-    mockGetSetting.mockClear().mockResolvedValue(null);
-    mockSetSetting.mockClear().mockResolvedValue(undefined);
-  });
-
-  it('notifies once when a newer version appears', async () => {
-    mockStableRelease('v1.5.0');
-    await processVersionCheck(makeJob(true));
-    expect(mockEnqueueNotification).toHaveBeenCalledTimes(1);
-    expect(mockEnqueueNotification).toHaveBeenCalledWith({
-      type: 'app_update_available',
-      payload: {
-        currentVersion: '1.4.0',
-        latestVersion: '1.5.0',
-        releaseUrl: 'https://github.com/test/releases/tag/v1.5.0',
-      },
-    });
-    expect(mockSetSetting).toHaveBeenCalledWith('lastNotifiedAppUpdateVersion', '1.5.0');
-  });
-
-  it('does NOT notify again on the next run for the same version', async () => {
-    mockStableRelease('v1.5.0');
-    await processVersionCheck(makeJob(true));
-    expect(mockEnqueueNotification).toHaveBeenCalledTimes(1);
-
-    // Persisted state now reflects the version already announced.
-    mockGetSetting.mockResolvedValue('1.5.0');
-    await processVersionCheck(makeJob(true));
-    expect(mockEnqueueNotification).toHaveBeenCalledTimes(1); // still just the one call
-  });
-
-  it('re-arms and notifies again when a newer version appears after that', async () => {
-    mockGetSetting.mockResolvedValue('1.5.0'); // already notified for 1.5.0
-    mockStableRelease('v1.6.0');
-    await processVersionCheck(makeJob(true));
-    expect(mockEnqueueNotification).toHaveBeenCalledTimes(1);
-    expect(mockEnqueueNotification).toHaveBeenCalledWith({
-      type: 'app_update_available',
-      payload: {
-        currentVersion: '1.4.0',
-        latestVersion: '1.6.0',
-        releaseUrl: 'https://github.com/test/releases/tag/v1.6.0',
-      },
-    });
-    expect(mockSetSetting).toHaveBeenCalledWith('lastNotifiedAppUpdateVersion', '1.6.0');
-  });
-
-  it('does not notify when already up to date', async () => {
-    mockStableRelease('v1.4.0'); // same as current
-    await processVersionCheck(makeJob(true));
-    expect(mockEnqueueNotification).not.toHaveBeenCalled();
-    expect(mockSetSetting).not.toHaveBeenCalled();
-  });
-
-  it('does not notify on a downgrade (server ahead of the latest release)', async () => {
-    mockGetCurrentVersion.mockReturnValue('2.0.0');
-    mockStableRelease('v1.5.0');
-    await processVersionCheck(makeJob(true));
-    expect(mockEnqueueNotification).not.toHaveBeenCalled();
-  });
-
-  it('does not notify when the version check fetch errors', async () => {
-    mockFetch.mockRejectedValue(new Error('network down'));
-    await expect(processVersionCheck(makeJob(true))).rejects.toThrow();
-    expect(mockEnqueueNotification).not.toHaveBeenCalled();
-  });
-
-  it('does not re-notify after a simulated restart (state is persisted, not in-memory)', async () => {
-    mockStableRelease('v1.5.0');
-    await processVersionCheck(makeJob(true));
-    expect(mockEnqueueNotification).toHaveBeenCalledTimes(1);
-
-    // "Restart": a fresh process would re-read the persisted setting (not an
-    // in-memory Map/variable that a restart would clear) and see it already set.
-    mockGetSetting.mockClear().mockResolvedValue('1.5.0');
-    mockEnqueueNotification.mockClear();
-    await processVersionCheck(makeJob(true));
-    expect(mockEnqueueNotification).not.toHaveBeenCalled();
+    expect(queue.removeJobScheduler).toHaveBeenCalledWith('version-check-repeatable');
   });
 });

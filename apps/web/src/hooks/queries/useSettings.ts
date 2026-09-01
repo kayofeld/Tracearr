@@ -39,6 +39,14 @@ export function useSettings() {
   });
 }
 
+export function useImageCacheStatus() {
+  return useQuery({
+    queryKey: ['settings', 'image-cache'],
+    queryFn: api.settings.getImageCache,
+    staleTime: 60_000,
+  });
+}
+
 interface UpdateSettingsOptions {
   silent?: boolean;
 }

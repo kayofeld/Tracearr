@@ -21,14 +21,22 @@ import {
   Smartphone,
   Download,
 } from 'lucide-react';
-import type { ColumnDef } from '@tanstack/react-table';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { DataTable } from '@/components/ui/data-table';
+import {
+  createDataTableColumnHelper,
+  DataTableBody,
+  DataTableEmpty,
+  DataTableHeader,
+  DataTablePager,
+  DataTableRoot,
+  DataTableViewport,
+  useDataTable,
+} from '@/components/ui/data-table';
 import {
   Dialog,
   DialogContent,
@@ -37,6 +45,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ClientErrors } from '@/components/debug/ClientErrors';
 import { useVersion } from '@/hooks/queries';
 import { tokenStorage, api, BASE_URL } from '@/lib/api';
 import { debugFetch, debugRawFetch } from '@/lib/debugFetch';
@@ -128,6 +137,9 @@ interface SnapshotItem {
   music_count: number;
   is_suspicious: boolean;
 }
+
+const snapshotColumn = createDataTableColumnHelper<SnapshotItem>();
+const getSnapshotId = (snapshot: SnapshotItem) => snapshot.id;
 
 const formatBytes = (bytes: string | number) => {
   const num = typeof bytes === 'string' ? parseInt(bytes, 10) : bytes;
@@ -294,117 +306,127 @@ export function Debug() {
     }
   };
 
-  const toggleSnapshotSelection = (id: string) => {
+  const toggleSnapshotSelection = useCallback((row: SnapshotItem) => {
     setSelectedSnapshots((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
+      if (next.has(row.id)) {
+        next.delete(row.id);
       } else {
-        next.add(id);
+        next.add(row.id);
       }
       return next;
     });
-  };
+  }, []);
 
-  const _toggleAllSnapshots = () => {
-    if (selectedSnapshots.size === snapshots.length) {
-      setSelectedSnapshots(new Set());
-    } else {
-      setSelectedSnapshots(new Set(snapshots.map((s) => s.id)));
-    }
-  };
-
-  const handlePageSelect = (rows: SnapshotItem[]) => {
-    const pageIds = new Set(rows.map((r) => r.id));
-    const allSelected = rows.every((r) => selectedSnapshots.has(r.id));
-    if (allSelected) {
-      setSelectedSnapshots((prev) => {
-        const next = new Set(prev);
+  const handlePageSelect = useCallback((rows: SnapshotItem[]) => {
+    const pageIds = rows.map((row) => row.id);
+    setSelectedSnapshots((prev) => {
+      const next = new Set(prev);
+      if (pageIds.every((id) => prev.has(id))) {
         pageIds.forEach((id) => next.delete(id));
-        return next;
-      });
-    } else {
-      setSelectedSnapshots((prev) => new Set([...prev, ...pageIds]));
-    }
-  };
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }, []);
 
-  const snapshotColumns: ColumnDef<SnapshotItem>[] = useMemo(
-    () => [
-      {
-        accessorKey: 'snapshot_time',
-        header: t('common:labels.date'),
-        cell: ({ row }) => {
-          const date = new Date(row.original.snapshot_time);
-          return (
-            <div className="text-xs">
-              <div>{format(date, 'MMM d, yyyy')}</div>
-              <div className="text-muted-foreground">
-                {formatDistanceToNow(date, { addSuffix: true })}
+  const snapshotColumns = useMemo(
+    () =>
+      snapshotColumn.columns([
+        snapshotColumn.accessor('snapshot_time', {
+          header: t('common:labels.date'),
+          cell: ({ row }) => {
+            const date = new Date(row.original.snapshot_time);
+            return (
+              <div className="text-xs">
+                <div>{format(date, 'MMM d, yyyy')}</div>
+                <div className="text-muted-foreground">
+                  {formatDistanceToNow(date, { addSuffix: true })}
+                </div>
               </div>
-            </div>
-          );
-        },
-        sortingFn: 'datetime',
-      },
-      {
-        accessorKey: 'server_name',
-        header: t('common:labels.server'),
-        cell: ({ row }) => <span className="text-xs">{row.original.server_name || 'Unknown'}</span>,
-      },
-      {
-        accessorKey: 'library_type',
-        header: 'Library',
-        cell: ({ row }) => (
-          <Badge variant="secondary" className="text-xs font-normal">
-            {row.original.library_type}
-          </Badge>
-        ),
-      },
-      {
-        accessorKey: 'is_suspicious',
-        header: t('common:labels.status'),
-        cell: ({ row }) =>
-          row.original.is_suspicious ? (
-            <Badge variant="outline" className="border-amber-500/30 text-xs text-amber-600">
-              {t('debug.suspicious')}
-            </Badge>
-          ) : (
-            <span className="text-muted-foreground text-xs">{t('debug.ok')}</span>
+            );
+          },
+          sortFn: 'datetime',
+        }),
+        snapshotColumn.accessor('server_name', {
+          header: t('common:labels.server'),
+          cell: ({ row }) => (
+            <span className="text-xs">{row.original.server_name || 'Unknown'}</span>
           ),
-      },
-      {
-        accessorKey: 'item_count',
-        header: t('common:labels.items'),
-        cell: ({ row }) => (
-          <span className="text-xs">{row.original.item_count.toLocaleString()}</span>
-        ),
-      },
-      {
-        accessorKey: 'total_size',
-        header: t('common:labels.size'),
-        cell: ({ row }) => <span className="text-xs">{formatBytes(row.original.total_size)}</span>,
-        sortingFn: (rowA, rowB) => {
-          const a = parseInt(String(rowA.original.total_size), 10) || 0;
-          const b = parseInt(String(rowB.original.total_size), 10) || 0;
-          return a - b;
-        },
-      },
-      {
-        id: 'content',
-        header: t('common:labels.content'),
-        cell: ({ row }) => {
-          const { movie_count, episode_count, music_count } = row.original;
-          const parts: string[] = [];
-          if (movie_count > 0) parts.push(`${movie_count} movies`);
-          if (episode_count > 0) parts.push(`${episode_count} episodes`);
-          if (music_count > 0) parts.push(`${music_count} tracks`);
-          return <span className="text-muted-foreground text-xs">{parts.join(', ') || '—'}</span>;
-        },
-        enableSorting: false,
-      },
-    ],
+        }),
+        snapshotColumn.accessor('library_type', {
+          header: 'Library',
+          cell: ({ row }) => (
+            <Badge variant="secondary" className="text-xs font-normal">
+              {row.original.library_type}
+            </Badge>
+          ),
+        }),
+        snapshotColumn.accessor('is_suspicious', {
+          header: t('common:labels.status'),
+          cell: ({ row }) =>
+            row.original.is_suspicious ? (
+              <Badge variant="outline" className="border-amber-500/30 text-xs text-amber-600">
+                {t('debug.suspicious')}
+              </Badge>
+            ) : (
+              <span className="text-muted-foreground text-xs">{t('debug.ok')}</span>
+            ),
+        }),
+        snapshotColumn.accessor('item_count', {
+          header: t('common:labels.items'),
+          cell: ({ row }) => (
+            <span className="text-xs">{row.original.item_count.toLocaleString()}</span>
+          ),
+        }),
+        snapshotColumn.accessor('total_size', {
+          header: t('common:labels.size'),
+          cell: ({ row }) => (
+            <span className="text-xs">{formatBytes(row.original.total_size)}</span>
+          ),
+          sortFn: (rowA, rowB) => {
+            const a = parseInt(String(rowA.original.total_size), 10) || 0;
+            const b = parseInt(String(rowB.original.total_size), 10) || 0;
+            return a - b;
+          },
+        }),
+        snapshotColumn.display({
+          id: 'content',
+          header: t('common:labels.content'),
+          cell: ({ row }) => {
+            const { movie_count, episode_count, music_count } = row.original;
+            const parts: string[] = [];
+            if (movie_count > 0) parts.push(`${movie_count} movies`);
+            if (episode_count > 0) parts.push(`${episode_count} episodes`);
+            if (music_count > 0) parts.push(`${music_count} tracks`);
+            return <span className="text-muted-foreground text-xs">{parts.join(', ') || '—'}</span>;
+          },
+        }),
+      ]),
     [t]
   );
+
+  const snapshotSelection = useMemo(
+    () => ({
+      selectedIds: selectedSnapshots,
+      onToggleRow: toggleSnapshotSelection,
+      onTogglePage: handlePageSelect,
+      labels: {
+        selectAllOnPage: t('common:table.selectAllOnPage'),
+        selectRow: t('common:table.selectRow'),
+      },
+    }),
+    [selectedSnapshots, toggleSnapshotSelection, handlePageSelect, t]
+  );
+
+  const { table: snapshotsTable, pager: snapshotsPager } = useDataTable<SnapshotItem>({
+    columns: snapshotColumns,
+    data: snapshots,
+    getRowId: getSnapshotId,
+    pageSize: 50,
+    selection: snapshotSelection,
+  });
 
   return (
     <div className="space-y-6">
@@ -453,7 +475,7 @@ export function Debug() {
                 <Scale className="text-muted-foreground h-8 w-8" />
                 <div>
                   <p className="text-2xl font-bold">{stats.data?.counts.rules ?? '-'}</p>
-                  <p className="text-muted-foreground text-xs">{t('rules.title')}</p>
+                  <p className="text-muted-foreground text-xs">{t('automations.title')}</p>
                 </div>
               </CardContent>
             </Card>
@@ -695,7 +717,7 @@ export function Debug() {
                   }
                   disabled={deleteMutation.isPending}
                 >
-                  <RefreshCw className="mr-2 h-4 w-4" />
+                  <RefreshCw />
                   {t('debug.refreshAggregates')}
                 </Button>
                 <Button
@@ -705,7 +727,7 @@ export function Debug() {
                   }
                   disabled={deleteMutation.isPending}
                 >
-                  <RotateCcw className="mr-2 h-4 w-4" />
+                  <RotateCcw />
                   {t('debug.clearStuckJobs')}
                 </Button>
                 <Button
@@ -724,7 +746,7 @@ export function Debug() {
                   {t('debug.obliterateAllJobs')}
                 </Button>
                 <Button variant="outline" onClick={() => queryClient.invalidateQueries()}>
-                  <RotateCcw className="mr-2 h-4 w-4" />
+                  <RotateCcw />
                   {t('debug.clearQueryCache')}
                 </Button>
                 <Button
@@ -757,12 +779,10 @@ export function Debug() {
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={() =>
-                      handleDelete('rules', 'Delete all detection rules and violations')
-                    }
+                    onClick={() => handleDelete('automations', t('debug.clearAutomationsConfirm'))}
                     disabled={deleteMutation.isPending}
                   >
-                    {t('debug.clearRules')}
+                    {t('debug.clearAutomations')}
                   </Button>
                   <Button
                     variant="outline"
@@ -938,29 +958,38 @@ export function Debug() {
                   </div>
 
                   {/* Snapshot table */}
-                  <DataTable
-                    columns={snapshotColumns}
-                    data={snapshots}
-                    pageSize={50}
-                    compact
-                    isLoading={isLoadingSnapshots}
-                    emptyMessage={
-                      showSuspiciousOnly
-                        ? t('debug.noSuspiciousSnapshots')
-                        : t('debug.clickLoadToView')
-                    }
-                    selectable
-                    getRowId={(row) => row.id}
-                    selectedIds={selectedSnapshots}
-                    onRowSelect={(row) => toggleSnapshotSelection(row.id)}
-                    onPageSelect={handlePageSelect}
-                    isPageSelected={
-                      snapshots.length > 0 && snapshots.every((s) => selectedSnapshots.has(s.id))
-                    }
-                    isPageIndeterminate={
-                      selectedSnapshots.size > 0 && selectedSnapshots.size < snapshots.length
-                    }
-                  />
+                  <DataTableRoot density="compact">
+                    <DataTableViewport>
+                      <DataTableHeader table={snapshotsTable} />
+                      <DataTableBody
+                        table={snapshotsTable}
+                        isLoading={isLoadingSnapshots}
+                        loadingLabel={t('common:states.loading')}
+                        empty={
+                          <DataTableEmpty
+                            table={snapshotsTable}
+                            title={
+                              showSuspiciousOnly
+                                ? t('debug.noSuspiciousSnapshots')
+                                : t('debug.clickLoadToView')
+                            }
+                          />
+                        }
+                      />
+                    </DataTableViewport>
+                    <DataTablePager
+                      {...snapshotsPager}
+                      labels={{
+                        navigation: t('common:table.pagination'),
+                        status: t('common:table.pageOf', {
+                          page: snapshotsPager.page,
+                          total: snapshotsPager.pageCount,
+                        }),
+                        previous: t('common:actions.previous'),
+                        next: t('common:actions.next'),
+                      }}
+                    />
+                  </DataTableRoot>
                 </div>
               )}
             </CardContent>
@@ -976,17 +1005,17 @@ export function Debug() {
             </CardHeader>
             <CardContent className="text-muted-foreground space-y-2 text-sm">
               <p>
-                Library snapshots are point-in-time records of your library's state. They power the
-                Storage Trend and Quality Evolution charts.
+                Library snapshots are point-in-time records of your library&apos;s state. They power
+                the Storage Trend and Quality Evolution charts.
               </p>
               <p>
                 <strong className="text-foreground">Suspicious snapshots</strong> have 0 bytes total
                 size but contain video content - this usually indicates an incomplete sync where
-                episodes/tracks weren't fetched properly.
+                episodes/tracks weren&apos;t fetched properly.
               </p>
               <p>
                 Deleting bad snapshots allows the backfill job to recreate them correctly from your
-                library items' created_at dates.
+                library items&apos; created_at dates.
               </p>
             </CardContent>
           </Card>
@@ -997,6 +1026,8 @@ export function Debug() {
         </TabsContent>
 
         <TabsContent value="logs" className="space-y-6">
+          <ClientErrors />
+
           {/* Log Explorer */}
           <Card>
             <CardHeader>
@@ -1021,7 +1052,7 @@ export function Debug() {
                       onClick={handleLogsRefresh}
                       disabled={logFiles.isFetching || logEntries.isFetching}
                     >
-                      <RotateCcw className="mr-2 h-4 w-4" />
+                      <RotateCcw />
                       Refresh Logs
                     </Button>
                     <Button
@@ -1038,7 +1069,7 @@ export function Debug() {
                       onClick={handleDownloadLogs}
                       disabled={isDownloadingLogs}
                     >
-                      <Download className="mr-2 h-4 w-4" />
+                      <Download />
                       {isDownloadingLogs ? 'Downloading...' : 'Download All'}
                     </Button>
                   </div>

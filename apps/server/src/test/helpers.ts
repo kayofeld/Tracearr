@@ -27,6 +27,67 @@ export function renderSql(
   });
 }
 
+// The union of every mocked query shape: an extra method on a chain is inert.
+const QUERY_CHAIN_METHODS = [
+  'from',
+  '$dynamic',
+  'innerJoin',
+  'leftJoin',
+  'where',
+  'orderBy',
+  'groupBy',
+  'limit',
+  'offset',
+  'set',
+  'values',
+  'returning',
+];
+
+// Chainable Drizzle stub that records every builder argument and resolves to `result`.
+// `createMock` is the caller's `vi.fn`: this module compiles into dist, so it cannot import vitest.
+export function queryChain(createMock: (impl: () => unknown) => any, result: unknown): any {
+  const chain: Record<string, unknown> = {};
+  for (const method of QUERY_CHAIN_METHODS) {
+    chain[method] = createMock(() => chain);
+  }
+  chain.then = (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
+    Promise.resolve(result).then(resolve, reject);
+  return chain;
+}
+
+// Renders an argument a queryChain recorded as normalized SQL text plus its bound params.
+export function renderCall(
+  chain: any,
+  method: 'where' | 'orderBy' = 'where',
+  index = 0
+): { text: string; params: unknown[] } {
+  const arg = chain[method].mock.calls[index]?.[0] as SQL | undefined;
+  if (!arg) throw new Error(`${method} was never called`);
+  const rendered = renderSql(arg);
+  return { text: rendered.sql.replace(/\s+/g, ' ').trim(), params: rendered.params };
+}
+
+// The ON condition of every join of one kind a chain recorded, in join order.
+export function renderedJoins(
+  chain: any,
+  method: 'innerJoin' | 'leftJoin' = 'innerJoin'
+): string[] {
+  return chain[method].mock.calls.map((call: unknown[]) =>
+    renderSql(call[1] as SQL)
+      .sql.replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+// Every WHERE the given chains recorded, in call order.
+export function renderedWheres(chains: any[]): string[] {
+  return chains.flatMap((chain: any) =>
+    chain.where.mock.calls.map(
+      (_call: unknown, index: number) => renderCall(chain, 'where', index).text
+    )
+  );
+}
+
 // Mock Redis client for testing
 export function createMockRedis() {
   const store = new Map<string, string>();

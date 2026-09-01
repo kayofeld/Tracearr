@@ -652,3 +652,77 @@ describe('Error hierarchy', () => {
     expect(new InternalError().isOperational).toBe(false);
   });
 });
+
+describe('registerErrorHandler notFound option', () => {
+  it('registers a not-found handler by default', async () => {
+    const { default: Fastify } = await import('fastify');
+    const app = Fastify({ logger: false });
+
+    registerErrorHandler(app);
+
+    // Fastify throws if a second not-found handler is added to the same scope,
+    // which is how the default registration proves it claimed the slot.
+    expect(() => app.setNotFoundHandler(() => undefined)).toThrow();
+
+    await app.close();
+  });
+
+  it('leaves the not-found slot free when notFound is false', async () => {
+    const { default: Fastify } = await import('fastify');
+    const app = Fastify({ logger: false });
+
+    registerErrorHandler(app, { notFound: false });
+
+    // index.ts registers its own SPA fallback handler on the root instance. If
+    // registerErrorHandler took the slot, buildApp would throw at startup - and
+    // only in production, where the SPA branch is active.
+    expect(() => app.setNotFoundHandler(() => undefined)).not.toThrow();
+
+    await app.close();
+  });
+
+  it('still installs the error handler when notFound is false', async () => {
+    const { default: Fastify } = await import('fastify');
+    const { default: sensible } = await import('@fastify/sensible');
+    const app = Fastify({ logger: false });
+
+    await app.register(sensible);
+    registerErrorHandler(app, { notFound: false });
+
+    app.get('/boom', () => {
+      throw new ValidationError('still handled');
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/boom' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toBe('still handled');
+
+    await app.close();
+  });
+
+  it('masks unknown error detail in production', async () => {
+    const { default: Fastify } = await import('fastify');
+    const { default: sensible } = await import('@fastify/sensible');
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    try {
+      const app = Fastify({ logger: false });
+      await app.register(sensible);
+      registerErrorHandler(app, { notFound: false });
+
+      app.get('/boom', () => {
+        throw new Error('select * from servers where token = $1');
+      });
+
+      const res = await app.inject({ method: 'GET', url: '/boom' });
+      expect(res.statusCode).toBe(500);
+      expect(res.body).not.toContain('select *');
+      expect(res.json().message).toBe('An unexpected error occurred');
+
+      await app.close();
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+    }
+  });
+});

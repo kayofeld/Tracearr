@@ -22,10 +22,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 const SIDEBAR_COOKIE_NAME = 'sidebar_state';
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
-const SIDEBAR_WIDTH = '16rem';
-const SIDEBAR_WIDTH_MOBILE = '18rem';
+const SIDEBAR_WIDTH = '14rem';
+// Matches the desktop width; upstream's 18rem default made the mobile sheet wider than the rail.
+const SIDEBAR_WIDTH_MOBILE = '14rem';
 const SIDEBAR_WIDTH_ICON = '3rem';
 const SIDEBAR_KEYBOARD_SHORTCUT = 'b';
+
+function readStoredOpenState(): boolean | undefined {
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${SIDEBAR_COOKIE_NAME}=(true|false)`));
+  return match ? match[1] === 'true' : undefined;
+}
 
 interface SidebarContextProps {
   state: 'expanded' | 'collapsed';
@@ -64,9 +70,9 @@ function SidebarProvider({
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
 
-  // This is the internal state of the sidebar.
-  // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen);
+  // Upstream only writes the cookie, leaving a Next.js server to read it back
+  // into defaultOpen. This is a SPA, so the read happens here instead.
+  const [_open, _setOpen] = React.useState(() => readStoredOpenState() ?? defaultOpen);
   const open = openProp ?? _open;
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
@@ -246,7 +252,7 @@ function Sidebar({
 }
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar, isMobile, open, openMobile } = useSidebar();
 
   return (
     <Button
@@ -254,6 +260,11 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon"
+      // Below the mobile breakpoint the sidebar is a Sheet driven by openMobile,
+      // so reading `open` there announces the state of a panel the user cannot
+      // see. The sr-only text below is only a fallback name; callers pass a
+      // translated aria-label, which wins.
+      aria-expanded={isMobile ? openMobile : open}
       className={cn('size-7', className)}
       onClick={(event) => {
         onClick?.(event);

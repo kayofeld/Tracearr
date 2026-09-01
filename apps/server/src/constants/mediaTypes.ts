@@ -5,7 +5,7 @@
  * Live TV and music tracks are excluded from primary statistics but tracked separately.
  *
  * IMPORTANT: All SQL fragments are dynamically derived from the TypeScript arrays.
- * Changing PRIMARY_MEDIA_TYPES or EXCLUDED_MEDIA_TYPES will automatically update all SQL.
+ * Changing PRIMARY_MEDIA_TYPES will automatically update all SQL.
  */
 
 import { sql } from 'drizzle-orm';
@@ -21,19 +21,6 @@ export type { MediaType };
  */
 export const PRIMARY_MEDIA_TYPES = ['movie', 'episode'] as const;
 export type PrimaryMediaType = (typeof PRIMARY_MEDIA_TYPES)[number];
-
-/**
- * Media types excluded from rule evaluation and primary statistics.
- * Live TV and music tracks typically don't represent sharing/abuse patterns.
- * Photos, trailers and unknown types are also excluded as they're not typical media consumption.
- */
-export const EXCLUDED_MEDIA_TYPES = ['live', 'track', 'photo', 'trailer', 'unknown'] as const;
-export type ExcludedMediaType = (typeof EXCLUDED_MEDIA_TYPES)[number];
-
-/**
- * Set version of excluded media types for O(1) lookup in hot paths.
- */
-export const EXCLUDED_MEDIA_TYPES_SET = new Set<string>(EXCLUDED_MEDIA_TYPES);
 
 // Generate SQL IN clause from array - single source of truth
 const primaryTypesInClause = PRIMARY_MEDIA_TYPES.map((t) => `'${t}'`).join(', ');

@@ -2,7 +2,7 @@
  * Authentication plugin for Fastify
  */
 
-import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest, FastifyReply, FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import jwt from '@fastify/jwt';
 import { eq } from 'drizzle-orm';
@@ -54,6 +54,25 @@ declare module 'fastify' {
   }
 }
 
+// Revocation blacklists a deviceId in Redis. Every decorator that accepts a
+// legacy JWT has to honour it, not just requireMobile - otherwise a revoked
+// device keeps owner access and can re-pair itself. Returns false once answered.
+async function assertMobileNotRevoked(
+  app: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<boolean> {
+  const user = request.user as AuthUser & { deviceId?: string };
+  if (!user?.mobile || !user.deviceId) return true;
+
+  const blacklisted = await app.redis.get(REDIS_KEYS.MOBILE_BLACKLISTED_TOKEN(user.deviceId));
+  if (blacklisted) {
+    reply.unauthorized('Session has been revoked');
+    return false;
+  }
+  return true;
+}
+
 const authPlugin: FastifyPluginAsync = async (app) => {
   const secret = process.env.JWT_SECRET;
 
@@ -96,6 +115,7 @@ const authPlugin: FastifyPluginAsync = async (app) => {
       if (isTokenRevoked((request.user as AuthUser & { iat?: number }).iat)) {
         return reply.unauthorized('Session invalidated. Please log in again');
       }
+      if (!(await assertMobileNotRevoked(app, request, reply))) return;
     } catch {
       reply.unauthorized('Invalid or expired token');
     }
@@ -116,6 +136,7 @@ const authPlugin: FastifyPluginAsync = async (app) => {
       if (isTokenRevoked((request.user as AuthUser & { iat?: number }).iat)) {
         return reply.unauthorized('Session invalidated. Please log in again');
       }
+      if (!(await assertMobileNotRevoked(app, request, reply))) return;
       if (request.user.role !== 'owner') {
         reply.forbidden('Owner access required');
       }

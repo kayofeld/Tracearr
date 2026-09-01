@@ -2,7 +2,16 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { DataTable } from '@/components/ui/data-table';
+import {
+  createDataTableColumnHelper,
+  DataTableBody,
+  DataTableEmpty,
+  DataTableHeader,
+  DataTablePager,
+  DataTableRoot,
+  DataTableViewport,
+  useDataTable,
+} from '@/components/ui/data-table';
 import {
   Select,
   SelectContent,
@@ -46,7 +55,6 @@ import {
   Split,
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
-import type { ColumnDef } from '@tanstack/react-table';
 import type {
   SessionWithDetails,
   ViolationSummary,
@@ -74,6 +82,10 @@ function getViolationServer(violation: ViolationRow): { id: string; name: string
   }
   return violation.server ? { id: violation.server.id, name: violation.server.name } : null;
 }
+
+const violationColumn = createDataTableColumnHelper<ViolationRow>();
+const terminationColumn = createDataTableColumnHelper<TerminationLogWithDetails>();
+const getRowId = (row: { id: string }) => row.id;
 
 export function UserDetail() {
   const { t } = useTranslation(['pages', 'common']);
@@ -189,170 +201,165 @@ export function UserDetail() {
     [showServerColumns]
   );
 
-  const violationColumns: ColumnDef<ViolationRow>[] = useMemo(() => {
-    const columns: ColumnDef<ViolationRow>[] = [
-      {
-        accessorKey: 'rule.name',
-        header: t('common:labels.rule'),
-        cell: ({ row }) => (
-          <div>
-            <p className="font-medium">{row.original.rule.name}</p>
-            <p className="text-muted-foreground text-xs capitalize">
-              {row.original.rule.type?.replace(/_/g, ' ') ?? t('rules.customRule')}
-            </p>
-          </div>
-        ),
-      },
-    ];
-    if (showServerColumns) {
-      columns.push({
-        id: 'server',
-        header: t('common:labels.server'),
-        cell: ({ row }) => {
-          const server = getViolationServer(row.original);
-          return server ? <ServerColumnCell server={server} /> : null;
-        },
-      });
-    }
-    columns.push(
-      {
-        accessorKey: 'severity',
-        header: t('common:labels.severity'),
-        cell: ({ row }) => (
-          <SeverityBadge severity={row.original.severity as 'low' | 'warning' | 'high'} />
-        ),
-      },
-      {
-        accessorKey: 'createdAt',
-        header: t('common:labels.when'),
-        cell: ({ row }) => (
-          <span className="text-muted-foreground text-sm">
-            {formatDistanceToNow(new Date(row.original.createdAt), { addSuffix: true })}
-          </span>
-        ),
-      },
-      {
-        accessorKey: 'acknowledgedAt',
-        header: t('common:labels.status'),
-        cell: ({ row }) => (
-          <span
-            className={
-              row.original.acknowledgedAt ? 'text-muted-foreground' : 'font-medium text-yellow-500'
-            }
-          >
-            {row.original.acknowledgedAt
-              ? t('common:states.acknowledged')
-              : t('common:states.pending')}
-          </span>
-        ),
-      }
-    );
-    return columns;
-  }, [t, showServerColumns]);
-
-  const terminationColumns: ColumnDef<TerminationLogWithDetails>[] = useMemo(() => {
-    const columns: ColumnDef<TerminationLogWithDetails>[] = [
-      {
-        accessorKey: 'trigger',
-        header: t('common:labels.type'),
-        cell: ({ row }) => (
-          <Badge variant={row.original.trigger === 'manual' ? 'default' : 'secondary'}>
-            {row.original.trigger === 'manual' ? (
-              <>
-                <UserIcon className="mr-1 h-3 w-3" />
-                {t('pages:userDetail.manual')}
-              </>
-            ) : (
-              <>
-                <Bot className="mr-1 h-3 w-3" />
-                {t('common:labels.rule')}
-              </>
-            )}
-          </Badge>
-        ),
-      },
-      {
-        accessorKey: 'mediaTitle',
-        header: t('common:labels.media'),
-        cell: ({ row }) => {
-          const { title, subtitle } = getMediaDisplay(row.original);
-          return (
-            <div className="max-w-[200px]">
-              <p className="truncate font-medium">{title || '—'}</p>
-              {subtitle ? (
-                <p className="text-muted-foreground text-xs">{subtitle}</p>
-              ) : (
-                <p className="text-muted-foreground text-xs capitalize">
-                  {row.original.mediaType ?? t('common:labels.unknown').toLowerCase()}
-                </p>
-              )}
+  const violationColumns = useMemo(
+    () =>
+      violationColumn.columns([
+        violationColumn.accessor((violation) => violation.rule.name, {
+          id: 'rule.name',
+          header: t('common:labels.rule'),
+          cell: ({ row }) => (
+            <div>
+              <p className="font-medium">{row.original.rule.name}</p>
+              <p className="text-muted-foreground text-xs capitalize">
+                {row.original.rule.type?.replace(/_/g, ' ') ?? t('automations.customAutomation')}
+              </p>
             </div>
-          );
-        },
-      },
-    ];
-    if (showServerColumns) {
-      columns.push({
-        id: 'server',
-        header: t('common:labels.server'),
-        cell: ({ row }) =>
-          row.original.serverName ? (
-            <ServerColumnCell
-              server={{ id: row.original.serverId, name: row.original.serverName }}
-            />
-          ) : null,
-      });
-    }
-    columns.push(
-      {
-        accessorKey: 'createdAt',
-        header: t('common:labels.when'),
-        cell: ({ row }) => (
-          <span className="text-muted-foreground text-sm">
-            {formatDistanceToNow(new Date(row.original.createdAt), { addSuffix: true })}
-          </span>
-        ),
-      },
-      {
-        accessorKey: 'triggeredByUsername',
-        header: t('pages:userDetail.byRule'),
-        cell: ({ row }) => {
-          const log = row.original;
-          if (log.trigger === 'manual') {
+          ),
+        }),
+        ...(showServerColumns
+          ? [
+              violationColumn.display({
+                id: 'server',
+                header: t('common:labels.server'),
+                cell: ({ row }) => {
+                  const server = getViolationServer(row.original);
+                  return server ? <ServerColumnCell server={server} /> : null;
+                },
+              }),
+            ]
+          : []),
+        violationColumn.accessor('severity', {
+          header: t('common:labels.severity'),
+          cell: ({ row }) => (
+            <SeverityBadge severity={row.original.severity as 'low' | 'warning' | 'high'} />
+          ),
+        }),
+        violationColumn.accessor('createdAt', {
+          header: t('common:labels.when'),
+          cell: ({ row }) => (
+            <span className="text-muted-foreground text-sm">
+              {formatDistanceToNow(new Date(row.original.createdAt), { addSuffix: true })}
+            </span>
+          ),
+        }),
+        violationColumn.accessor('acknowledgedAt', {
+          header: t('common:labels.status'),
+          cell: ({ row }) => (
+            <span
+              className={
+                row.original.acknowledgedAt
+                  ? 'text-muted-foreground'
+                  : 'font-medium text-yellow-500'
+              }
+            >
+              {row.original.acknowledgedAt
+                ? t('common:states.acknowledged')
+                : t('common:states.pending')}
+            </span>
+          ),
+        }),
+      ]),
+    [t, showServerColumns]
+  );
+
+  const terminationColumns = useMemo(
+    () =>
+      terminationColumn.columns([
+        terminationColumn.accessor('trigger', {
+          header: t('common:labels.type'),
+          cell: ({ row }) => (
+            <Badge variant={row.original.trigger === 'manual' ? 'default' : 'secondary'}>
+              {row.original.trigger === 'manual' ? (
+                <>
+                  <UserIcon className="mr-1 h-3 w-3" />
+                  {t('pages:userDetail.manual')}
+                </>
+              ) : (
+                <>
+                  <Bot className="mr-1 h-3 w-3" />
+                  {t('common:labels.rule')}
+                </>
+              )}
+            </Badge>
+          ),
+        }),
+        terminationColumn.accessor('mediaTitle', {
+          header: t('common:labels.media'),
+          cell: ({ row }) => {
+            const { title, subtitle } = getMediaDisplay(row.original);
             return (
-              <span className="text-sm">
-                @{log.triggeredByUsername ?? t('common:labels.unknown')}
+              <div className="max-w-[200px]">
+                <p className="truncate font-medium">{title || '—'}</p>
+                {subtitle ? (
+                  <p className="text-muted-foreground text-xs">{subtitle}</p>
+                ) : (
+                  <p className="text-muted-foreground text-xs capitalize">
+                    {row.original.mediaType ?? t('common:labels.unknown').toLowerCase()}
+                  </p>
+                )}
+              </div>
+            );
+          },
+        }),
+        ...(showServerColumns
+          ? [
+              terminationColumn.display({
+                id: 'server',
+                header: t('common:labels.server'),
+                cell: ({ row }) =>
+                  row.original.serverName ? (
+                    <ServerColumnCell
+                      server={{ id: row.original.serverId, name: row.original.serverName }}
+                    />
+                  ) : null,
+              }),
+            ]
+          : []),
+        terminationColumn.accessor('createdAt', {
+          header: t('common:labels.when'),
+          cell: ({ row }) => (
+            <span className="text-muted-foreground text-sm">
+              {formatDistanceToNow(new Date(row.original.createdAt), { addSuffix: true })}
+            </span>
+          ),
+        }),
+        terminationColumn.accessor('triggeredByUsername', {
+          header: t('pages:userDetail.byRule'),
+          cell: ({ row }) => {
+            const log = row.original;
+            if (log.trigger === 'manual') {
+              return (
+                <span className="text-sm">
+                  @{log.triggeredByUsername ?? t('common:labels.unknown')}
+                </span>
+              );
+            }
+            return (
+              <span className="text-muted-foreground text-sm">
+                {log.ruleName ?? t('pages:userDetail.unknownRule')}
               </span>
             );
-          }
-          return (
-            <span className="text-muted-foreground text-sm">
-              {log.ruleName ?? t('pages:userDetail.unknownRule')}
+          },
+        }),
+        terminationColumn.accessor('reason', {
+          header: t('common:labels.reason'),
+          cell: ({ row }) => (
+            <span className="text-muted-foreground block max-w-[150px] truncate text-sm">
+              {row.original.reason ?? '—'}
             </span>
-          );
-        },
-      },
-      {
-        accessorKey: 'reason',
-        header: t('common:labels.reason'),
-        cell: ({ row }) => (
-          <span className="text-muted-foreground block max-w-[150px] truncate text-sm">
-            {row.original.reason ?? '—'}
-          </span>
-        ),
-      },
-      {
-        accessorKey: 'success',
-        header: t('common:labels.status'),
-        cell: ({ row }) => (
-          <span className={row.original.success ? 'text-green-500' : 'font-medium text-red-500'}>
-            {row.original.success ? t('common:states.success') : t('common:states.failed')}
-          </span>
-        ),
-      }
-    );
-    return columns;
-  }, [t, showServerColumns]);
+          ),
+        }),
+        terminationColumn.accessor('success', {
+          header: t('common:labels.status'),
+          cell: ({ row }) => (
+            <span className={row.original.success ? 'text-green-500' : 'font-medium text-red-500'}>
+              {row.original.success ? t('common:states.success') : t('common:states.failed')}
+            </span>
+          ),
+        }),
+      ]),
+    [t, showServerColumns]
+  );
 
   // Sessions: use paginated data if on page > 1, otherwise use aggregate
   const rawSessions = needsPaginatedSessions
@@ -394,7 +401,7 @@ export function UserDetail() {
     ? (paginatedViolations?.data ?? [])
     : (fullData?.violations.data ?? []);
   const violationsTotal = needsPaginatedViolations
-    ? (paginatedViolations?.total ?? fullData?.violations.total ?? 0)
+    ? (paginatedViolations?.meta.total ?? fullData?.violations.total ?? 0)
     : (fullData?.violations.total ?? 0);
   const violationsTotalPages = Math.ceil(violationsTotal / pageSize);
   const violationsLoading = needsPaginatedViolations ? paginatedViolationsLoading : isLoading;
@@ -409,13 +416,34 @@ export function UserDetail() {
   const terminationsTotalPages = Math.ceil(terminationsTotal / pageSize);
   const terminationsLoading = needsPaginatedTerminations ? paginatedTerminationsLoading : isLoading;
 
+  const { table: violationsTable, pager: violationsPager } = useDataTable<ViolationRow>({
+    columns: violationColumns,
+    data: violations,
+    getRowId,
+    pageSize,
+    pageCount: violationsTotalPages,
+    page: violationsPage,
+    onPageChange: setViolationsPage,
+  });
+
+  const { table: terminationsTable, pager: terminationsPager } =
+    useDataTable<TerminationLogWithDetails>({
+      columns: terminationColumns,
+      data: terminations,
+      getRowId,
+      pageSize,
+      pageCount: terminationsTotalPages,
+      page: terminationsPage,
+      onPageChange: setTerminationsPage,
+    });
+
   if (isLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
-            <CardContent className="pt-6">
+            <CardContent>
               <div className="flex items-center gap-4">
                 <Skeleton className="h-16 w-16 rounded-full" />
                 <div className="space-y-2">
@@ -426,7 +454,7 @@ export function UserDetail() {
             </CardContent>
           </Card>
           <Card>
-            <CardContent className="pt-6">
+            <CardContent>
               <div className="grid grid-cols-2 gap-4">
                 {[...Array(4)].map((_, i) => (
                   <Skeleton key={i} className="h-16" />
@@ -444,7 +472,7 @@ export function UserDetail() {
       <div className="space-y-6">
         <Link to="/users">
           <Button variant="ghost" size="sm">
-            <ArrowLeft className="mr-2 h-4 w-4" />
+            <ArrowLeft />
             {t('userDetail.backToUsers')}
           </Button>
         </Link>
@@ -468,7 +496,7 @@ export function UserDetail() {
       <div className="flex flex-wrap items-center gap-4">
         <Link to="/users">
           <Button variant="ghost" size="sm">
-            <ArrowLeft className="mr-2 h-4 w-4" />
+            <ArrowLeft />
             {t('common:actions.back')}
           </Button>
         </Link>
@@ -730,7 +758,7 @@ export function UserDetail() {
                       onClick={() => setSplitTarget({ id: account.id, username: account.username })}
                       disabled={splitMutation.isPending}
                     >
-                      <Split className="mr-2 h-4 w-4" />
+                      <Split />
                       {t('pages:userDetail.splitAccount')}
                     </Button>
                   )}
@@ -799,17 +827,34 @@ export function UserDetail() {
           <CardTitle>{t('userDetail.violations')}</CardTitle>
         </CardHeader>
         <CardContent>
-          <DataTable
-            columns={violationColumns}
-            data={violations}
-            pageSize={pageSize}
-            pageCount={violationsTotalPages}
-            page={violationsPage}
-            onPageChange={setViolationsPage}
-            isLoading={violationsLoading}
-            isServerFiltered
-            emptyMessage={t('userDetail.noViolationsFound')}
-          />
+          <DataTableRoot>
+            <DataTableViewport>
+              <DataTableHeader table={violationsTable} />
+              <DataTableBody
+                table={violationsTable}
+                isLoading={violationsLoading}
+                loadingLabel={t('common:states.loading')}
+                empty={
+                  <DataTableEmpty
+                    table={violationsTable}
+                    title={t('userDetail.noViolationsFound')}
+                  />
+                }
+              />
+            </DataTableViewport>
+            <DataTablePager
+              {...violationsPager}
+              labels={{
+                navigation: t('common:table.pagination'),
+                status: t('common:table.pageOf', {
+                  page: violationsPager.page,
+                  total: violationsPager.pageCount,
+                }),
+                previous: t('common:actions.previous'),
+                next: t('common:actions.next'),
+              }}
+            />
+          </DataTableRoot>
         </CardContent>
       </Card>
 
@@ -822,17 +867,34 @@ export function UserDetail() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <DataTable
-            columns={terminationColumns}
-            data={terminations}
-            pageSize={pageSize}
-            pageCount={terminationsTotalPages}
-            page={terminationsPage}
-            onPageChange={setTerminationsPage}
-            isLoading={terminationsLoading}
-            isServerFiltered
-            emptyMessage={t('userDetail.noTerminationsFound')}
-          />
+          <DataTableRoot>
+            <DataTableViewport>
+              <DataTableHeader table={terminationsTable} />
+              <DataTableBody
+                table={terminationsTable}
+                isLoading={terminationsLoading}
+                loadingLabel={t('common:states.loading')}
+                empty={
+                  <DataTableEmpty
+                    table={terminationsTable}
+                    title={t('userDetail.noTerminationsFound')}
+                  />
+                }
+              />
+            </DataTableViewport>
+            <DataTablePager
+              {...terminationsPager}
+              labels={{
+                navigation: t('common:table.pagination'),
+                status: t('common:table.pageOf', {
+                  page: terminationsPager.page,
+                  total: terminationsPager.pageCount,
+                }),
+                previous: t('common:actions.previous'),
+                next: t('common:actions.next'),
+              }}
+            />
+          </DataTableRoot>
         </CardContent>
       </Card>
 

@@ -215,9 +215,16 @@ export class ExternalServiceError extends AppError {
 }
 
 /**
- * Register global error handler for Fastify
+ * Register global error handler for Fastify.
+ *
+ * Pass notFound: false when the caller registers its own not-found handler on
+ * the same scope - Fastify throws on a second one, and index.ts installs the
+ * SPA fallback in production.
  */
-export function registerErrorHandler(app: FastifyInstance): void {
+export function registerErrorHandler(
+  app: FastifyInstance,
+  opts: { notFound?: boolean } = {}
+): void {
   app.setErrorHandler((error: FastifyError | AppError | Error, request, reply) => {
     // Log the error
     request.log.error(
@@ -269,12 +276,14 @@ export function registerErrorHandler(app: FastifyInstance): void {
   });
 
   // Handle 404 Not Found
-  app.setNotFoundHandler((request, reply) => {
-    const response: ApiError = {
-      statusCode: 404,
-      error: 'NotFound',
-      message: `Route ${request.method} ${request.url} not found`,
-    };
-    return reply.status(404).send(response);
-  });
+  if (opts.notFound !== false) {
+    app.setNotFoundHandler((request, reply) => {
+      const response: ApiError = {
+        statusCode: 404,
+        error: 'NotFound',
+        message: `Route ${request.method} ${request.url} not found`,
+      };
+      return reply.status(404).send(response);
+    });
+  }
 }

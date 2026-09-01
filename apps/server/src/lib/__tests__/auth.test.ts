@@ -108,7 +108,9 @@ describe('getAuth construction', () => {
         },
       ]);
 
-      expect(auth.options.account?.accountLinking).toMatchObject({
+      // toEqual pins the whole object: dropping trustedProviders breaks OIDC
+      // linking on Authentik and Keycloak, so the value is load-bearing.
+      expect(auth.options.account?.accountLinking).toEqual({
         enabled: true,
         trustedProviders: ['oidc'],
       });

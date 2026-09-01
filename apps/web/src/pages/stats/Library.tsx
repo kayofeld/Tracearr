@@ -3,6 +3,7 @@ import { Film, Tv } from 'lucide-react';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { MediaCard, MediaCardSmall } from '@/components/media';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
 import { InlineErrorState } from '@/components/library/ErrorState';
 import { useTopContent, useShowStats } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
@@ -56,12 +57,7 @@ export function StatsLibrary() {
           (() => {
             const topMovie = movies[0];
             if (!topMovie) {
-              return (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <Film className="text-muted-foreground/50 mx-auto h-12 w-12" />
-                  <p className="text-muted-foreground mt-2">{t('library.noMoviePlays')}</p>
-                </div>
-              );
+              return <EmptyState icon={Film} title={t('library.noMoviePlays')} className="py-8" />;
             }
             return (
               <div className="space-y-4">
@@ -127,12 +123,7 @@ export function StatsLibrary() {
           (() => {
             const topShow = showsFromEngagement[0];
             if (!topShow) {
-              return (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <Tv className="text-muted-foreground/50 mx-auto h-12 w-12" />
-                  <p className="text-muted-foreground mt-2">{t('library.noShowPlays')}</p>
-                </div>
-              );
+              return <EmptyState icon={Tv} title={t('library.noShowPlays')} className="py-8" />;
             }
             return (
               <div className="space-y-4">
@@ -178,12 +169,7 @@ export function StatsLibrary() {
             const shows = topContent.data?.shows ?? [];
             const topShow = shows[0];
             if (!topShow) {
-              return (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <Tv className="text-muted-foreground/50 mx-auto h-12 w-12" />
-                  <p className="text-muted-foreground mt-2">{t('library.noShowPlays')}</p>
-                </div>
-              );
+              return <EmptyState icon={Tv} title={t('library.noShowPlays')} className="py-8" />;
             }
             return (
               <div className="space-y-4">

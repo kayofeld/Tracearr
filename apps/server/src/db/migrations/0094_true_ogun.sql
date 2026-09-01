@@ -1,0 +1,1 @@
+CREATE INDEX "automations_template_id_idx" ON "automations" USING btree ("template_id");

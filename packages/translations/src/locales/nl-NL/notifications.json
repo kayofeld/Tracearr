@@ -51,8 +51,15 @@
       "agentUpdateFailed": "Agent bijwerken mislukt",
       "apiKeyGenerateFailed": "API-sleutel genereren mislukt",
       "authFailed": "Authenticatie mislukt",
+      "automationCreateFailed": "Automatisering aanmaken is mislukt",
+      "automationDeleteFailed": "Automatisering verwijderen is mislukt",
+      "automationUpdateFailed": "Automatisering bijwerken is mislukt",
       "clipboardFailed": "Kopiëren naar klembord mislukt",
       "copyFailed": "Kopiëren naar klembord mislukt",
+      "destinationDeleteFailed": "Niet gelukt bestemming te verwijderen: {{error}}",
+      "destinationInUse": "Nog in gebruik door: {{rules}}",
+      "destinationSaveFailed": "Niet gelukt bestemming op te slaan: {{error}}",
+      "destinationTestFailed": "Test niet geslaagd: {{error}}",
       "deviceRemoveFailed": "Apparaat verwijderen mislukt",
       "deviceRenameFailed": "Apparaat hernoemen mislukt",
       "dismissFailed": "Overtreding negeren mislukt",
@@ -77,6 +84,7 @@
       "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
       "plexDirectUrl": "Een plex.direct-URL is een relay-adres dat hier niet gebruikt kan worden. Gebruik een direct IP-adres of hostnaam.",
+      "plexReauthorizeFailed": "Het opnieuw autoriseren van het Plex account is mislukt",
       "plexUnlinkFailed": "Ontkoppelen Plex-account mislukt",
       "routingUpdateFailed": "Routering bijwerken mislukt",
       "ruleCreateFailed": "Regel aanmaken mislukt",
@@ -93,7 +101,7 @@
       "serverSyncFailed": "Server synchroniseren mislukt",
       "serverUpdateFailed": "Server bijwerken mislukt",
       "serverUrlUpdateFailed": "Server-URL bijwerken mislukt",
-      "serverUserSplitFailed": "Failed to split account",
+      "serverUserSplitFailed": "Splitsen van het account is mislukt",
       "sessionsDeleteFailed": "Sessies verwijderen mislukt",
       "sessionsRevokeFailed": "Sessies intrekken mislukt",
       "settingsUpdateFailed": "Instellingen bijwerken mislukt",
@@ -101,7 +109,7 @@
       "trustScoresResetFailed": "Vertrouwensscores herstellen mislukt",
       "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
       "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
-      "userMergeFailed": "Failed to merge users",
+      "userMergeFailed": "Het samenvoegen van gebruikers is mislukt",
       "usersRemoveFailed": "Failed to remove users",
       "webhookTestFailed": "Webhook-test mislukt"
     },
@@ -148,6 +156,18 @@
         "message": "Je nieuwe API-sleutel is klaar voor gebruik",
         "title": "API-sleutel gegenereerd"
       },
+      "automationCreated": {
+        "title": "Automatisering gemaakt",
+        "message": "De automatisering is succesvol aangemaakt"
+      },
+      "automationDeleted": {
+        "title": "Automatisering verwijderd",
+        "message": "De automatisering is succesvol verwijdert"
+      },
+      "automationUpdated": {
+        "title": "Automatisering geüpdatet",
+        "message": "De automatisering is succesvol aangemaakt"
+      },
       "claimCodeValidated": {
         "message": "Je kunt nu doorgaan met instellen",
         "title": "Claimcode geverifiëerd"
@@ -155,6 +175,9 @@
       "copiedToClipboard": {
         "title": "Gekopieerd naar klembord"
       },
+      "destinationDeleted": "Bestemming verwijdert",
+      "destinationSaved": "Bestemming opgeslagen",
+      "destinationTestSent": "Test notificatie verzonden",
       "deviceRemoved": {
         "message": "Het apparaat is losgekoppeld",
         "title": "Apparaat verwijderd"
@@ -198,6 +221,14 @@
       "plexAccountLinked": {
         "message": "Je kunt nu servers uit je Plex-account toevoegen",
         "title": "Plex-account gekoppeld"
+      },
+      "plexAccountReauthorized": {
+        "title": "Plex account opnieuw geautoriseerd",
+        "message_one": "{{count}} server opnieuw verbonden",
+        "message_other": "{{count}} servers hebben opnieuw verbinding gemaakt",
+        "messageNoServers": "Accounttoken bijgewerkt",
+        "partial": "Token bijgewerkt, maar {{names}} weigerde het nog steeds",
+        "unmatched": "Token bijgewerkt, maar {{names}} kon niet opnieuw gekoppeld worden"
       },
       "plexAccountUnlinked": {
         "message": "Je Plex-account is ontkoppeld",
@@ -245,7 +276,7 @@
         "title": "Server-URL bijgewerkt"
       },
       "serverUserSplit": {
-        "title": "Account split into a separate user"
+        "title": "Account opgesplitst naar een aparte gebruiker"
       },
       "sessionsDeleted": {
         "message_one": "{{count}} sessie verwijderd",
@@ -283,8 +314,9 @@
         "title": "Redeploy webhook saved"
       },
       "usersMerged": {
+        "automationsKept": "Versie van doel verwijderd: {{names}}",
         "rulesKept": "Kept target's version of: {{names}}",
-        "title": "Users merged"
+        "title": "Gebruikers samengevoegd"
       },
       "usersRemoved": {
         "message_one": "{{count}} user removed from the roster",

@@ -5,6 +5,7 @@
  */
 
 export { getTestPool, getTestDb, closeTestPool, executeRawSql } from './pool.js';
+export { quote } from './sql.js';
 export { setupTestDb, isTestDbReady, waitForTestDb } from './setup.js';
 export { resetTestDb, teardownTestDb, truncateTables } from './reset.js';
 export {

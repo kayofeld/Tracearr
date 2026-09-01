@@ -36,7 +36,7 @@ test.describe('Settings', () => {
 
   test('can navigate to notifications settings', async ({ page }) => {
     await page.getByRole('link', { name: 'Notifications' }).click();
-    await expect(page.getByRole('heading', { name: 'Notification Agents' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Notification destinations' })).toBeVisible();
   });
 
   test('can navigate to access control settings', async ({ page }) => {

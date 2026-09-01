@@ -3,19 +3,19 @@ import { deriveMergeActionState, findOverlappingServerName } from './mergeSelect
 
 describe('deriveMergeActionState', () => {
   it('disables merge and flags the same-identity reason when both selected rows share a userId', () => {
-    const result = deriveMergeActionState([{ userId: 'user-1' }, { userId: 'user-1' }], false, 2);
+    const result = deriveMergeActionState([{ userId: 'user-1' }, { userId: 'user-1' }], false);
 
     expect(result).toEqual({ disabled: true, reasonKey: 'pages:users.mergeSameIdentity' });
   });
 
   it('enables merge when exactly two rows with different userIds are selected', () => {
-    const result = deriveMergeActionState([{ userId: 'user-1' }, { userId: 'user-2' }], false, 2);
+    const result = deriveMergeActionState([{ userId: 'user-1' }, { userId: 'user-2' }], false);
 
     expect(result).toEqual({ disabled: false });
   });
 
   it('disables merge with the select-two reason when fewer than two rows are selected', () => {
-    const result = deriveMergeActionState([{ userId: 'user-1' }], false, 1);
+    const result = deriveMergeActionState([{ userId: 'user-1' }], false);
 
     expect(result).toEqual({ disabled: true, reasonKey: 'pages:users.mergeSelectTwo' });
   });
@@ -23,15 +23,14 @@ describe('deriveMergeActionState', () => {
   it('disables merge with the select-two reason when more than two rows are selected', () => {
     const result = deriveMergeActionState(
       [{ userId: 'user-1' }, { userId: 'user-2' }, { userId: 'user-3' }],
-      false,
-      3
+      false
     );
 
     expect(result).toEqual({ disabled: true, reasonKey: 'pages:users.mergeSelectTwo' });
   });
 
   it('disables merge with a distinct reason when select-all mode is active', () => {
-    const result = deriveMergeActionState([], true, 50);
+    const result = deriveMergeActionState([], true);
 
     expect(result).toEqual({ disabled: true, reasonKey: 'pages:users.mergeSelectAllActive' });
   });

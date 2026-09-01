@@ -1,6 +1,6 @@
 /**
  * Environment discovery + runtime module loading shared by the admin scripts
- * (cli.ts, reset-password.ts).
+ * (cli.ts, reset-password.ts) and by imageCacheSweepScale.ts.
  *
  * The scripts are compiled into dist/scripts by the server build
  * (tsconfig.scripts.json), so in production they run as plain compiled JS
@@ -69,12 +69,22 @@ export async function loadRuntime() {
   loadEnv();
   const base = basePath();
 
-  const [dbModule, schema, passwordModule, settingsModule, redisModule] = await Promise.all([
+  const [
+    dbModule,
+    schema,
+    passwordModule,
+    settingsModule,
+    redisModule,
+    imageProxyModule,
+    imageCacheSweepModule,
+  ] = await Promise.all([
     import(`${base}/db/client.js`),
     import(`${base}/db/schema.js`),
     import(`${base}/utils/password.js`),
     import(`${base}/services/settings.js`),
     import(`${base}/lib/redisShared.js`),
+    import(`${base}/services/imageProxy.js`),
+    import(`${base}/services/imageCacheSweep.js`),
   ]);
 
   return {
@@ -84,11 +94,14 @@ export async function loadRuntime() {
     authAccounts: schema.authAccounts,
     authSessions: schema.authSessions,
     plexAccounts: schema.plexAccounts,
+    libraryItems: schema.libraryItems,
     servers: schema.servers,
     hashPassword: passwordModule.hashPassword,
     setSetting: settingsModule.setSetting,
     getSetting: settingsModule.getSetting,
     getRedis: redisModule.getRedis,
     closeRedis: redisModule.closeRedis,
+    posterCacheFileName: imageProxyModule.posterCacheFileName,
+    sweepImageCache: imageCacheSweepModule.sweepImageCache,
   };
 }

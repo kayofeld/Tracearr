@@ -6,13 +6,12 @@
  */
 
 import { Queue, Worker, type Job, type ConnectionOptions } from 'bullmq';
-import { getRedisPrefix } from '@tracearr/shared';
 import type { Redis } from 'ioredis';
+import { getBullPrefix, queueConnectionOptions } from './queueConnection.js';
 import { isMaintenance } from '../serverState.js';
 import { REDIS_KEYS, CACHE_TTL, WS_EVENTS } from '@tracearr/shared';
+import { dispatchTracearrUpdate } from '../services/automations/events/producers.js';
 import { getCurrentVersion } from '../utils/buildInfo.js';
-import { enqueueNotification } from './notificationQueue.js';
-import { getSetting, setSetting } from '../services/settings.js';
 
 // Queue name
 const QUEUE_NAME = 'version-check';
@@ -101,10 +100,10 @@ export function initVersionCheckQueue(
     return;
   }
 
-  connectionOptions = { url: redisUrl };
+  connectionOptions = queueConnectionOptions(redisUrl);
   redisClient = redis;
   pubSubPublish = publishFn;
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  const bullPrefix = getBullPrefix();
 
   // Create the version check queue
   versionQueue = new Queue<VersionCheckJobData>(QUEUE_NAME, {
@@ -146,7 +145,7 @@ export function startVersionCheckWorker(): void {
     return;
   }
 
-  const bullPrefix = `${getRedisPrefix()}bull`;
+  const bullPrefix = getBullPrefix();
 
   versionWorker = new Worker<VersionCheckJobData>(
     QUEUE_NAME,
@@ -185,12 +184,10 @@ export async function scheduleVersionChecks(): Promise<void> {
     return;
   }
 
-  // Remove any existing job schedulers (repeatable jobs)
+  // Remove any existing job schedulers; BullMQ reports them by key, not id.
   const schedulers = await versionQueue.getJobSchedulers();
   for (const scheduler of schedulers) {
-    if (scheduler.id) {
-      await versionQueue.removeJobScheduler(scheduler.id);
-    }
+    await versionQueue.removeJobScheduler(scheduler.key);
   }
 
   // Schedule a check every 6 hours (4 times per day)
@@ -292,63 +289,21 @@ export async function fetchGitHubReleases(
 }
 
 /**
- * Find the best update target for a prerelease user
- *
- * Returns the newest stable release if available, otherwise the newest prerelease.
- * This ensures prerelease users are notified about the latest stable version
- * (e.g., user on 1.4.1-beta.17 sees 1.4.3, not just 1.4.1).
+ * Find the best update target for a prerelease user: the newest release
+ * overall. When a stable supersedes the user's beta line it IS the newest
+ * (1.4.1-beta.17 is offered 1.4.3), but a newer beta line past the last
+ * stable must win too - preferring stable here once hid 2.0.0-beta.1 from
+ * every 1.5.0-beta user because 1.5.0 outranked their tag.
  */
 export function findBestUpdateForPrerelease(
   currentVersion: string,
   releases: GitHubRelease[]
 ): GitHubRelease | null {
-  // Filter out drafts and sort by version (newest first)
   const validReleases = releases
     .filter((r) => !r.draft)
     .sort((a, b) => compareVersions(b.tag_name, a.tag_name));
 
-  // Find the newest stable release
-  const newestStable = validReleases.find((r) => !r.prerelease);
-
-  // If there's a stable release newer than current, return it
-  if (newestStable && compareVersions(newestStable.tag_name, currentVersion) > 0) {
-    return newestStable;
-  }
-
-  // Otherwise, find any newer release (including prereleases)
-  const newerRelease = validReleases.find((r) => {
-    return compareVersions(r.tag_name, currentVersion) > 0;
-  });
-
-  return newerRelease ?? null;
-}
-
-/**
- * Notify every configured channel (Telegram, Discord, webhooks, ...) about a new
- * Tracearr release, once per version. Mirrors pluginUpdateChecker's "nudge once,
- * re-arm when latest changes" approach, but persists the last-notified version via
- * services/settings.ts (an internal setting) instead of an in-memory map, since this
- * check must survive a server restart without re-announcing an already-notified version.
- * Never fires on downgrade/equal-version/fetch-error — those are excluded upstream by
- * only calling this when `updateAvailable` (isNewerVersion) is already true.
- */
-async function notifyAppUpdateIfNew(
-  currentVersion: string,
-  latestVersion: string,
-  releaseUrl: string
-): Promise<void> {
-  const lastNotified = await getSetting('lastNotifiedAppUpdateVersion');
-  if (lastNotified === latestVersion) {
-    // Already notified for this version (including across a restart) - skip.
-    return;
-  }
-
-  await enqueueNotification({
-    type: 'app_update_available',
-    payload: { currentVersion, latestVersion, releaseUrl },
-  });
-
-  await setSetting('lastNotifiedAppUpdateVersion', latestVersion);
+  return validReleases.find((r) => compareVersions(r.tag_name, currentVersion) > 0) ?? null;
 }
 
 /**
@@ -442,19 +397,23 @@ export async function processVersionCheck(job: Job<VersionCheckJobData>): Promis
     // Check if update is available
     const updateAvailable = isNewerVersion(version, currentVersion);
 
-    if (updateAvailable && pubSubPublish) {
+    if (updateAvailable) {
       // Broadcast update availability to connected clients
-      await pubSubPublish(WS_EVENTS.VERSION_UPDATE, {
+      if (pubSubPublish) {
+        await pubSubPublish(WS_EVENTS.VERSION_UPDATE, {
+          current: currentVersion,
+          latest: version,
+          releaseUrl: latestData.releaseUrl,
+        });
+      }
+      // This worker runs on every instance; the cooldown above and the run gate's
+      // edge key (the latest version) bound the duplicate dispatches.
+      await dispatchTracearrUpdate({
         current: currentVersion,
         latest: version,
         releaseUrl: latestData.releaseUrl,
       });
       console.log(`Update available: ${currentVersion} -> ${version}`);
-    }
-
-    if (updateAvailable) {
-      // Notify Telegram/Discord/webhooks - once per version, persisted across restarts.
-      await notifyAppUpdateIfNew(currentVersion, version, latestData.releaseUrl);
     }
   } catch (error) {
     if (error instanceof GitHubRateLimitError) {

@@ -34,10 +34,19 @@ vi.mock('../mediaServer/index.js', () => ({
   createMediaServerClient: vi.fn(),
 }));
 
+vi.mock('../automations/events/dispatcher.js', () => ({
+  dispatch: vi.fn().mockResolvedValue({ violations: [], outcomes: [] }),
+}));
+
+vi.mock('../automations/events/producers.js', () => ({
+  dispatchSessionStopped: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Import after mocking
 import { db } from '../../db/client.js';
 import { getCacheService, getPubSubService } from '../cache.js';
 import { createMediaServerClient } from '../mediaServer/index.js';
+import { dispatchSessionStopped } from '../automations/events/producers.js';
 import { terminateSession } from '../termination.js';
 
 // Type for the mock session findFirst function (returns partial session for tests)
@@ -157,6 +166,27 @@ describe('terminateSession', () => {
       });
 
       expect(mockPubSubService.publish).toHaveBeenCalledWith('session:stopped', mockSession.id);
+    });
+
+    it('should dispatch session.stopped with the stopped session and its duration', async () => {
+      const mockSession = createMockSession();
+      mockSessionFindFirst.mockResolvedValue(mockSession);
+      mockMediaClient.terminateSession.mockResolvedValue(true);
+
+      await terminateSession({
+        sessionId: mockSession.id,
+        trigger: 'manual',
+      });
+
+      expect(dispatchSessionStopped).toHaveBeenCalledTimes(1);
+      const [session, durationMs, at] = vi.mocked(dispatchSessionStopped).mock.calls[0] ?? [];
+      expect(session).toMatchObject({
+        id: mockSession.id,
+        serverId: mockSession.serverId,
+        state: 'stopped',
+      });
+      expect(durationMs).toBeGreaterThan(0);
+      expect(at).toBeInstanceOf(Date);
     });
 
     it('should update session state to stopped in database', async () => {
@@ -326,6 +356,19 @@ describe('terminateSession', () => {
       });
 
       expect(mockPubSubService.publish).not.toHaveBeenCalled();
+    });
+
+    it('should NOT dispatch session.stopped on failure', async () => {
+      const mockSession = createMockSession();
+      mockSessionFindFirst.mockResolvedValue(mockSession);
+      mockMediaClient.terminateSession.mockRejectedValue(new Error('Server error'));
+
+      await terminateSession({
+        sessionId: mockSession.id,
+        trigger: 'manual',
+      });
+
+      expect(dispatchSessionStopped).not.toHaveBeenCalled();
     });
 
     it('should still log the failed termination attempt', async () => {

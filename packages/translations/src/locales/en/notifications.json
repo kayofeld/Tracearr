@@ -1,257 +1,127 @@
 {
+  "push": {
+    "newDevice": "New Device",
+    "serverDown": "Server Connection Lost",
+    "serverUp": "Server Back Online",
+    "streamEnded": "Stream Ended",
+    "streamStarted": "Stream Started",
+    "trustScoreChanged": "Trust Score Changed",
+    "violationDetected": "Sharing Violation Detected"
+  },
+  "settings": {
+    "allSeverity": "All (Low, Warning, High)",
+    "allTypes": "All Types",
+    "concurrentStreams": "Concurrent Streams",
+    "concurrentStreamsDesc": "When max stream limit is exceeded",
+    "enablePushNotifications": "Enable Push Notifications",
+    "enableQuietHours": "Enable Quiet Hours",
+    "highOnly": "High severity only",
+    "minimumSeverity": "Minimum Severity",
+    "newDevice": "New Device",
+    "newDeviceDesc": "When a new device connects",
+    "notificationEvents": "Notification Events",
+    "overrideForCritical": "Override for Critical",
+    "perHour": "Per Hour",
+    "perMinute": "Per Minute",
+    "quietHours": "Quiet Hours",
+    "rateLimit": "Current Rate Limit Status",
+    "rateLimiting": "Rate Limiting",
+    "serverDown": "Server Down",
+    "serverDownDesc": "When a media server goes offline",
+    "serverUp": "Server Up",
+    "serverUpDesc": "When a media server comes back online",
+    "streamStarted": "Stream Started",
+    "streamStartedDesc": "When a user starts watching",
+    "streamStopped": "Stream Stopped",
+    "streamStoppedDesc": "When a user stops watching",
+    "title": "Notification Settings",
+    "trustScoreChanged": "Trust Score Changed",
+    "trustScoreChangedDesc": "When a user's trust score changes",
+    "violationDetected": "Violation Detected",
+    "violationDetectedDesc": "When a sharing violation is triggered",
+    "violationFilters": "Violation Filters",
+    "warningAndHigh": "Warning & High only"
+  },
   "toast": {
-    "success": {
-      "serverAdded": {
-        "title": "Server Added",
-        "message": "{{name}} has been connected successfully"
-      },
-      "serverRemoved": {
-        "title": "Server Removed",
-        "message": "The server has been removed successfully"
-      },
-      "serverSynced": {
-        "title": "Server Synced",
-        "message": "Server data has been synchronized"
-      },
-      "settingsUpdated": {
-        "title": "Settings Updated",
-        "message": "Your settings have been saved"
-      },
-      "tokenCopied": {
-        "title": "Token Copied",
-        "message": "Pair token copied to clipboard"
-      },
-      "violationAcknowledged": {
-        "title": "Violation Acknowledged",
-        "message": "The violation has been marked as acknowledged"
-      },
-      "violationDismissed": {
-        "title": "Violation Dismissed",
-        "message": "The violation has been dismissed"
-      },
-      "deviceRemoved": {
-        "title": "Device Removed",
-        "message": "The device has been disconnected"
-      },
-      "deviceRenamed": {
-        "title": "Device Renamed",
-        "message": "The device name has been updated"
-      },
-      "sessionsRevoked": {
-        "title": "Sessions Revoked",
-        "message": "All mobile sessions have been revoked"
-      },
-      "loggedIn": {
-        "title": "Success",
-        "message": "Logged in successfully"
-      },
-      "webhookTest": {
-        "title": "Test Successful",
-        "message": "Webhook is working correctly"
-      },
-      "copiedToClipboard": {
-        "title": "Copied to clipboard"
-      },
-      "plexAccountLinked": {
-        "title": "Plex Account Linked",
-        "message": "You can now add servers from your Plex account"
-      },
-      "plexAccountUnlinked": {
-        "title": "Plex Account Unlinked",
-        "message": "Your Plex account has been disconnected"
-      },
-      "agentAdded": {
-        "title": "Agent Added",
-        "message": "The notification agent has been added"
-      },
-      "agentUpdated": {
-        "title": "Agent Updated",
-        "message": "The notification agent has been updated"
-      },
-      "agentRemoved": {
-        "title": "Agent Removed",
-        "message": "The notification agent has been removed"
-      },
-      "jobCompleted": {
-        "title": "Job Completed",
-        "message": "{{name}} finished successfully"
-      },
-      "ruleCreated": {
-        "title": "Rule Created",
-        "message": "The rule has been created successfully"
-      },
-      "ruleUpdated": {
-        "title": "Rule Updated",
-        "message": "The rule has been updated successfully"
-      },
-      "ruleDeleted": {
-        "title": "Rule Deleted",
-        "message": "The rule has been deleted successfully"
-      },
-      "streamTerminated": {
-        "title": "Stream Terminated",
-        "message": "The playback session has been stopped"
-      },
-      "serverUrlUpdated": {
-        "title": "Server URL Updated",
-        "message": "The server URL has been updated successfully"
-      },
-      "serverUpdated": {
-        "title": "Server Updated",
-        "message": "The server has been updated successfully"
-      },
-      "syncCompletedWithErrors": {
-        "title": "Sync Completed with Errors"
-      },
-      "sessionsDeleted": {
-        "title": "Sessions Deleted",
-        "message_one": "{{count}} session deleted",
-        "message_other": "{{count}} sessions deleted"
-      },
-      "violationsAcknowledged": {
-        "title": "Violations Acknowledged",
-        "message_one": "{{count}} violation acknowledged",
-        "message_other": "{{count}} violations acknowledged"
-      },
-      "violationsDismissed": {
-        "title": "Violations Dismissed",
-        "message_one": "{{count}} violation dismissed",
-        "message_other": "{{count}} violations dismissed"
-      },
-      "apiKeyGenerated": {
-        "title": "API Key Generated",
-        "message": "Your new API key is ready to use"
-      },
-      "mobileAccessEnabled": {
-        "title": "Mobile Access Enabled",
-        "message": "Scan the QR code with the Tracearr mobile app to connect"
-      },
-      "mobileAccessDisabled": {
-        "title": "Mobile Access Disabled",
-        "message": "All mobile sessions have been revoked"
-      },
-      "pairTokenGenerated": {
-        "title": "Pair Token Generated",
-        "message": "Scan the QR code with your mobile device to pair"
-      },
-      "displayNameUpdated": {
-        "title": "Display Name Updated"
-      },
-      "trustScoresReset": {
-        "title": "Trust Scores Reset",
-        "message_one": "{{count}} user reset to 100",
-        "message_other": "{{count}} users reset to 100"
-      },
-      "usersRemoved": {
-        "title": "Users Removed",
-        "message_one": "{{count}} user removed from the roster",
-        "message_other": "{{count}} users removed from the roster"
-      },
-      "claimCodeValidated": {
-        "title": "Claim code validated",
-        "message": "You can now proceed with setup"
-      },
-      "usersMerged": {
-        "title": "Users merged",
-        "rulesKept": "Kept target's version of: {{names}}"
-      },
-      "serverUserSplit": {
-        "title": "Account split into a separate user"
-      },
-      "ombiDataPurged": {
-        "title": "Ombi data purged"
-      },
-      "ombiMappingUpdated": {
-        "title": "Requester mapping updated"
-      },
-      "ombiMappingReverted": {
-        "title": "Requester mapping reverted to automatic"
-      },
-      "seerrDataPurged": {
-        "title": "Seerr data purged"
-      },
-      "seerrMappingUpdated": {
-        "title": "Requester mapping updated"
-      },
-      "seerrMappingReverted": {
-        "title": "Requester mapping reverted to automatic"
-      },
-      "updateWebhookSaved": {
-        "title": "Redeploy webhook saved"
-      },
-      "updateWebhookCleared": {
-        "title": "Redeploy webhook removed"
-      }
-    },
     "error": {
-      "serverAddFailed": "Failed to add server",
-      "serverRemoveFailed": "Failed to remove server",
-      "serverSyncFailed": "Failed to sync server",
-      "settingsUpdateFailed": "Failed to update settings",
-      "copyFailed": "Could not copy to clipboard",
       "acknowledgeFailed": "Failed to acknowledge violation",
-      "dismissFailed": "Failed to dismiss violation",
-      "authFailed": "Authentication failed",
-      "webhookTestFailed": "Webhook test failed",
-      "ruleCreateFailed": "Failed to create rule",
-      "ruleUpdateFailed": "Failed to update rule",
-      "ruleDeleteFailed": "Failed to delete rule",
-      "streamTerminateFailed": "Failed to terminate stream",
-      "serverUrlUpdateFailed": "Failed to update server URL",
-      "serverUpdateFailed": "Failed to update server",
-      "serverReorderFailed": "Failed to reorder servers",
-      "sessionsDeleteFailed": "Failed to delete sessions",
-      "apiKeyGenerateFailed": "Failed to generate API key",
-      "mobileAccessEnableFailed": "Failed to enable mobile access",
-      "mobileAccessDisableFailed": "Failed to disable mobile access",
-      "pairTokenGenerateFailed": "Failed to generate pair token",
-      "deviceRemoveFailed": "Failed to remove device",
-      "deviceRenameFailed": "Failed to rename device",
-      "sessionsRevokeFailed": "Failed to revoke sessions",
-      "displayNameUpdateFailed": "Failed to update display name",
-      "trustScoresResetFailed": "Failed to reset trust scores",
-      "usersRemoveFailed": "Failed to remove users",
-      "routingUpdateFailed": "Failed to update routing",
-      "clipboardFailed": "Failed to copy to clipboard",
-      "plexUnlinkFailed": "Failed to unlink Plex account",
       "agentAddFailed": "Failed to add agent",
-      "agentUpdateFailed": "Failed to update agent",
       "agentRemoveFailed": "Failed to remove agent",
       "agentTestFailed": "Test failed",
-      "jobAlreadyRunning": "Job already running",
-      "jobStartFailed": "Failed to start job",
-      "jobLoadFailed": "Failed to load maintenance jobs",
-      "invalidUrl": "Invalid URL",
-      "plexDirectUrl": "plex.direct URLs are relay addresses that cannot be used here. Please use a direct IP address or hostname instead.",
-      "userMergeFailed": "Failed to merge users",
-      "serverUserSplitFailed": "Failed to split account",
+      "agentUpdateFailed": "Failed to update agent",
+      "apiKeyGenerateFailed": "Failed to generate API key",
+      "authFailed": "Authentication failed",
+      "automationCreateFailed": "Failed to create automation",
+      "automationDeleteFailed": "Failed to delete automation",
+      "automationUpdateFailed": "Failed to update automation",
+      "clipboardFailed": "Failed to copy to clipboard",
+      "copyFailed": "Could not copy to clipboard",
+      "destinationDeleteFailed": "Failed to delete destination: {{error}}",
+      "destinationInUse": "Still used by: {{rules}}",
+      "destinationSaveFailed": "Failed to save destination: {{error}}",
+      "destinationTestFailed": "Test failed: {{error}}",
+      "deviceRemoveFailed": "Failed to remove device",
+      "deviceRenameFailed": "Failed to rename device",
+      "dismissFailed": "Failed to dismiss violation",
+      "displayNameUpdateFailed": "Failed to update display name",
       "invalidClaimCode": {
-        "title": "Invalid claim code",
-        "message": "Please check the server logs"
+        "message": "Please check the server logs",
+        "title": "Invalid claim code"
       },
-      "ombiSyncFailed": "Failed to start Ombi sync",
-      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
-      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
-      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "invalidUrl": "Invalid URL",
+      "jobAlreadyRunning": "Job already running",
+      "jobLoadFailed": "Failed to load maintenance jobs",
+      "jobStartFailed": "Failed to start job",
+      "mobileAccessDisableFailed": "Failed to disable mobile access",
+      "mobileAccessEnableFailed": "Failed to enable mobile access",
       "ombiMappingUpdateFailed": "Failed to update requester mapping",
-      "seerrSyncFailed": "Failed to start Seerr sync",
-      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
-      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
-      "seerrPurgeFailed": "Failed to purge Seerr data",
-      "seerrMappingUpdateFailed": "Failed to update requester mapping",
-      "playedStateSyncFailed": "Failed to start played-state sync",
+      "ombiPurgeFailed": "Failed to purge Ombi data",
+      "ombiSyncAlreadyRunning": "An Ombi sync is already running",
+      "ombiSyncFailed": "Failed to start Ombi sync",
+      "ombiSyncNotConfigured": "Connect Ombi before starting a sync",
+      "pairTokenGenerateFailed": "Failed to generate pair token",
       "playedStateSyncAlreadyRunning": "A played-state sync is already running for this server",
+      "playedStateSyncFailed": "Failed to start played-state sync",
       "playedStateSyncUnsupported": "This server does not support played-state sync",
+      "plexDirectUrl": "plex.direct URLs are relay addresses that cannot be used here. Please use a direct IP address or hostname instead.",
+      "plexReauthorizeFailed": "Failed to reauthorize Plex account",
+      "plexUnlinkFailed": "Failed to unlink Plex account",
+      "routingUpdateFailed": "Failed to update routing",
+      "ruleCreateFailed": "Failed to create rule",
+      "ruleDeleteFailed": "Failed to delete rule",
+      "ruleUpdateFailed": "Failed to update rule",
+      "seerrMappingUpdateFailed": "Failed to update requester mapping",
+      "seerrPurgeFailed": "Failed to purge Seerr data",
+      "seerrSyncAlreadyRunning": "A Seerr sync is already running",
+      "seerrSyncFailed": "Failed to start Seerr sync",
+      "seerrSyncNotConfigured": "Connect Seerr before starting a sync",
+      "serverAddFailed": "Failed to add server",
+      "serverRemoveFailed": "Failed to remove server",
+      "serverReorderFailed": "Failed to reorder servers",
+      "serverSyncFailed": "Failed to sync server",
+      "serverUpdateFailed": "Failed to update server",
+      "serverUrlUpdateFailed": "Failed to update server URL",
+      "serverUserSplitFailed": "Failed to split account",
+      "sessionsDeleteFailed": "Failed to delete sessions",
+      "sessionsRevokeFailed": "Failed to revoke sessions",
+      "settingsUpdateFailed": "Failed to update settings",
+      "streamTerminateFailed": "Failed to terminate stream",
+      "trustScoresResetFailed": "Failed to reset trust scores",
+      "updateWebhookClearFailed": "Failed to remove the redeploy webhook",
       "updateWebhookSaveFailed": "Failed to save the redeploy webhook",
-      "updateWebhookClearFailed": "Failed to remove the redeploy webhook"
-    },
-    "warning": {
-      "jobFailed": {
-        "title": "Job Failed",
-        "message": "{{name}} encountered an error"
-      }
+      "userMergeFailed": "Failed to merge users",
+      "usersRemoveFailed": "Failed to remove users",
+      "webhookTestFailed": "Webhook test failed"
     },
     "info": {
+      "serverOffline": {
+        "title": "Server Offline",
+        "message": "{{name}} is unreachable"
+      },
+      "serverOnline": {
+        "title": "Server Online",
+        "message": "{{name}} is back online"
+      },
       "streamStarted": {
         "title": "New Stream Started",
         "message": "{{user}} started watching {{media}}"
@@ -261,64 +131,226 @@
         "message": "{{user}} stopped watching"
       },
       "updateAvailable": {
-        "title": "Update Available",
-        "message": "Tracearr {{version}} is available"
-      },
-      "serverOffline": {
-        "title": "Server Offline",
-        "message": "{{name}} is unreachable"
-      },
-      "serverOnline": {
-        "title": "Server Online",
-        "message": "{{name}} is back online"
+        "message": "Tracearr {{version}} is available",
+        "title": "Update Available"
       },
       "violationDetected": {
-        "title": "New Violation: {{ruleName}}",
-        "message": "{{user}} triggered {{ruleType}}"
+        "message": "{{user}} triggered {{ruleType}}",
+        "title": "New Violation: {{ruleName}}"
+      }
+    },
+    "success": {
+      "agentAdded": {
+        "message": "The notification agent has been added",
+        "title": "Agent Added"
+      },
+      "agentRemoved": {
+        "message": "The notification agent has been removed",
+        "title": "Agent Removed"
+      },
+      "agentUpdated": {
+        "message": "The notification agent has been updated",
+        "title": "Agent Updated"
+      },
+      "apiKeyGenerated": {
+        "message": "Your new API key is ready to use",
+        "title": "API Key Generated"
+      },
+      "automationCreated": {
+        "title": "Automation Created",
+        "message": "The automation has been created successfully"
+      },
+      "automationDeleted": {
+        "title": "Automation Deleted",
+        "message": "The automation has been deleted successfully"
+      },
+      "automationUpdated": {
+        "title": "Automation Updated",
+        "message": "The automation has been updated successfully"
+      },
+      "claimCodeValidated": {
+        "message": "You can now proceed with setup",
+        "title": "Claim code validated"
+      },
+      "copiedToClipboard": {
+        "title": "Copied to clipboard"
+      },
+      "destinationDeleted": "Destination deleted",
+      "destinationSaved": "Destination saved",
+      "destinationTestSent": "Test notification sent",
+      "deviceRemoved": {
+        "message": "The device has been disconnected",
+        "title": "Device Removed"
+      },
+      "deviceRenamed": {
+        "message": "The device name has been updated",
+        "title": "Device Renamed"
+      },
+      "displayNameUpdated": {
+        "title": "Display Name Updated"
+      },
+      "jobCompleted": {
+        "message": "{{name}} finished successfully",
+        "title": "Job Completed"
+      },
+      "loggedIn": {
+        "message": "Logged in successfully",
+        "title": "Success"
+      },
+      "mobileAccessDisabled": {
+        "message": "All mobile sessions have been revoked",
+        "title": "Mobile Access Disabled"
+      },
+      "mobileAccessEnabled": {
+        "message": "Scan the QR code with the Tracearr mobile app to connect",
+        "title": "Mobile Access Enabled"
+      },
+      "ombiDataPurged": {
+        "title": "Ombi data purged"
+      },
+      "ombiMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "ombiMappingUpdated": {
+        "title": "Requester mapping updated"
+      },
+      "pairTokenGenerated": {
+        "message": "Scan the QR code with your mobile device to pair",
+        "title": "Pair Token Generated"
+      },
+      "plexAccountLinked": {
+        "message": "You can now add servers from your Plex account",
+        "title": "Plex Account Linked"
+      },
+      "plexAccountReauthorized": {
+        "title": "Plex Account Reauthorized",
+        "message_one": "{{count}} server reconnected",
+        "message_other": "{{count}} servers reconnected",
+        "messageNoServers": "Account token updated",
+        "partial": "Token updated, but {{names}} still refused it",
+        "unmatched": "Token updated, but {{names}} could not be re-linked"
+      },
+      "plexAccountUnlinked": {
+        "message": "Your Plex account has been disconnected",
+        "title": "Plex Account Unlinked"
+      },
+      "ruleCreated": {
+        "title": "Rule Created",
+        "message": "The rule has been created successfully"
+      },
+      "ruleDeleted": {
+        "title": "Rule Deleted",
+        "message": "The rule has been deleted successfully"
+      },
+      "ruleUpdated": {
+        "title": "Rule Updated",
+        "message": "The rule has been updated successfully"
+      },
+      "seerrDataPurged": {
+        "title": "Seerr data purged"
+      },
+      "seerrMappingReverted": {
+        "title": "Requester mapping reverted to automatic"
+      },
+      "seerrMappingUpdated": {
+        "title": "Requester mapping updated"
+      },
+      "serverAdded": {
+        "message": "{{name}} has been connected successfully",
+        "title": "Server Added"
+      },
+      "serverRemoved": {
+        "message": "The server has been removed successfully",
+        "title": "Server Removed"
+      },
+      "serverSynced": {
+        "message": "Server data has been synchronized",
+        "title": "Server Synced"
+      },
+      "serverUpdated": {
+        "message": "The server has been updated successfully",
+        "title": "Server Updated"
+      },
+      "serverUrlUpdated": {
+        "message": "The server URL has been updated successfully",
+        "title": "Server URL Updated"
+      },
+      "serverUserSplit": {
+        "title": "Account split into a separate user"
+      },
+      "sessionsDeleted": {
+        "message_one": "{{count}} session deleted",
+        "message_other": "{{count}} sessions deleted",
+        "title": "Sessions Deleted"
+      },
+      "sessionsRevoked": {
+        "message": "All mobile sessions have been revoked",
+        "title": "Sessions Revoked"
+      },
+      "settingsUpdated": {
+        "message": "Your settings have been saved",
+        "title": "Settings Updated"
+      },
+      "streamTerminated": {
+        "message": "The playback session has been stopped",
+        "title": "Stream Terminated"
+      },
+      "syncCompletedWithErrors": {
+        "title": "Sync Completed with Errors"
+      },
+      "tokenCopied": {
+        "message": "Pair token copied to clipboard",
+        "title": "Token Copied"
+      },
+      "trustScoresReset": {
+        "message_one": "{{count}} user reset to 100",
+        "message_other": "{{count}} users reset to 100",
+        "title": "Trust Scores Reset"
+      },
+      "updateWebhookCleared": {
+        "title": "Redeploy webhook removed"
+      },
+      "updateWebhookSaved": {
+        "title": "Redeploy webhook saved"
+      },
+      "usersMerged": {
+        "automationsKept": "Kept target's version of: {{names}}",
+        "rulesKept": "Kept target's version of: {{names}}",
+        "title": "Users merged"
+      },
+      "usersRemoved": {
+        "title": "Users Removed",
+        "message_one": "{{count}} user removed from the roster",
+        "message_other": "{{count}} users removed from the roster"
+      },
+      "violationAcknowledged": {
+        "message": "The violation has been marked as acknowledged",
+        "title": "Violation Acknowledged"
+      },
+      "violationDismissed": {
+        "message": "The violation has been dismissed",
+        "title": "Violation Dismissed"
+      },
+      "violationsAcknowledged": {
+        "message_one": "{{count}} violation acknowledged",
+        "message_other": "{{count}} violations acknowledged",
+        "title": "Violations Acknowledged"
+      },
+      "violationsDismissed": {
+        "message_one": "{{count}} violation dismissed",
+        "message_other": "{{count}} violations dismissed",
+        "title": "Violations Dismissed"
+      },
+      "webhookTest": {
+        "message": "Webhook is working correctly",
+        "title": "Test Successful"
+      }
+    },
+    "warning": {
+      "jobFailed": {
+        "message": "{{name}} encountered an error",
+        "title": "Job Failed"
       }
     }
-  },
-  "push": {
-    "violationDetected": "Sharing Violation Detected",
-    "streamStarted": "Stream Started",
-    "streamEnded": "Stream Ended",
-    "serverDown": "Server Connection Lost",
-    "serverUp": "Server Back Online",
-    "newDevice": "New Device",
-    "trustScoreChanged": "Trust Score Changed"
-  },
-  "settings": {
-    "title": "Notification Settings",
-    "allSeverity": "All (Low, Warning, High)",
-    "warningAndHigh": "Warning & High only",
-    "highOnly": "High severity only",
-    "allTypes": "All Types",
-    "rateLimit": "Current Rate Limit Status",
-    "perMinute": "Per Minute",
-    "perHour": "Per Hour",
-    "enablePushNotifications": "Enable Push Notifications",
-    "notificationEvents": "Notification Events",
-    "violationDetected": "Violation Detected",
-    "violationDetectedDesc": "When a sharing violation is triggered",
-    "streamStarted": "Stream Started",
-    "streamStartedDesc": "When a user starts watching",
-    "streamStopped": "Stream Stopped",
-    "streamStoppedDesc": "When a user stops watching",
-    "concurrentStreams": "Concurrent Streams",
-    "concurrentStreamsDesc": "When max stream limit is exceeded",
-    "newDevice": "New Device",
-    "newDeviceDesc": "When a new device connects",
-    "trustScoreChanged": "Trust Score Changed",
-    "trustScoreChangedDesc": "When a user's trust score changes",
-    "serverDown": "Server Down",
-    "serverDownDesc": "When a media server goes offline",
-    "serverUp": "Server Up",
-    "serverUpDesc": "When a media server comes back online",
-    "violationFilters": "Violation Filters",
-    "minimumSeverity": "Minimum Severity",
-    "quietHours": "Quiet Hours",
-    "enableQuietHours": "Enable Quiet Hours",
-    "overrideForCritical": "Override for Critical",
-    "rateLimiting": "Rate Limiting"
   }
 }

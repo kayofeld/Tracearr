@@ -108,6 +108,36 @@ export function pickStreamDetailFields<T extends StreamDetailFields>(
   };
 }
 
+/**
+ * The subset of Session that changes while a session is live and that
+ * re-evaluation reads from the fresh poll/SSE payload rather than the stored row.
+ */
+export function pickLiveSessionFields(processed: ProcessedSession): Partial<Session> {
+  return {
+    state: processed.state,
+    mediaType: processed.mediaType,
+    mediaTitle: processed.mediaTitle,
+    grandparentTitle: processed.grandparentTitle || null,
+    seasonNumber: processed.mediaType === 'episode' ? processed.seasonNumber : null,
+    episodeNumber: processed.mediaType === 'episode' ? processed.episodeNumber : null,
+    year: processed.year || null,
+    thumbPath: processed.thumbPath || null,
+    totalDurationMs: processed.totalDurationMs || null,
+    progressMs: processed.progressMs || null,
+    playerName: processed.playerName,
+    deviceId: processed.deviceId || null,
+    product: processed.product || null,
+    device: processed.device || null,
+    platform: processed.platform,
+    quality: processed.quality,
+    isTranscode: processed.isTranscode,
+    videoDecision: processed.videoDecision,
+    audioDecision: processed.audioDecision,
+    bitrate: processed.bitrate,
+    ...pickStreamDetailFields(processed),
+  };
+}
+
 // ============================================================================
 // MediaSession → ProcessedSession Mapping
 // ============================================================================
@@ -152,6 +182,7 @@ export function mapMediaSession(
     sessionKey: session.sessionKey,
     plexSessionId: session.plexSessionId,
     ratingKey: session.mediaId,
+    serverVersionKey: session.serverVersionKey ?? null,
     // User data
     externalUserId: session.user.id,
     username: session.user.username || 'Unknown',
@@ -225,6 +256,14 @@ export function mapSessionRow(s: typeof sessions.$inferSelect): Session {
     year: s.year,
     thumbPath: s.thumbPath,
     ratingKey: s.ratingKey,
+    serverVersionKey: s.serverVersionKey,
+    parentRatingKey: s.parentRatingKey,
+    grandparentRatingKey: s.grandparentRatingKey,
+    mediaId: s.mediaId,
+    showMediaId: s.showMediaId,
+    imdbId: s.imdbId,
+    tmdbId: s.tmdbId,
+    tvdbId: s.tvdbId,
     externalSessionId: s.externalSessionId,
     startedAt: s.startedAt,
     stoppedAt: s.stoppedAt,

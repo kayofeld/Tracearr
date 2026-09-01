@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 import { EyeOff, HardDrive, Percent, CalendarClock, Film, Tv } from 'lucide-react';
-import type { ColumnDef } from '@tanstack/react-table';
 import type { StaleItem, NeverWatchedAgeBucket } from '@tracearr/shared';
 import { StatCard } from '@/components/ui/stat-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,13 +9,19 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { DataTable, type SortingState } from '@/components/ui/data-table';
 import {
-  ErrorState,
-  LibraryEmptyState,
-  EmptyState,
-  PlayedStateCoverageBanner,
-} from '@/components/library';
+  DataTableBody,
+  DataTableEmpty,
+  DataTableHeader,
+  DataTablePager,
+  DataTableRoot,
+  DataTableViewport,
+  useDataTable,
+  type DataTableColumns,
+  type SortingState,
+} from '@/components/ui/data-table';
+import { ErrorState, LibraryEmptyState, PlayedStateCoverageBanner } from '@/components/library';
+import { EmptyState } from '@/components/ui/empty-state';
 import { NeverWatchedAgeChart } from '@/components/charts';
 import { ServerColumnCell } from '@/components/server';
 import {
@@ -222,7 +227,7 @@ export function LibraryNeverWatched() {
 
   const totalPages = Math.ceil((items.data?.pagination.total ?? 0) / pageSize) || 1;
 
-  const columns = useMemo<ColumnDef<StaleItem>[]>(
+  const columns = useMemo<DataTableColumns<StaleItem>>(
     () => [
       {
         accessorKey: 'mediaType',
@@ -242,7 +247,7 @@ export function LibraryNeverWatched() {
           </span>
         ),
       },
-      ...(isMultiServer
+      ...((isMultiServer
         ? [
             {
               id: 'server',
@@ -253,9 +258,9 @@ export function LibraryNeverWatched() {
                   server={{ id: row.original.serverId, name: row.original.serverName }}
                 />
               ),
-            } satisfies ColumnDef<StaleItem>,
+            },
           ]
-        : []),
+        : []) as DataTableColumns<StaleItem>),
       {
         id: 'addedAt',
         accessorKey: 'addedAt',
@@ -295,6 +300,18 @@ export function LibraryNeverWatched() {
     ],
     [t, translate, isMultiServer, showRequesterSource]
   );
+
+  const { table, pager } = useDataTable<StaleItem>({
+    columns,
+    data: items.data?.items ?? [],
+    getRowId: (item) => item.id,
+    pageSize,
+    pageCount: totalPages,
+    page,
+    onPageChange: setPage,
+    sorting,
+    onSortingChange: handleSortingChange,
+  });
 
   // Show empty state only if ALL selected servers need setup
   const allNeedSetup = useMemo(() => {
@@ -549,22 +566,36 @@ export function LibraryNeverWatched() {
           <p className="text-muted-foreground text-sm">{t('library.neverWatched.itemsDesc')}</p>
         </CardHeader>
         <CardContent>
-          <DataTable
-            columns={columns}
-            data={items.data?.items ?? []}
-            isLoading={items.isLoading}
-            pageCount={totalPages}
-            page={page}
-            onPageChange={setPage}
-            sorting={sorting}
-            onSortingChange={handleSortingChange}
-            isServerFiltered
-            emptyMessage={
-              requestedOnly
-                ? t('library.neverWatched.requestedOnlyEmptyTitle')
-                : t('library.neverWatched.emptyTitle')
-            }
-          />
+          <DataTableRoot density="default">
+            <DataTableViewport>
+              <DataTableHeader table={table} />
+              <DataTableBody
+                table={table}
+                isLoading={items.isLoading}
+                loadingLabel={t('common:states.loading')}
+                empty={
+                  <DataTableEmpty
+                    table={table}
+                    icon={EyeOff}
+                    title={
+                      requestedOnly
+                        ? t('library.neverWatched.requestedOnlyEmptyTitle')
+                        : t('library.neverWatched.emptyTitle')
+                    }
+                  />
+                }
+              />
+            </DataTableViewport>
+            <DataTablePager
+              {...pager}
+              labels={{
+                navigation: t('common:table.pagination'),
+                status: t('common:table.pageOf', { page: pager.page, total: pager.pageCount }),
+                previous: t('common:actions.previous'),
+                next: t('common:actions.next'),
+              }}
+            />
+          </DataTableRoot>
         </CardContent>
       </Card>
     </div>

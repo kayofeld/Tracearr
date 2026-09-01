@@ -8,8 +8,23 @@ import type {
   Session,
   SessionWithDetails,
   ActiveSession,
-  Rule,
+  Automation,
+  AutomationKind,
+  AutomationListQuery,
+  AutomationRun,
+  AutomationRunSummary,
+  AutomationSortField,
+  CreateAutomationInput,
+  DryRunRequest,
+  DryRunResponse,
+  NearMissEntry,
+  RunCounts,
+  RunListQuery,
+  RunSortField,
+  UpdateAutomationInput,
   ViolationWithDetails,
+  ViolationRosterFilters,
+  ViolationSortField,
   DashboardStats,
   PlayStats,
   UserStats,
@@ -28,11 +43,14 @@ import type {
   PlexAccountsResponse,
   LinkPlexAccountResponse,
   UnlinkPlexAccountResponse,
-  NotificationChannelRouting,
-  NotificationEventType,
+  ReauthorizePlexAccountResponse,
+  Destination,
+  DestinationKind,
+  CreateDestinationInput,
+  UpdateDestinationInput,
   HistorySessionResponse,
   HistoryFilterOptions,
-  RulesFilterOptions,
+  AutomationFilterOptions,
   HistoryQueryInput,
   HistoryAggregatesQueryInput,
   HistoryAggregates,
@@ -44,7 +62,6 @@ import type {
   ShowStatsResponse,
   SetupStatus,
   MediaType,
-  WebhookFormat,
   ServerConnectionStatus,
   // New analytics types
   DeviceCompatibilityResponse,
@@ -73,9 +90,6 @@ import type {
   LibraryResolutionResponse,
   RunningTasksResponse,
   TailscaleInfo,
-  // Rules V2 types
-  CreateRuleV2Input,
-  UpdateRuleV2Input,
   // Backup & Restore types
   BackupMetadata,
   BackupListItem,
@@ -103,13 +117,38 @@ import type {
   // Played-state sync types (docs/architecture/emby-played-state-sync.md §7)
   PlayedStateSyncStatusResponse,
   PlayedStateSyncTriggerResponse,
+  UserRosterFilters,
+  ListResponse,
+  // Media browsing types
+  WatchedState,
+  CatalogResponse,
+  CatalogLettersResponse,
+  ShelvesResponse,
+  GenresResponse,
+  LibrariesResponse,
+  MediaDetailResponse,
+  MediaChildrenResponse,
+  MediaStatsResponse,
+  MediaWatchersResponse,
+  MediaPlatformBreakdownResponse,
+  MediaSeasonHeatResponse,
+  ImageCacheStatus,
+  ServerResourceDataPoint,
+  ServerBandwidthDataPoint,
+  BandwidthSample,
+  BandwidthAccount,
+  BandwidthDevice,
+  TEMPLATE_GROUPS,
+  TemplateDefinition,
+  TemplateEnvelope,
+  TemplateInput,
 } from '@tracearr/shared';
 // Telegram pairing types re-exported from @tracearr/shared via one isolated
 // module - see telegramPairingContract.ts.
 import type {
   TelegramPairingStart,
   TelegramPairingStatus,
-} from '@/components/settings/notification-agents/telegramPairingContract';
+} from '@/components/settings/telegram/telegramPairingContract';
 
 // Re-export shared types needed by frontend components
 export type {
@@ -125,6 +164,159 @@ import { BASE_PATH } from '@/lib/basePath';
 export { BASE_PATH, BASE_URL, imageProxyUrl } from '@/lib/basePath';
 import { MAINTENANCE_EVENT } from '@/hooks/useMaintenanceMode';
 
+/** Roster query params: the server's own filter schema plus paging and sort. */
+export type UserListParams = Partial<UserRosterFilters> & {
+  page?: number;
+  pageSize?: number;
+  orderBy?: UserSortField;
+  orderDir?: 'asc' | 'desc';
+};
+
+/** Violation query params: the server's own filter schema plus paging and sort. */
+export type ViolationListParams = Partial<ViolationRosterFilters> & {
+  page?: number;
+  pageSize?: number;
+  orderBy?: ViolationSortField;
+  orderDir?: 'asc' | 'desc';
+};
+
+/** Automation query params: the server's own filter schema plus paging and sort. */
+export type AutomationListParams = Partial<
+  Pick<
+    AutomationListQuery,
+    'kind' | 'enabled' | 'search' | 'source' | 'serverId' | 'trigger' | 'severity'
+  >
+> & {
+  page?: number;
+  pageSize?: number;
+  orderBy?: AutomationSortField;
+  orderDir?: 'asc' | 'desc';
+};
+
+export type TemplateGroup = (typeof TEMPLATE_GROUPS)[number];
+
+/** One stored version: the inputs to bind and the definition they fill. */
+export interface TemplateVersionPayload {
+  version: number;
+  inputs: TemplateInput[];
+  definition: TemplateDefinition;
+}
+
+/** A catalog row, carrying the version it currently points at. */
+export interface AutomationTemplate {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  group: TemplateGroup;
+  kind: AutomationKind;
+  builtin: boolean;
+  source: 'builtin' | 'import' | 'local';
+  author: string | null;
+  currentVersion: number;
+  usedBy: number;
+  createdAt: string;
+  updatedAt: string;
+  version: TemplateVersionPayload;
+}
+
+/** A share code or a pasted envelope; the server accepts either. */
+export interface TemplateImportBody {
+  code?: string;
+  envelope?: unknown;
+  source?: 'local';
+  replace?: string;
+}
+
+export interface TemplatePreview {
+  envelope: TemplateEnvelope;
+  fingerprint: string;
+  existing?: {
+    templateId: string;
+    version: number;
+    name: string;
+    builtin: boolean;
+    fingerprintMatch: boolean;
+  };
+  minServerVersion: { required: string; current: string; satisfied: boolean };
+}
+
+export interface InstantiateTemplateInput {
+  inputs: Record<string, unknown>;
+  name?: string;
+  isActive?: boolean;
+}
+
+/** What both run reads filter on. */
+export type RunFilterParams = Partial<
+  Pick<RunListQuery, 'kind' | 'outcome' | 'automationId' | 'startDate' | 'endDate'>
+>;
+
+/** Run query params: the server's own filter schema plus paging and sort. */
+export type RunListParams = RunFilterParams & {
+  page?: number;
+  pageSize?: number;
+  orderBy?: RunSortField;
+  orderDir?: 'asc' | 'desc';
+};
+
+/**
+ * Query string for a list endpoint. `undefined` and `''` drop out; `false` stays,
+ * because a false is a filter value (`acknowledged=false` is "pending only").
+ */
+function listSearchParams(params: Record<string, unknown>): string {
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === '') continue;
+    if (Array.isArray(value)) {
+      for (const entry of value) searchParams.append(key, String(entry));
+    } else {
+      searchParams.set(key, String(value));
+    }
+  }
+  return searchParams.toString();
+}
+
+export interface BulkViolationParams {
+  ids?: string[];
+  selectAll?: boolean;
+  /** The filters the table was showing; a narrower set dismisses more
+   *  violations than the user could see. */
+  filters?: Partial<ViolationRosterFilters>;
+}
+
+// GET /library/media/:id/history has no shared-package response type yet (its
+// query builder still returns the public v2 snake_case play shape rather than
+// the internal camelCase convention other Task-18-era routes use) - minimal
+// shape only, refine once a dedicated internal history type lands. `user` is
+// typed to match mapHistoryRow's actual serialization (snake_case keys,
+// username already resolved to identity name over server username).
+export interface MediaHistoryPlayEntry {
+  id: string;
+  server_id: string;
+  server_name: string;
+  state: string;
+  media_type: string;
+  media_title: string;
+  started_at: string;
+  stopped_at: string | null;
+  duration_ms: number | null;
+  watched: boolean;
+  user: {
+    id: string;
+    server_user_id: string;
+    username: string;
+    thumb_url: string | null;
+    avatar_url: string | null;
+  };
+  [key: string]: unknown;
+}
+
+export interface MediaHistoryPageResponse {
+  data: MediaHistoryPlayEntry[];
+  meta: { nextCursor: string | null; pageSize: number };
+}
+
 export interface LibraryStatusResponse {
   isSynced: boolean;
   isSyncRunning: boolean;
@@ -136,6 +328,9 @@ export interface LibraryStatusResponse {
   earliestItemDate: string | null;
   earliestSnapshotDate: string | null;
   backfillDays: number | null;
+  /** True while items on the server still carry placeholder version rows;
+   * a full library sync replaces them with observed file versions. */
+  versionsBackfillPending: boolean;
 }
 
 // Stats time range parameters
@@ -144,35 +339,6 @@ export interface StatsTimeRange {
   startDate?: string; // ISO date string
   endDate?: string; // ISO date string
   timezone?: string; // IANA timezone (e.g., 'America/Los_Angeles')
-}
-
-// Rules V2 migration response types
-export interface MigrationPreviewItem {
-  id: string;
-  name: string;
-  type: string;
-  conditions: unknown;
-  actions: unknown;
-}
-
-export interface MigrationPreviewResponse {
-  total: number;
-  alreadyMigrated: number;
-  toMigrate: number;
-  preview: MigrationPreviewItem[];
-}
-
-export interface MigrationResponse {
-  success: boolean;
-  migrated: { id: string; name: string }[];
-  skipped: { id: string; name: string; reason: string }[];
-  errors: { id: string; name: string; error: string }[];
-  summary: {
-    total: number;
-    migrated: number;
-    skipped: number;
-    failed: number;
-  };
 }
 
 // Re-export shared timezone helper for backwards compatibility
@@ -265,20 +431,17 @@ export const tokenStorage = {
 // Used by both ApiClient and authClient so they always target the same origin/basePath.
 export const API_BASE_URL = `${BASE_PATH}${API_BASE_PATH}`;
 
-/**
- * Thrown by `ApiClient.request` for any non-2xx response. Extends `Error` so
- * every existing `err instanceof Error` / `err.message` call site keeps
- * working unchanged; `status` lets callers that need to branch on the exact
- * HTTP status (e.g. 409 "already running" vs 400 "not configured" on the
- * Ombi sync trigger) do so without string-matching the message.
- */
+/** Carries the response status so callers can distinguish e.g. a 404 from a network failure. */
 export class ApiError extends Error {
-  readonly status: number;
+  status: number;
+  /** Parsed error body, for endpoints whose failure carries detail (a 409 delete lists the blocking rules). */
+  body: Record<string, unknown>;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, body: Record<string, unknown> = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -342,7 +505,8 @@ class ApiClient {
       const errorBody = (await response.json().catch(() => ({}))) as Record<string, unknown>;
       throw new ApiError(
         ((errorBody.message ?? errorBody.error) as string) ?? `Request failed: ${response.status}`,
-        response.status
+        response.status,
+        errorBody
       );
     }
 
@@ -446,6 +610,13 @@ class ApiClient {
         body: JSON.stringify({ pin }),
       }),
 
+    // Replace a linked Plex account's token via a fresh OAuth PIN (owner only)
+    reauthorizePlexAccount: (accountId: string, pin: string) =>
+      this.request<ReauthorizePlexAccountResponse>(`/auth/plex/accounts/${accountId}/reauthorize`, {
+        method: 'POST',
+        body: JSON.stringify({ pin }),
+      }),
+
     // Unlink a Plex account (authenticated - owner only)
     unlinkPlexAccount: (id: string) =>
       this.request<UnlinkPlexAccountResponse>(`/auth/plex/accounts/${id}`, {
@@ -533,30 +704,16 @@ class ApiClient {
         method: 'PATCH',
         body: JSON.stringify({ servers }),
       }),
-    statistics: (id: string) =>
+    liveStats: (id: string) =>
       this.request<{
         serverId: string;
-        data: {
-          at: number;
-          timespan: number;
-          hostCpuUtilization: number;
-          processCpuUtilization: number;
-          hostMemoryUtilization: number;
-          processMemoryUtilization: number;
-        }[];
+        statistics: ServerResourceDataPoint[];
+        bandwidth: ServerBandwidthDataPoint[];
+        bandwidthSamples: BandwidthSample[];
+        bandwidthAccounts: BandwidthAccount[];
+        bandwidthDevices: BandwidthDevice[];
         fetchedAt: string;
-      }>(`/servers/${id}/statistics`),
-    bandwidth: (id: string) =>
-      this.request<{
-        serverId: string;
-        data: {
-          at: number;
-          timespan: number;
-          lanBytes: number;
-          wanBytes: number;
-        }[];
-        fetchedAt: string;
-      }>(`/servers/${id}/bandwidth`),
+      }>(`/servers/${id}/live-stats`),
     health: async () => {
       const response = await this.request<{
         data: { serverId: string; serverName: string }[];
@@ -573,30 +730,17 @@ class ApiClient {
 
   // Users
   users = {
-    list: (params?: {
-      page?: number;
-      pageSize?: number;
-      serverId?: string;
-      serverIds?: string[];
-      includeRemoved?: boolean;
-      search?: string;
-      orderBy?: UserSortField;
-      orderDir?: 'asc' | 'desc';
-    }) => {
+    list: (params: UserListParams = {}) => {
       const searchParams = new URLSearchParams();
-      if (params?.page) searchParams.set('page', String(params.page));
-      if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-      if (params?.serverId) searchParams.set('serverId', params.serverId);
-      if (params?.serverIds?.length) {
-        for (const id of params.serverIds) {
-          searchParams.append('serverIds', id);
+      for (const [key, value] of Object.entries(params)) {
+        if (value === undefined || value === false || value === '') continue;
+        if (Array.isArray(value)) {
+          for (const entry of value) searchParams.append(key, entry);
+        } else {
+          searchParams.set(key, String(value));
         }
       }
-      if (params?.includeRemoved) searchParams.set('includeRemoved', 'true');
-      if (params?.search) searchParams.set('search', params.search);
-      if (params?.orderBy) searchParams.set('orderBy', params.orderBy);
-      if (params?.orderDir) searchParams.set('orderDir', params.orderDir);
-      return this.request<PaginatedResponse<ServerUserWithIdentity>>(
+      return this.request<ListResponse<ServerUserWithIdentity>>(
         `/users?${searchParams.toString()}`
       );
     },
@@ -648,7 +792,9 @@ class ApiClient {
     bulkResetTrust: (params: {
       ids?: string[];
       selectAll?: boolean;
-      filters?: { serverId?: string; serverIds?: string[]; includeRemoved?: boolean };
+      /** The roster filters the table was showing; a narrower set resets more
+       *  people than the user could see. */
+      filters?: Partial<UserRosterFilters>;
     }) =>
       this.request<{ success: boolean; updated: number }>('/users/bulk/reset-trust', {
         method: 'POST',
@@ -785,11 +931,13 @@ class ApiClient {
       );
     },
     /**
-     * Get filter options for the rules builder.
+     * Get filter options for the automation builder.
      * Returns all countries (with hasSessions indicator) and servers.
      */
-    rulesFilterOptions: () => {
-      return this.request<RulesFilterOptions>('/sessions/filter-options?includeAllCountries=true');
+    automationFilterOptions: () => {
+      return this.request<AutomationFilterOptions>(
+        '/sessions/filter-options?includeAllCountries=true'
+      );
     },
     getActive: async (serverIds?: string[]) => {
       const params = new URLSearchParams();
@@ -817,116 +965,114 @@ class ApiClient {
       }),
   };
 
-  // Rules
-  rules = {
-    list: async () => {
-      const response = await this.request<{ data: Rule[] }>('/rules');
-      return response.data;
-    },
-    create: (data: Omit<Rule, 'id' | 'createdAt' | 'updatedAt'>) =>
-      this.request<Rule>('/rules', { method: 'POST', body: JSON.stringify(data) }),
-    update: (id: string, data: Partial<Rule>) =>
-      this.request<Rule>(`/rules/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    delete: (id: string) => this.request<void>(`/rules/${id}`, { method: 'DELETE' }),
+  // Automations
+  automations = {
+    list: (params: AutomationListParams = {}) =>
+      this.request<ListResponse<Automation>>(`/automations?${listSearchParams(params)}`),
+    get: (id: string) => this.request<Automation>(`/automations/${id}`),
+    create: (data: CreateAutomationInput) =>
+      this.request<Automation>('/automations', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: UpdateAutomationInput) =>
+      this.request<Automation>(`/automations/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) => this.request<void>(`/automations/${id}`, { method: 'DELETE' }),
+    /** Re-answers what a bound row's template asked; the server re-materializes the definition. */
+    rebind: (id: string, templateInputs: Record<string, unknown>) =>
+      this.request<Automation>(`/automations/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ templateInputs }),
+      }),
+    /** What a draft would do against the sessions playing now; nothing is recorded. */
+    dryRun: (data: DryRunRequest) =>
+      this.request<DryRunResponse>('/automations/dry-run', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
     bulkUpdate: (ids: string[], isActive: boolean) =>
-      this.request<{ success: boolean; updated: number }>('/rules/bulk', {
+      this.request<{ success: boolean; updated: number }>('/automations/bulk', {
         method: 'PATCH',
         body: JSON.stringify({ ids, isActive }),
       }),
     bulkDelete: (ids: string[]) =>
-      this.request<{ success: boolean; deleted: number }>('/rules/bulk', {
+      this.request<{ success: boolean; deleted: number }>('/automations/bulk', {
         method: 'DELETE',
         body: JSON.stringify({ ids }),
       }),
-
-    // V2 Rules API
-    createV2: (data: CreateRuleV2Input) =>
-      this.request<Rule>('/rules/v2', { method: 'POST', body: JSON.stringify(data) }),
-    updateV2: (id: string, data: UpdateRuleV2Input) =>
-      this.request<Rule>(`/rules/${id}/v2`, { method: 'PATCH', body: JSON.stringify(data) }),
-
-    // Migration
-    migratePreview: () => this.request<MigrationPreviewResponse>('/rules/migrate/preview'),
-    migrate: (ids?: string[]) =>
-      this.request<MigrationResponse>('/rules/migrate', {
+    /** The automation as an envelope plus the code that carries it. */
+    export: (id: string, author?: string, group?: TemplateGroup) => {
+      const query = listSearchParams({ author, group });
+      return this.request<{ envelope: TemplateEnvelope; code: string }>(
+        `/automations/${id}/export${query ? `?${query}` : ''}`
+      );
+    },
+    detach: (id: string) =>
+      this.request<Automation>(`/automations/${id}/detach`, { method: 'POST' }),
+    upgrade: (id: string, inputs: Record<string, unknown>) =>
+      this.request<Automation>(`/automations/${id}/upgrade`, {
         method: 'POST',
-        body: JSON.stringify(ids ? { ids } : {}),
+        body: JSON.stringify({ inputs }),
       }),
-    migrateOne: (id: string) =>
-      this.request<Rule>(`/rules/${id}/migrate`, { method: 'POST', body: '{}' }),
+  };
+
+  // Automation templates
+  templates = {
+    list: () => this.request<{ data: AutomationTemplate[] }>('/templates'),
+    get: (id: string) => this.request<AutomationTemplate>(`/templates/${id}`),
+    /** One stored version, however old: what a row pinned to it still says. */
+    getVersion: (id: string, version: number) =>
+      this.request<TemplateVersionPayload>(`/templates/${id}/versions/${version}`),
+    /** What an import would land on; nothing is written. */
+    preview: (body: TemplateImportBody) =>
+      this.request<TemplatePreview>('/templates/preview', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    create: (body: TemplateImportBody) =>
+      this.request<AutomationTemplate>('/templates', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    instantiate: (id: string, body: InstantiateTemplateInput) =>
+      this.request<Automation>(`/templates/${id}/instantiate`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+  };
+
+  // Automation runs
+  runs = {
+    get: (id: string) => this.request<AutomationRun>(`/runs/${id}`),
+    listForAutomation: (automationId: string, params: RunListParams = {}) =>
+      this.request<ListResponse<AutomationRunSummary>>(
+        `/automations/${automationId}/runs?${listSearchParams(params)}`
+      ),
+    /** How many runs each outcome holds, for the Activity tabs. */
+    counts: (params: RunFilterParams = {}) =>
+      this.request<RunCounts>(`/runs/counts?${listSearchParams(params)}`),
+    /** The capped near-miss ring, newest first. */
+    evaluations: (automationId: string) =>
+      this.request<{ data: NearMissEntry[] }>(`/automations/${automationId}/evaluations`),
   };
 
   // Violations
   violations = {
     get: (id: string) => this.request<ViolationWithDetails>(`/violations/${id}`),
-    list: (params?: {
-      page?: number;
-      pageSize?: number;
-      serverUserId?: string;
-      userId?: string;
-      userIds?: string[];
-      severity?: string;
-      acknowledged?: boolean;
-      serverIds?: string[];
-      orderBy?: string;
-      orderDir?: 'asc' | 'desc';
-    }) => {
-      const searchParams = new URLSearchParams();
-      if (params?.page) searchParams.set('page', String(params.page));
-      if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-      if (params?.serverUserId) searchParams.set('serverUserId', params.serverUserId);
-      if (params?.userId) searchParams.set('userId', params.userId);
-      if (params?.userIds?.length) {
-        for (const id of params.userIds) {
-          searchParams.append('userIds', id);
-        }
-      }
-      if (params?.severity) searchParams.set('severity', params.severity);
-      if (params?.acknowledged !== undefined)
-        searchParams.set('acknowledged', String(params.acknowledged));
-      if (params?.serverIds?.length) {
-        for (const id of params.serverIds) {
-          searchParams.append('serverIds', id);
-        }
-      }
-      if (params?.orderBy) searchParams.set('orderBy', params.orderBy);
-      if (params?.orderDir) searchParams.set('orderDir', params.orderDir);
-      return this.request<PaginatedResponse<ViolationWithDetails>>(
-        `/violations?${searchParams.toString()}`
-      );
-    },
+    list: (params: ViolationListParams = {}) =>
+      this.request<ListResponse<ViolationWithDetails>>(`/violations?${listSearchParams(params)}`),
     acknowledge: (id: string) =>
       this.request<{ success: boolean; acknowledgedAt: Date | null }>(`/violations/${id}`, {
         method: 'PATCH',
         body: '{}',
       }),
     dismiss: (id: string) => this.request<void>(`/violations/${id}`, { method: 'DELETE' }),
-    bulkAcknowledge: (params: {
-      ids?: string[];
-      selectAll?: boolean;
-      filters?: {
-        serverIds?: string[];
-        severity?: string;
-        acknowledged?: boolean;
-        userId?: string;
-        userIds?: string[];
-      };
-    }) =>
+    bulkAcknowledge: (params: BulkViolationParams) =>
       this.request<{ success: boolean; acknowledged: number }>('/violations/bulk/acknowledge', {
         method: 'POST',
         body: JSON.stringify(params),
       }),
-    bulkDismiss: (params: {
-      ids?: string[];
-      selectAll?: boolean;
-      filters?: {
-        serverIds?: string[];
-        severity?: string;
-        acknowledged?: boolean;
-        userId?: string;
-        userIds?: string[];
-      };
-    }) =>
+    bulkDismiss: (params: BulkViolationParams) =>
       this.request<{ success: boolean; dismissed: number }>('/violations/bulk', {
         method: 'DELETE',
         body: JSON.stringify(params),
@@ -1217,7 +1363,13 @@ class ApiClient {
       params.set('timezone', getBrowserTimezone());
       return this.request<LibraryStatsResponse>(`/library/stats?${params.toString()}`);
     },
-    growth: (serverIds?: string[], libraryId?: string, period: string = '30d') => {
+    growth: (
+      serverIds?: string[],
+      libraryId?: string,
+      period: string = '30d',
+      startDate?: string,
+      endDate?: string
+    ) => {
       const params = new URLSearchParams();
       if (serverIds?.length) {
         for (const id of serverIds) {
@@ -1226,6 +1378,8 @@ class ApiClient {
       }
       if (libraryId) params.set('libraryId', libraryId);
       params.set('period', period);
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
       params.set('timezone', getBrowserTimezone());
       return this.request<LibraryGrowthResponse>(`/library/growth?${params.toString()}`);
     },
@@ -1245,6 +1399,17 @@ class ApiClient {
       const params = new URLSearchParams();
       if (serverId) params.set('serverId', serverId);
       if (libraryId) params.set('libraryId', libraryId);
+      params.set('period', period);
+      params.set('timezone', getBrowserTimezone());
+      return this.request<LibraryStorageResponse>(`/library/storage?${params.toString()}`);
+    },
+    // Scoped variant: one request over the whole selection, so the server's
+    // mirror dedup sees every server at once instead of per-server sums
+    storageScoped: (serverIds: string[], period: string = '30d') => {
+      const params = new URLSearchParams();
+      for (const id of serverIds) {
+        params.append('serverIds', id);
+      }
       params.set('period', period);
       params.set('timezone', getBrowserTimezone());
       return this.request<LibraryStorageResponse>(`/library/storage?${params.toString()}`);
@@ -1458,6 +1623,209 @@ class ApiClient {
           body: JSON.stringify(serverId ? { serverId } : {}),
         }),
     },
+    catalog: (params: {
+      type: 'movie' | 'show';
+      serverIds?: string[];
+      resolution?: string;
+      genre?: string;
+      yearFrom?: number;
+      yearTo?: number;
+      watched?: WatchedState;
+      lens?: string;
+      search?: string;
+      sort?: 'title' | 'added' | 'year' | 'plays' | 'watch_time' | 'viewers';
+      offset?: number;
+      pageSize?: number;
+      libraryKey?: string;
+      hdr?: boolean;
+      sizeGbMin?: number;
+      sizeGbMax?: number;
+    }) => {
+      const searchParams = new URLSearchParams();
+      searchParams.set('type', params.type);
+      if (params.serverIds?.length) {
+        for (const id of params.serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
+      if (params.resolution) searchParams.set('resolution', params.resolution);
+      if (params.genre) searchParams.set('genre', params.genre);
+      if (params.yearFrom !== undefined) searchParams.set('yearFrom', String(params.yearFrom));
+      if (params.yearTo !== undefined) searchParams.set('yearTo', String(params.yearTo));
+      if (params.watched) searchParams.set('watched', params.watched);
+      if (params.lens) searchParams.set('lens', params.lens);
+      if (params.search) searchParams.set('search', params.search);
+      if (params.sort) searchParams.set('sort', params.sort);
+      if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
+      if (params.pageSize) searchParams.set('pageSize', String(params.pageSize));
+      if (params.libraryKey) searchParams.set('libraryKey', params.libraryKey);
+      if (params.hdr) searchParams.set('hdr', 'true');
+      if (params.sizeGbMin !== undefined) searchParams.set('sizeGbMin', String(params.sizeGbMin));
+      if (params.sizeGbMax !== undefined) searchParams.set('sizeGbMax', String(params.sizeGbMax));
+      return this.request<CatalogResponse>(`/library/catalog?${searchParams.toString()}`);
+    },
+    catalogLetters: (params: {
+      type: 'movie' | 'show';
+      serverIds?: string[];
+      resolution?: string;
+      genre?: string;
+      yearFrom?: number;
+      yearTo?: number;
+      watched?: WatchedState;
+      lens?: string;
+      search?: string;
+      sort?: 'title' | 'added' | 'year' | 'plays' | 'watch_time' | 'viewers';
+      libraryKey?: string;
+      hdr?: boolean;
+      sizeGbMin?: number;
+      sizeGbMax?: number;
+    }) => {
+      const searchParams = new URLSearchParams();
+      searchParams.set('type', params.type);
+      if (params.serverIds?.length) {
+        for (const id of params.serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
+      if (params.resolution) searchParams.set('resolution', params.resolution);
+      if (params.genre) searchParams.set('genre', params.genre);
+      if (params.yearFrom !== undefined) searchParams.set('yearFrom', String(params.yearFrom));
+      if (params.yearTo !== undefined) searchParams.set('yearTo', String(params.yearTo));
+      if (params.watched) searchParams.set('watched', params.watched);
+      if (params.lens) searchParams.set('lens', params.lens);
+      if (params.search) searchParams.set('search', params.search);
+      if (params.sort) searchParams.set('sort', params.sort);
+      if (params.libraryKey) searchParams.set('libraryKey', params.libraryKey);
+      if (params.hdr) searchParams.set('hdr', 'true');
+      if (params.sizeGbMin !== undefined) searchParams.set('sizeGbMin', String(params.sizeGbMin));
+      if (params.sizeGbMax !== undefined) searchParams.set('sizeGbMax', String(params.sizeGbMax));
+      return this.request<CatalogLettersResponse>(
+        `/library/catalog/letters?${searchParams.toString()}`
+      );
+    },
+    shelves: (
+      params: {
+        timeRange?: StatsTimeRange;
+        serverIds?: string[];
+        includeDeadWeight?: boolean;
+      } = {}
+    ) => {
+      const searchParams = new URLSearchParams();
+      if (params.timeRange?.period) searchParams.set('period', params.timeRange.period);
+      if (params.timeRange?.startDate) searchParams.set('startDate', params.timeRange.startDate);
+      if (params.timeRange?.endDate) searchParams.set('endDate', params.timeRange.endDate);
+      if (params.includeDeadWeight === false) searchParams.set('includeDeadWeight', 'false');
+      if (params.serverIds?.length) {
+        for (const id of params.serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
+      return this.request<ShelvesResponse>(`/library/shelves?${searchParams.toString()}`);
+    },
+    genres: (type: 'movie' | 'show', serverIds?: string[]) => {
+      const searchParams = new URLSearchParams();
+      searchParams.set('type', type);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
+      return this.request<GenresResponse>(`/library/genres?${searchParams.toString()}`);
+    },
+    libraries: (serverIds?: string[]) => {
+      const searchParams = new URLSearchParams();
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          searchParams.append('serverIds', id);
+        }
+      }
+      return this.request<LibrariesResponse>(`/library/libraries?${searchParams.toString()}`);
+    },
+    media: {
+      detail: (id: string, serverIds?: string[]) => {
+        const searchParams = new URLSearchParams();
+        if (serverIds?.length) {
+          for (const serverId of serverIds) {
+            searchParams.append('serverIds', serverId);
+          }
+        }
+        const query = searchParams.toString();
+        return this.request<MediaDetailResponse>(`/library/media/${id}${query ? `?${query}` : ''}`);
+      },
+      children: (id: string, serverIds?: string[]) => {
+        const searchParams = new URLSearchParams();
+        if (serverIds?.length) {
+          for (const serverId of serverIds) {
+            searchParams.append('serverIds', serverId);
+          }
+        }
+        const query = searchParams.toString();
+        return this.request<MediaChildrenResponse>(
+          `/library/media/${id}/children${query ? `?${query}` : ''}`
+        );
+      },
+      stats: (id: string, serverIds?: string[]) => {
+        const searchParams = new URLSearchParams();
+        if (serverIds?.length) {
+          for (const serverId of serverIds) {
+            searchParams.append('serverIds', serverId);
+          }
+        }
+        const query = searchParams.toString();
+        return this.request<MediaStatsResponse>(
+          `/library/media/${id}/stats${query ? `?${query}` : ''}`
+        );
+      },
+      watchers: (id: string, window?: 'all_time' | 'last_30' | 'last_7', serverIds?: string[]) => {
+        const searchParams = new URLSearchParams();
+        if (window) searchParams.set('window', window);
+        if (serverIds?.length) {
+          for (const serverId of serverIds) {
+            searchParams.append('serverIds', serverId);
+          }
+        }
+        return this.request<MediaWatchersResponse>(
+          `/library/media/${id}/watchers?${searchParams.toString()}`
+        );
+      },
+      history: (id: string, cursor?: string, pageSize?: number, serverIds?: string[]) => {
+        const searchParams = new URLSearchParams();
+        if (cursor) searchParams.set('cursor', cursor);
+        if (pageSize) searchParams.set('pageSize', String(pageSize));
+        if (serverIds?.length) {
+          for (const serverId of serverIds) {
+            searchParams.append('serverIds', serverId);
+          }
+        }
+        return this.request<MediaHistoryPageResponse>(
+          `/library/media/${id}/history?${searchParams.toString()}`
+        );
+      },
+      platforms: (id: string, serverIds?: string[]) => {
+        const searchParams = new URLSearchParams();
+        if (serverIds?.length) {
+          for (const serverId of serverIds) {
+            searchParams.append('serverIds', serverId);
+          }
+        }
+        const query = searchParams.toString();
+        return this.request<MediaPlatformBreakdownResponse>(
+          `/library/media/${id}/platforms${query ? `?${query}` : ''}`
+        );
+      },
+      seasonHeat: (id: string, serverIds?: string[]) => {
+        const searchParams = new URLSearchParams();
+        if (serverIds?.length) {
+          for (const serverId of serverIds) {
+            searchParams.append('serverIds', serverId);
+          }
+        }
+        const query = searchParams.toString();
+        return this.request<MediaSeasonHeatResponse>(
+          `/library/media/${id}/season-heat${query ? `?${query}` : ''}`
+        );
+      },
+    },
   };
 
   // Settings
@@ -1479,24 +1847,12 @@ class ApiClient {
         method: 'PATCH',
         body: JSON.stringify({ dockerRedeployWebhookUrl: url }),
       }),
-    testWebhook: (data: {
-      type: 'discord' | 'custom';
-      url?: string;
-      format?: WebhookFormat;
-      ntfyTopic?: string;
-      ntfyAuthToken?: string;
-      pushoverUserKey?: string;
-      pushoverApiToken?: string;
-    }) =>
-      this.request<{ success: boolean; error?: string }>('/settings/test-webhook', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
     getApiKey: () => this.request<{ token: string | null }>('/settings/api-key'),
     regenerateApiKey: () =>
       this.request<{ token: string }>('/settings/api-key/regenerate', { method: 'POST' }),
     getIpWarning: () =>
       this.request<{ showWarning: boolean; stateHash: string }>('/settings/ip-warning'),
+    getImageCache: () => this.request<ImageCacheStatus>('/settings/image-cache'),
   };
 
   // Ombi connector - owner-gated connection/sync/mapping management.
@@ -1555,7 +1911,7 @@ class ApiClient {
 
   // Telegram bot pairing - interactive setup wizard.
   // Contract: apps/server/src/routes/telegramPairing.ts (types re-exported via
-  // ./components/settings/notification-agents/telegramPairingContract.ts).
+  // ./components/settings/telegram/telegramPairingContract.ts).
   telegramPairing = {
     start: (botToken: string) =>
       this.request<TelegramPairingStart>('/notifications/telegram/pairing', {
@@ -1572,20 +1928,29 @@ class ApiClient {
       }),
   };
 
-  // Channel Routing
-  channelRouting = {
-    getAll: () => this.request<NotificationChannelRouting[]>('/settings/notifications/routing'),
-    update: (
-      eventType: NotificationEventType,
-      data: {
-        discordEnabled?: boolean;
-        webhookEnabled?: boolean;
-        webToastEnabled?: boolean;
-        pushEnabled?: boolean;
-      }
-    ) =>
-      this.request<NotificationChannelRouting>(`/settings/notifications/routing/${eventType}`, {
+  map = {
+    getBasemapStatus: () =>
+      this.request<{ installed: boolean; path: string }>('/map/basemap/status'),
+  };
+
+  // Notification destinations
+  destinations = {
+    list: () => this.request<Destination[]>('/destinations'),
+    create: (data: CreateDestinationInput) =>
+      this.request<Destination>('/destinations', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: UpdateDestinationInput) =>
+      this.request<Destination>(`/destinations/${id}`, {
         method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    remove: (id: string) => this.request<void>(`/destinations/${id}`, { method: 'DELETE' }),
+    test: (id: string) =>
+      this.request<{ success: boolean; error?: string }>(`/destinations/${id}/test`, {
+        method: 'POST',
+      }),
+    testUnsaved: (data: { type: DestinationKind; config: Record<string, unknown> }) =>
+      this.request<{ success: boolean; error?: string }>('/destinations/test', {
+        method: 'POST',
         body: JSON.stringify(data),
       }),
   };
@@ -1692,6 +2057,61 @@ class ApiClient {
         }>(`/import/jellystat/${jobId}`),
       cancel: (jobId: string) =>
         this.request<{ status: string; jobId: string }>(`/import/jellystat/${jobId}`, {
+          method: 'DELETE',
+        }),
+    },
+    playbackReporting: {
+      test: (serverId: string) =>
+        this.request<{
+          success: boolean;
+          installed: boolean;
+          message: string;
+          records?: number;
+          oldestDate?: string;
+          newestDate?: string;
+        }>('/import/playback-reporting/test', {
+          method: 'POST',
+          body: JSON.stringify({ serverId }),
+        }),
+      start: (
+        serverId: string,
+        timezone: string,
+        enrichMedia: boolean = true,
+        importFullRange: boolean = false
+      ) =>
+        this.request<{ status: string; jobId?: string; message: string }>(
+          '/import/playback-reporting',
+          {
+            method: 'POST',
+            body: JSON.stringify({ serverId, timezone, enrichMedia, importFullRange }),
+          }
+        ),
+      getActive: (serverId: string) =>
+        this.request<{
+          active: boolean;
+          jobId?: string;
+          state?: string;
+          progress?: number | object;
+          createdAt?: number;
+        }>(`/import/playback-reporting/active/${serverId}`),
+      getStatus: (jobId: string) =>
+        this.request<{
+          jobId: string;
+          state: string;
+          progress: number | object | null;
+          result?: {
+            success: boolean;
+            imported: number;
+            skipped: number;
+            errors: number;
+            message: string;
+          };
+          failedReason?: string;
+          createdAt?: number;
+          finishedAt?: number;
+        }>(`/import/playback-reporting/${jobId}`),
+      cancel: (jobId: string) =>
+        this.request<{ status: string; jobId: string }>(`/import/playback-reporting/${jobId}`, {
           method: 'DELETE',
         }),
     },

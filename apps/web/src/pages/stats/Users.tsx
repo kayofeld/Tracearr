@@ -3,6 +3,7 @@ import { Users as UsersIcon, Trophy } from 'lucide-react';
 import { TimeRangePicker } from '@/components/ui/time-range-picker';
 import { UserCard, UserRow } from '@/components/users';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/library/ErrorState';
 import { useTopUsers } from '@/hooks/queries';
 import { useServer } from '@/hooks/useServer';
@@ -65,11 +66,11 @@ export function StatsUsers() {
           </section>
         </div>
       ) : users.length === 0 ? (
-        <div className="rounded-xl border border-dashed p-12 text-center">
-          <UsersIcon className="text-muted-foreground/50 mx-auto h-16 w-16" />
-          <h3 className="mt-4 text-lg font-semibold">{t('statsUsers.noActivity')}</h3>
-          <p className="text-muted-foreground mt-1">{t('statsUsers.noActivityDesc')}</p>
-        </div>
+        <EmptyState
+          icon={UsersIcon}
+          title={t('statsUsers.noActivity')}
+          description={t('statsUsers.noActivityDesc')}
+        />
       ) : (
         <>
           {/* Podium Section - Top 3 */}

@@ -3,8 +3,8 @@ import { format } from 'date-fns';
 import { CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
 
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -21,6 +21,9 @@ interface TimeRangePickerProps {
   onChange: (value: TimeRangeValue) => void;
   className?: string;
 }
+
+// one selected-state language across every segmented control in the app
+const SELECTED = 'data-[state=on]:bg-primary/15 data-[state=on]:text-primary';
 
 const PRESETS: { value: TimeRangePeriod; label: string }[] = [
   { value: 'week', label: '7d' },
@@ -65,38 +68,31 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
   };
 
   return (
-    <div className={cn('bg-muted inline-flex items-center gap-1 rounded-lg p-1', className)}>
-      {/* Preset buttons */}
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      value={value.period}
+      // 'custom' is committed by Apply, not by opening the popover
+      onValueChange={(next) => {
+        if (next && next !== 'custom') handlePresetClick(next as TimeRangePeriod);
+      }}
+      className={className}
+    >
       {PRESETS.map((preset) => (
-        <button
-          key={preset.value}
-          onClick={() => handlePresetClick(preset.value)}
-          className={cn(
-            'cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-            value.period === preset.value
-              ? 'bg-background text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          )}
-        >
+        <ToggleGroupItem key={preset.value} value={preset.value} className={SELECTED}>
           {preset.label}
-        </button>
+        </ToggleGroupItem>
       ))}
 
-      {/* Custom date range picker */}
       <Popover open={isOpen} onOpenChange={setIsOpen}>
         <PopoverTrigger asChild>
-          <button
-            className={cn(
-              'inline-flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-              value.period === 'custom'
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            <CalendarIcon className="h-3.5 w-3.5" />
-            <span>{value.period === 'custom' ? formatDateRange() : 'Custom'}</span>
-          </button>
+          <ToggleGroupItem value="custom" className={SELECTED}>
+            <CalendarIcon />
+            {value.period === 'custom' ? formatDateRange() : 'Custom'}
+          </ToggleGroupItem>
         </PopoverTrigger>
+        {/* z-[1100]: this picker sits over the Leaflet map, whose own controls
+            reach z-1000, so the default z-50 would render underneath them */}
         <PopoverContent className="z-[1100] w-auto p-0" align="end">
           <div className="p-3">
             <Calendar
@@ -129,6 +125,6 @@ export function TimeRangePicker({ value, onChange, className }: TimeRangePickerP
           </div>
         </PopoverContent>
       </Popover>
-    </div>
+    </ToggleGroup>
   );
 }

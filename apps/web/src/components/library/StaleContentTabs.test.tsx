@@ -112,7 +112,7 @@ describe('StaleContentTabs', () => {
 
     renderTabs();
 
-    expect(screen.getByText('library.neverWatched.emptyTitleNoData')).toBeInTheDocument();
+    expect(screen.getByText('pages:library.neverWatched.emptyTitleNoData')).toBeInTheDocument();
     expect(screen.queryByText('No stale content')).not.toBeInTheDocument();
   });
 
@@ -137,6 +137,8 @@ describe('StaleContentTabs', () => {
     renderTabs();
 
     expect(screen.getByText('No stale content')).toBeInTheDocument();
-    expect(screen.queryByText('library.neverWatched.emptyTitleNoData')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('pages:library.neverWatched.emptyTitleNoData')
+    ).not.toBeInTheDocument();
   });
 });

@@ -1,25 +1,29 @@
 /**
- * Shared ioredis client for the Better Auth instance and its plugins.
- *
- * Constructed lazily so Phase 1 startup (building the Fastify app) succeeds
- * without a reachable Redis. The Better Auth secondary storage and the Plex
- * login plugin both use this single connection.
+ * Redis accessor for the Better Auth instance, the Plex login plugin, and the
+ * SSE stats recorder. Prefers the Fastify plugin's client (see plugins/redis.ts)
+ * so the process holds one connection with one retry policy and one error handler.
  */
 
 import { Redis } from 'ioredis';
 
-let client: Redis | null = null;
+/** The Fastify plugin's client. Owned by the plugin - closeRedis must not quit it. */
+let injected: Redis | null = null;
+/** Only created when nothing injected a client: scripts and unit tests. */
+let fallback: Redis | null = null;
+
+export function setSharedRedis(redis: Redis): void {
+  injected = redis;
+}
 
 export function getRedis(): Redis {
-  if (!client) {
-    client = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
-  }
-  return client;
+  if (injected) return injected;
+  fallback ??= new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
+  return fallback;
 }
 
 export async function closeRedis(): Promise<void> {
-  if (client) {
-    await client.quit();
-    client = null;
+  if (fallback) {
+    await fallback.quit();
+    fallback = null;
   }
 }
