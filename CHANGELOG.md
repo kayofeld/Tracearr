@@ -4,6 +4,22 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v2.3.1: green pipelines for the v2 line
+
+No user-facing change. v2.3.0 shipped with red integration, E2E and Snyk jobs, all fallout from the
+upstream merge and all confined to tests and workflow wiring:
+
+- Upstream's integration tests create several owner accounts per database; this fork allows exactly one
+  owner per instance and keeps that guard, so the extra accounts in those tests are now admins or members.
+- Upstream's E2E harness seeded servers and users before the owner signed up, which this fork refuses on
+  purpose (an instance with data but no owner must not be claimable from the login page). The seed now
+  runs after the owner exists.
+- The Snyk scan is skipped when the fork has no Snyk token instead of reporting a broken scan.
+- Two fork tests caught up with upstream's renamed `libraries.media_type` column and its per-file size
+  model; the never-watched totals in the app were never affected.
+
+The upgrade notes for v2.3.0 (database reconciliation, Telegram re-setup) apply unchanged.
+
 ## v2.3.0: caught up with upstream v2.2.3
 
 The fork had been running on its own line since July and was 389 commits behind. This release merges
