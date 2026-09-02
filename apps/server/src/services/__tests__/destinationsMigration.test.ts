@@ -28,6 +28,7 @@ import { db } from '../../db/client.js';
 import { destinations, automations, settings } from '../../db/schema.js';
 import { invalidateAutomationsCache } from '../../jobs/poller/database.js';
 import {
+  decryptConfig,
   initDestinationCrypto,
   resetDestinationCryptoForTests,
 } from '../notifications/destinationCrypto.js';
@@ -523,6 +524,30 @@ describe('runDestinationsMigration', () => {
         ])
       );
     }
+  });
+
+  it('carries a Telegram channel whose chat id drizzle hands back as a number', async () => {
+    // jsonb re-parses string payloads, so an all-digit chat id arrives as a number
+    const harness = await runWith({
+      builtinRows: [
+        { id: 'push-row', type: 'push' },
+        { id: 'toast-row', type: 'web_toast' },
+      ],
+      settingRows: [
+        { name: 'telegramBotToken', value: '123:abc' },
+        { name: 'telegramChatId', value: 123456789 },
+        { name: 'webhookFormat', value: 'telegram' },
+      ],
+      ruleRows: [],
+      routingRows: [],
+      routingExists: false,
+    });
+
+    const telegram = harness.inserted.find((row) => row.type === 'telegram');
+    expect(telegram).toBeDefined();
+    expect(telegram?.enabled).toBe(true);
+    const opened = decryptConfig(telegram?.config as string);
+    expect(opened.ok && opened.config).toEqual({ botToken: '123:abc', chatId: '123456789' });
   });
 
   it('deletes exactly the legacy setting names (the seven plus the two fork telegram keys)', async () => {

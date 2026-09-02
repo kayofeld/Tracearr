@@ -343,8 +343,12 @@ export async function runDestinationsMigration(): Promise<void> {
       string | null
     >;
     for (const row of settingRows) {
-      if (typeof row.value === 'string' && (LEGACY_KEYS as readonly string[]).includes(row.name)) {
-        seven[row.name as LegacyKey] = row.value;
+      if (!(LEGACY_KEYS as readonly string[]).includes(row.name)) continue;
+      // Every legacy value is a string, but drizzle's jsonb reader re-parses a
+      // string payload, so an all-digit value such as a Telegram chat id
+      // arrives as a number. Coerce rather than drop it.
+      if (typeof row.value === 'string' || typeof row.value === 'number') {
+        seven[row.name as LegacyKey] = String(row.value);
       }
     }
 

@@ -4,6 +4,12 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v2.3.3: Telegram carry-over reads the chat id correctly
+
+- v2.3.2's Telegram carry-over skipped the channel on any real install: the chat id is all digits, and
+  the database layer hands an all-digit setting back as a number, which the migration then ignored.
+  Caught in rehearsal against a copy of production before it shipped anywhere. Fixed and tested.
+
 ## v2.3.2: Telegram survives the upgrade
 
 - The upgrade to the v2 line moves notification channels into Destinations. Upstream's migration
