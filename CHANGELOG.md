@@ -4,6 +4,17 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v2.3.2: Telegram survives the upgrade
+
+- The upgrade to the v2 line moves notification channels into Destinations. Upstream's migration
+  carries Discord, webhooks and Pushover across; this release carries the fork's Telegram channel too.
+  On first start it becomes a Telegram destination with the bot token and chat id stored encrypted,
+  enabled when Telegram was the selected format, subscribed to the same events the old routing table
+  sent it, and referenced by any rule that used to notify the webhook channel. No re-pairing needed.
+- The Snyk workflow is removed from the fork.
+
+The v2.3.0 upgrade note about database reconciliation still applies.
+
 ## v2.3.1: green pipelines for the v2 line
 
 No user-facing change. v2.3.0 shipped with red integration, E2E and Snyk jobs, all fallout from the

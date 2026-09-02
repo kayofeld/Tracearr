@@ -43,17 +43,17 @@ import {
 import {
   planDestinationsMigration,
   runDestinationsMigration,
-  SEVEN_KEYS,
+  LEGACY_KEYS,
   sweepDestinationConfigs,
+  type LegacyKey,
   type PlanInput,
   type RoutingRow,
-  type SevenKey,
 } from '../notifications/destinationsMigration.js';
 import { resetSettingsCache } from '../settings.js';
 
 const seven = (
-  o: Partial<Record<SevenKey, string | null>> = {}
-): Record<SevenKey, string | null> => ({
+  o: Partial<Record<LegacyKey, string | null>> = {}
+): Record<LegacyKey, string | null> => ({
   discordWebhookUrl: null,
   customWebhookUrl: null,
   webhookFormat: null,
@@ -61,6 +61,8 @@ const seven = (
   ntfyAuthToken: null,
   pushoverUserKey: null,
   pushoverApiToken: null,
+  telegramBotToken: null,
+  telegramChatId: null,
   ...o,
 });
 
@@ -182,6 +184,41 @@ describe('planDestinationsMigration', () => {
     });
     expect(on.destinations[0]?.enabled).toBe(true);
     expect(plan({ settings: seven({ pushoverUserKey: 'u' }) }).destinations).toEqual([]);
+  });
+
+  it('telegram keys create a row in the webhook slot, enabled only when webhookFormat is telegram', () => {
+    const on = plan({
+      settings: seven({
+        telegramBotToken: '123:abc',
+        telegramChatId: '42',
+        webhookFormat: 'telegram',
+      }),
+      routing: routing([
+        { eventType: 'violation_detected', webhookEnabled: true },
+        { eventType: 'server_down', webhookEnabled: false },
+      ]),
+      rules: [notifyRule('r1', ['webhook'])],
+    });
+    expect(on.destinations).toEqual([
+      expect.objectContaining({
+        key: 'telegram',
+        type: 'telegram',
+        name: 'Telegram',
+        config: { botToken: '123:abc', chatId: '42' },
+        enabled: true,
+      }),
+    ]);
+    expect(on.destinations[0]?.events).toContain('violation_detected');
+    expect(on.destinations[0]?.events).not.toContain('server_down');
+    // a rule that notified the webhook channel now sends to the Telegram row
+    expect(on.ruleUpdates[0]?.actions.actions).toEqual([
+      expect.objectContaining({ type: 'send', to: ['planned:telegram'] }),
+    ]);
+
+    const off = plan({ settings: seven({ telegramBotToken: '123:abc', telegramChatId: '42' }) });
+    expect(off.destinations[0]?.enabled).toBe(false);
+
+    expect(plan({ settings: seven({ telegramBotToken: '123:abc' }) }).destinations).toEqual([]);
   });
 
   it('routing null falls back to every event but the stream pair and trust, capped by capability', () => {
@@ -488,7 +525,7 @@ describe('runDestinationsMigration', () => {
     }
   });
 
-  it('deletes exactly the seven legacy setting names', async () => {
+  it('deletes exactly the legacy setting names (the seven plus the two fork telegram keys)', async () => {
     let deleteClause: unknown;
     const harness = buildTx({
       builtinRows: [
@@ -518,7 +555,7 @@ describe('runDestinationsMigration', () => {
     const names = ((deleteClause as { queryChunks?: unknown[] }).queryChunks ?? [])
       .flatMap((c) => (Array.isArray(c) ? c : []))
       .map((p) => (p && typeof p === 'object' && 'value' in p ? p.value : p));
-    expect(names).toEqual([...SEVEN_KEYS]);
+    expect(names).toEqual([...LEGACY_KEYS]);
   });
 
   it('only locks and seeds when there is nothing to migrate', async () => {

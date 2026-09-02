@@ -35,6 +35,15 @@ export const SEVEN_KEYS = [
 ] as const;
 export type SevenKey = (typeof SEVEN_KEYS)[number];
 
+/**
+ * Fork: the Telegram agent lived in the same "webhook" slot as ntfy/pushover -
+ * it sent whenever webhookFormat was 'telegram' and both values were set - so
+ * it is migrated alongside the seven and inherits the webhook routing toggles.
+ */
+export const TELEGRAM_KEYS = ['telegramBotToken', 'telegramChatId'] as const;
+export const LEGACY_KEYS = [...SEVEN_KEYS, ...TELEGRAM_KEYS] as const;
+export type LegacyKey = (typeof LEGACY_KEYS)[number];
+
 /** Distinct from the schema runner's 875_100_002 and timescale's backfill 875_100_001. */
 const LOCK_KEY = 875_100_003;
 
@@ -62,7 +71,7 @@ interface LegacyNotifyAction {
 }
 
 export interface PlanInput {
-  settings: Record<SevenKey, string | null>;
+  settings: Record<LegacyKey, string | null>;
   routing: RoutingRow[] | null;
   rules: Array<{
     id: string;
@@ -74,7 +83,7 @@ export interface PlanInput {
 }
 
 export interface PlannedDestination {
-  key: 'discord' | 'webhook' | 'pushover';
+  key: 'discord' | 'webhook' | 'pushover' | 'telegram';
   type: DestinationKind;
   name: string;
   config: Record<string, unknown>;
@@ -146,8 +155,8 @@ export function planDestinationsMigration(input: PlanInput): Plan {
 
   const fmt = s.webhookFormat;
   if (set(s.customWebhookUrl)) {
-    if (fmt === 'pushover') {
-      logs.push('customWebhookUrl set with webhookFormat=pushover: no agent read it; not migrated');
+    if (fmt === 'pushover' || fmt === 'telegram') {
+      logs.push(`customWebhookUrl set with webhookFormat=${fmt}: no agent read it; not migrated`);
     } else {
       const kind: WebhookKind =
         fmt === 'ntfy'
@@ -190,8 +199,24 @@ export function planDestinationsMigration(input: PlanInput): Plan {
     });
   }
 
+  if (set(s.telegramBotToken) && set(s.telegramChatId)) {
+    planned.push({
+      key: 'telegram',
+      type: 'telegram',
+      name: 'Telegram',
+      config: { botToken: s.telegramBotToken, chatId: s.telegramChatId },
+      enabled: fmt === 'telegram',
+      events: capable(
+        'telegram',
+        evts((r) => r.webhookEnabled)
+      ),
+    });
+  }
+
   const ruleUpdates: Plan['ruleUpdates'] = [];
-  const webhookRows = planned.filter((p) => p.key === 'webhook' || p.key === 'pushover');
+  const webhookRows = planned.filter(
+    (p) => p.key === 'webhook' || p.key === 'pushover' || p.key === 'telegram'
+  );
   const discordRow = planned.find((p) => p.key === 'discord');
   for (const rule of input.rules) {
     const actions = rule.actions?.actions ?? [];
@@ -312,14 +337,14 @@ export async function runDestinationsMigration(): Promise<void> {
     const settingRows = await tx
       .select({ name: settings.name, value: settings.value })
       .from(settings)
-      .where(inArray(settings.name, [...SEVEN_KEYS]));
-    const seven = Object.fromEntries(SEVEN_KEYS.map((k) => [k, null])) as Record<
-      SevenKey,
+      .where(inArray(settings.name, [...LEGACY_KEYS]));
+    const seven = Object.fromEntries(LEGACY_KEYS.map((k) => [k, null])) as Record<
+      LegacyKey,
       string | null
     >;
     for (const row of settingRows) {
-      if (typeof row.value === 'string' && (SEVEN_KEYS as readonly string[]).includes(row.name)) {
-        seven[row.name as SevenKey] = row.value;
+      if (typeof row.value === 'string' && (LEGACY_KEYS as readonly string[]).includes(row.name)) {
+        seven[row.name as LegacyKey] = row.value;
       }
     }
 
@@ -405,7 +430,7 @@ export async function runDestinationsMigration(): Promise<void> {
         .where(eq(automations.id, update.id));
     }
 
-    await tx.delete(settings).where(inArray(settings.name, [...SEVEN_KEYS]));
+    await tx.delete(settings).where(inArray(settings.name, [...LEGACY_KEYS]));
     await tx.execute(sql`DROP TABLE IF EXISTS notification_channel_routing`);
     logger.info(
       `Migrated ${plan.destinations.length} destination(s) and ${plan.ruleUpdates.length} rule(s)`
