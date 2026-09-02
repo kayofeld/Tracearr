@@ -42,12 +42,21 @@ export default defineConfig({
       testMatch: /auth\.setup\.ts/,
     },
     {
+      // Bulk fixture data (servers, libraries, titles, a member user). Runs
+      // after 'setup' rather than in globalSetup: first-run sign-up is refused
+      // on an instance that holds data but no owner (fork authGuards), so the
+      // owner has to exist before any other row does. See README.md.
+      name: 'core-seed',
+      testMatch: /core-seed\.setup\.ts/,
+      dependencies: ['setup'],
+    },
+    {
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
         storageState: path.resolve(import.meta.dirname, '.auth/user.json'),
       },
-      dependencies: ['setup'],
+      dependencies: ['setup', 'core-seed'],
       testIgnore: /media-browse\.spec\.ts/,
     },
     {
@@ -56,7 +65,7 @@ export default defineConfig({
       // globalSetup, which runs before any project. See README.md.
       name: 'media-seed',
       testMatch: /media-browse\.setup\.ts/,
-      dependencies: ['setup'],
+      dependencies: ['setup', 'core-seed'],
     },
     {
       name: 'media-browse',
@@ -65,7 +74,7 @@ export default defineConfig({
         storageState: path.resolve(import.meta.dirname, '.auth/user.json'),
       },
       testMatch: /media-browse\.spec\.ts/,
-      dependencies: ['setup', 'media-seed'],
+      dependencies: ['setup', 'core-seed', 'media-seed'],
     },
   ],
 

@@ -44,7 +44,7 @@ async function insertMovie(serverId: string, libraryId: string, ratingKey: strin
 
 async function upsertLibraryName(serverId: string, libraryId: string, name: string) {
   await db.execute(sql`
-    INSERT INTO libraries (server_id, library_id, name, type)
+    INSERT INTO libraries (server_id, library_id, name, media_type)
     VALUES (${serverId}::uuid, ${libraryId}, ${name}, 'movie')
     ON CONFLICT (server_id, library_id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
   `);

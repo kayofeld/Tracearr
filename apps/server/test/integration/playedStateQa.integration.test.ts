@@ -112,18 +112,26 @@ async function insertLibraryItem(opts: {
   fileSize?: number;
   addedDaysAgo?: number;
 }) {
+  // file_size lives on the item (read by the never-watched stats route) and on
+  // a library_item_versions row (what stale.ts sums since upstream's
+  // physical-file model); seed both so every route sees the same bytes.
   await db.execute(sql`
-    INSERT INTO library_items (server_id, library_id, rating_key, title, media_type, grandparent_rating_key, file_size, created_at)
-    VALUES (
-      ${opts.serverId}::uuid,
-      ${opts.libraryId ?? 'lib-1'},
-      ${opts.ratingKey},
-      ${opts.title},
-      ${opts.mediaType},
-      ${opts.grandparentRatingKey ?? null},
-      ${opts.fileSize ?? 1000},
-      NOW() - INTERVAL '1 day' * ${opts.addedDaysAgo ?? 0}
+    WITH item AS (
+      INSERT INTO library_items (server_id, library_id, rating_key, title, media_type, grandparent_rating_key, file_size, created_at)
+      VALUES (
+        ${opts.serverId}::uuid,
+        ${opts.libraryId ?? 'lib-1'},
+        ${opts.ratingKey},
+        ${opts.title},
+        ${opts.mediaType},
+        ${opts.grandparentRatingKey ?? null},
+        ${opts.fileSize ?? 1000},
+        NOW() - INTERVAL '1 day' * ${opts.addedDaysAgo ?? 0}
+      )
+      RETURNING id
     )
+    INSERT INTO library_item_versions (library_item_id, server_version_key, file_size)
+    SELECT id, ${'v-' + opts.ratingKey}, ${opts.fileSize ?? 1000} FROM item
   `);
 }
 

@@ -25,7 +25,17 @@ jobs:
 
       # setup rather than the node action: a container action can't expose its
       # exit code, and the whole point here is telling exit 1 from exit 2.
+      # Fork note: SNYK_TOKEN is an upstream org secret. Without it the CLI
+      # exits 2 and the step below fails on purpose, so on a fork with no token
+      # the scan is skipped rather than reported as broken.
+      - name: Check for Snyk token
+        id: snyk-token
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: echo "present=$([ -n \"$SNYK_TOKEN\" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Install Snyk CLI
+        if: steps.snyk-token.outputs.present == 'true'
         uses: snyk/actions/setup@12140f4059e244892ae643824a95459a102120dd # master
 
       # Snyk is the detection half. Its database carries findings with no live
@@ -39,6 +49,7 @@ jobs:
       # Exit 2 or 3 means the scan itself failed: fail loudly, because a
       # revoked token used to look identical to a clean run.
       - name: Snyk test
+        if: steps.snyk-token.outputs.present == 'true'
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
@@ -60,6 +71,7 @@ jobs:
       # No snyk monitor here: the SCM integration already tracks this repo, and
       # a CLI monitor would create a second Target rather than join it.
       - name: Upload SARIF to code scanning
+        if: steps.snyk-token.outputs.present == 'true'
         uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           sarif_file: snyk.sarif

@@ -284,7 +284,8 @@ describe('a same-server combine keeps the absorbed external id resolvable', () =
     const admin = await createTestUser({ role: 'owner' });
     const server = await createTestServer({ type: 'plex' });
 
-    const owner = await createTestUser({ role: 'owner', username: 'durzoau' });
+    // admin, not owner: the fork allows one owner per instance (users_single_owner)
+    const owner = await createTestUser({ role: 'admin', username: 'durzoau' });
     const pollerIdentity = await createTestUser({ role: 'member', username: 'durzoau' });
 
     const ownerAccount = await createTestServerUser({
@@ -332,7 +333,8 @@ describe('a same-server combine keeps the absorbed external id resolvable', () =
 
     const first = await createTestUser({ role: 'member', username: 'chain-a' });
     const second = await createTestUser({ role: 'member', username: 'chain-b' });
-    const final = await createTestUser({ role: 'owner', username: 'chain-c' });
+    // admin, not owner: the fork allows one owner per instance (users_single_owner)
+    const final = await createTestUser({ role: 'admin', username: 'chain-c' });
 
     await createTestServerUser({ userId: first.id, serverId: server.id, externalId: 'a' });
     await createTestServerUser({ userId: second.id, serverId: server.id, externalId: 'b' });
@@ -363,7 +365,8 @@ describe('sync does not write an absorbed account over the one that survived it'
     const admin = await createTestUser({ role: 'owner' });
     const server = await createTestServer({ type: 'jellyfin' });
 
-    const owner = await createTestUser({ role: 'owner', username: 'john' });
+    // admin, not owner: the fork allows one owner per instance (users_single_owner)
+    const owner = await createTestUser({ role: 'admin', username: 'john' });
     const spare = await createTestUser({ role: 'member', username: 'john-4k' });
 
     const survivor = await createTestServerUser({

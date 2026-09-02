@@ -34,7 +34,9 @@ function ownedResource(clientIdentifier: string) {
 async function seedAccount(plexTvId = `plex-tv-${randomUUID()}`) {
   const [user] = await db
     .insert(users)
-    .values({ username: `owner-${randomUUID().slice(0, 8)}`, role: 'owner' })
+    // admin, not owner: seeded twice per test and the fork allows one owner per
+    // instance (users_single_owner); nothing here depends on the role.
+    .values({ username: `owner-${randomUUID().slice(0, 8)}`, role: 'admin' })
     .returning();
 
   const [account] = await db

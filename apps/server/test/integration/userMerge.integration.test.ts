@@ -85,6 +85,8 @@ function decorateTestAuth(app: FastifyInstance, user: TestAuthUser): void {
       return reply.forbidden('Owner access required');
     }
   });
+}
+
 /** The list envelope reports total and pageSize; the page count derives from them. */
 function pageCount(body: { meta: { pageSize: number; total: number } }): number {
   return Math.ceil(body.meta.total / body.meta.pageSize);
@@ -1857,9 +1859,9 @@ describe('every trust move announces itself', () => {
   async function ownerApp(adminId: string) {
     const app = Fastify({ logger: false });
     await app.register(sensible);
-    app.decorate('authenticate', async (request: any) => {
-      request.user = { userId: adminId, username: 'owner', role: 'owner', serverIds: [] };
-    });
+    // Same helper as the other suites: listRoutes also registers the fork's
+    // owner-gated POST /users/bulk/remove, which needs requireOwner present.
+    decorateTestAuth(app, { userId: adminId, username: 'owner', role: 'owner', serverIds: [] });
     await app.register(listRoutes, { prefix: '/users' });
     return app;
   }

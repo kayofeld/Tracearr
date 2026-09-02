@@ -144,7 +144,8 @@ describe('public API v2 end to end', () => {
   const authHeaders = () => ({ authorization: `Bearer ${token}` });
 
   it('proves the whole v2 surface against one identity across three servers', async () => {
-    const admin = await createTestUser({ role: 'owner' });
+    // admin, not owner: seedOwnerToken already holds the instance's one owner (users_single_owner)
+    const admin = await createTestUser({ role: 'admin' });
     const plex = await createTestServer({ type: 'plex' });
     const jelly = await createTestServer({ type: 'jellyfin' });
     const emby = await createTestServer({ type: 'emby' });

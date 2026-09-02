@@ -91,7 +91,8 @@ describe('concurrent session starts', () => {
     // Separate identities, so the only thing the two transactions share is automation_runs.
     const starters = await Promise.all(
       [0, 1].map(async () => {
-        const owner = await createTestUser({ role: 'owner' });
+        // member, not owner: two are created and the fork allows one owner per instance
+        const owner = await createTestUser({ role: 'member' });
         const serverUser = await createTestServerUser({ userId: owner.id, serverId: server.id });
         const session = await createTestSession({
           serverId: server.id,

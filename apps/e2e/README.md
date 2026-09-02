@@ -64,6 +64,7 @@ Environment variables are loaded from the root `.env` file. The following can be
 | File                    | What it tests                                                                                      |
 | ----------------------- | -------------------------------------------------------------------------------------------------- |
 | `auth.setup.ts`         | Authentication setup project: handles first-time signup or login, saves auth state for other tests |
+| `core-seed.setup.ts`    | Bulk fixture seed (servers, libraries, titles, member user), run after the owner exists            |
 | `media-browse.setup.ts` | Phase 2 of the media browse seed: links the just-created owner to a watched title (see below)      |
 | `auth.spec.ts`          | Login page, unauthenticated redirects, credential login                                            |
 | `automations.spec.ts`   | Create and delete template and custom automations, filter the list by kind                         |
@@ -87,10 +88,14 @@ watch history) and it must never touch a real library. The seed is fail-closed b
    migrations (`db:migrate`) before `pnpm --filter @tracearr/server dev` ever starts - otherwise the
    app's boot-time migration runner would crash-loop against a database that doesn't exist yet on a
    fresh checkout.
-3. **Bulk fixture data.** `seed/globalSetup.ts` is Playwright's `globalSetup` hook - it runs once,
-   after the webServer is already up, and seeds two media servers, ~90 movies/shows, and watch
-   history (idempotent - safe to rerun). It also re-runs the ensure/migrate steps defensively in case
-   a stale server process was reused instead (`reuseExistingServer`).
+3. **Bulk fixture data.** `tests/core-seed.setup.ts` runs as its own Playwright project
+   (`core-seed`, depends on `setup`) and seeds two media servers, ~90 movies/shows, and watch
+   history via `seed/seedCore.ts` (idempotent - safe to rerun). It deliberately runs _after_
+   `auth.setup.ts` has created the owner: this fork refuses first-run sign-up on an instance that
+   already holds data but has no owner (a lost owner row must not be claimable from `/login`), and
+   seeding servers and users ahead of the owner is exactly that state. `seed/globalSetup.ts` keeps
+   the ensure/migrate/safety-check steps and runs them defensively in case a stale server process
+   was reused instead (`reuseExistingServer`).
 4. **Admin link.** One scenario (a title marked "watched by you") needs the real signed-in owner's id,
    which only exists after `auth.setup.ts` signs up/logs in. `media-browse.setup.ts` runs as its own
    Playwright project (`media-seed`, depends on `setup`) to link that account and refresh the watch
