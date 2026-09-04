@@ -4,6 +4,32 @@ Release history for this fork of [connorgallopo/Tracearr](https://github.com/con
 The fork tracks upstream but ships independently; entries below are the fork's own line. Versions are
 3-part semver (the in-app self-updater validates tags as `vX.Y.Z`).
 
+## v2.3.4: the v2 upgrade migrates an existing fork database on its own
+
+v2.3.0 shipped with a note saying an existing database had to be reconciled by hand before starting it.
+That was not a reasonable thing to ask. Installs update themselves, nobody had a script to run, and the
+result was a server that came up in maintenance mode and stayed there, logging:
+
+    column "video_dynamic_range" does not exist
+
+Nothing was damaged when that happened. The whole migration batch runs in one transaction, so a database
+in this state is exactly where it was before the upgrade, and it will migrate correctly once it is on
+this release.
+
+The cause is how the migrator decides what to run. It reads the single highest timestamp in its ledger
+and applies everything newer, so it never notices a gap below that mark. The fork's own migrations 0067
+to 0071 were written after it branched, which put their timestamps above ten upstream migrations the
+fork only inherited at the merge. The migrator skipped all ten and started partway up the chain, where
+the first migration that needed one of them failed.
+
+This release repairs that before the migrator runs: it reshapes what the fork's own migrations left
+behind so upstream's versions recognise their own tables, then drops the five ledger rows that were
+hiding the gap. The upgrade then proceeds normally and your data comes with it. Nothing to run, nothing
+to configure. A fresh install and an already-reconciled one both skip it.
+
+If you upgraded to v2.3.0 or later and your server has been sitting in maintenance mode, update to this
+release and start it again.
+
 ## v2.3.3: Telegram carry-over reads the chat id correctly
 
 - v2.3.2's Telegram carry-over skipped the channel on any real install: the chat id is all digits, and
@@ -52,7 +78,8 @@ migration chain whole and renumbers the fork's tables to 0097, which leaves a da
 the old numbering in a state the migrator cannot reconcile on its own: it decides what to apply by
 timestamp, so it would skip ten upstream migrations whose timestamps predate what the fork already
 applied, including the ones that create the tables the new code reads. A fresh install is unaffected.
-Reconcile an existing database before starting this version.
+Reconcile an existing database before starting this version. **As of v2.3.4 this happens automatically
+on first start, so upgrade straight to v2.3.4 or later and ignore this paragraph.**
 
 Telegram notifications need setting up again. Upstream replaced the notification-channel model with
 destinations, so Telegram is now a destination rather than a channel, and its bot token lives in the

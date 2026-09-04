@@ -13,6 +13,7 @@ import type pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { createRawPgClient } from './client.js';
+import { reconcileForkLedger } from './forkLedgerReconcile.js';
 import * as schema from './schema.js';
 import { uncapDecompressionForSession } from './timescale.js';
 
@@ -82,6 +83,12 @@ export async function runMigrationsGuarded(
       // unlimited setting this replaced OOM-crashed postgres under routine
       // load), so only this dedicated migration session runs uncapped.
       await uncapDecompressionForSession(client);
+
+      // A pre-v2 fork database carries ledger rows whose timestamps sit above
+      // ten upstream migrations it never ran, so drizzle's high-water-mark
+      // check skips them and the batch fails on the first dependency. Repair
+      // that before handing over. No-op on every other database.
+      await reconcileForkLedger(client);
 
       const migrationDb = drizzle(client, { schema });
       await migrate(migrationDb, { migrationsFolder });
