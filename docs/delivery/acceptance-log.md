@@ -138,3 +138,72 @@ hostile media server) are backlogged with their suggested fixes.
    inert. Either implement or amend the spec — currently doc and code disagree.
 
 **Sign-off:** coordinator, pending owner decision on deploying to production to settle item 1.
+
+---
+
+## v2.3.4 — the v2 upgrade reconciles a fork database on its own
+
+**Date:** 2026-09-04 **Branch:** `fix/fork-migration-ledger` (`0ce3881f`) **Verdict:** GO, pending
+owner merge and tag.
+
+**Trigger.** A user reported the fork broken after updating. Their container log shows the server
+listening but stuck in maintenance mode, retrying migrations and failing every time on
+`column "video_dynamic_range" does not exist`.
+
+**Diagnosis (verified, not inferred).** Drizzle's migrator reads one row —
+`order by created_at desc limit 1` — and applies every journal entry above it, so a gap below that
+mark is invisible to it (read in `drizzle-orm@0.45.2/pg-core/dialect.js`, not assumed). The fork's
+own 0067..0071 carry timestamps 1785251293080..1785397613726, all above upstream's 0067..0076
+(1784125742617..1785249058410), which the fork only inherited at the v2 merge. Every fork database
+therefore skips those ten and starts at 0077; 0078 reads `library_items.video_dynamic_range`, a
+column the skipped 0075 adds. Confirmed against `git show v1.13.0:.../meta/_journal.json`. v2.3.0's
+release note asked owners to reconcile by hand, which nothing in an auto-updating install can do.
+
+**Fix.** `reconcileForkLedger()` runs on the migration connection before drizzle: it reshapes what
+the fork's own migrations left behind (`libraries` into upstream 0074's shape, keeping its rows; the
+constraint and index names its ombi_* to media_* rename left behind; a pre-0068 request mirror
+parked aside with any colliding index names), then deletes the five fork ledger rows so the mark
+falls back to upstream 0066 and drizzle replays 0067..0097 in order. 0074 and 0097 are the two
+migrations that then meet objects the fork already created, so both are idempotent. One transaction,
+every step guarded.
+
+**Evidence — green under: seedbox, Postgres 18.4 + TimescaleDB, a `pg_restore` of the real
+pre-upgrade production backup (`tracearr-pre-v2.3.0-20260901-155052.dump`), booted with
+`pnpm --filter @tracearr/server dev` at `0ce3881f`, scratch database and redis db, production
+untouched.**
+
+1. _Failure reproduced first._ v2.3.3 against that restore (ledger 72 rows, max 1785397613726):
+   stuck in maintenance, same `video_dynamic_range` error as the user's log.
+2. _Fix on the same database._ READY after 9 s; ledger 72 → 98 rows at 0097 (1788182222814);
+   `video_dynamic_range` present; `library_item_versions` seeded with 23,179 rows; media_requests
+   1,714 and played_states 19,301 rows carried across intact; `libraries` 6 rows in the upstream
+   shape; the Telegram destination and 5 automations migrated as they did on production.
+3. _Second boot._ No reconciliation lines, migrations complete, ledger unchanged — a clean no-op,
+   which is also the already-reconciled production case.
+4. _Schema parity._ Against a fresh install of the same code, the reconciled database is missing
+   nothing except `notification_channel_routing` (3 indexes, 8 columns) and `automations.params` /
+   `.type`, all of which the boot-time system-events migration drops and the never-booted reference
+   still has. No table, index or column the fresh install has is absent otherwise.
+5. _The other entry point._ A v1.8.x-shaped copy (fork tables renamed back, played_states and
+   libraries dropped) reached 0097 too, with the legacy mirror parked at 1,714 rows and
+   library_item_versions backfilled. **This run found a real defect first** — a parked table keeps
+   its constraint names, and a half-renamed one collides with what 0097 creates — fixed in
+   `0ce3881f` and re-verified.
+6. _Fresh install._ `db:migrate` on an empty database with the edited 0074/0097: 98 rows at 0097.
+7. Unit: 6 new tests (guards, ordering, rollback, and that both migrations stay idempotent).
+   `tsc` clean, pre-push hook (typecheck, unit, lint, translations) passed.
+
+**Scratch databases dropped, checkout removed, no dev ports left listening. Backups kept.**
+
+**Open items:**
+
+1. Not released. The branch is pushed; the owner opens the PR, merges and tags `v2.3.4`, which is
+   what publishes the image the affected user needs.
+2. Fork databases at v1.9.0 through v1.12.1 are handled by the same guarded path but were not
+   booted individually; v1.13.0 (the overwhelming majority, and the last fork release) and a
+   v1.8.x shape were.
+3. The release workflow's Helm-chart and npm-publish jobs still fail on this fork. Cosmetic,
+   unrelated, and not addressed here.
+
+**Sign-off:** coordinator. No independent reviewer ran on this fix; the evidence above is a real
+reproduction and a real repair on a copy of production, not a self-declared pass.
