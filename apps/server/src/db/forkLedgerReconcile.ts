@@ -122,6 +122,7 @@ export async function reconcileForkLedger(client: pg.Client): Promise<boolean> {
     // the old rows stay available if anyone wants them.
     await client.query(`
       DO $$
+      DECLARE r record;
       BEGIN
         IF to_regclass('public.ombi_requests') IS NOT NULL
            AND to_regclass('public.media_requests') IS NULL THEN
@@ -129,6 +130,29 @@ export async function reconcileForkLedger(client: pg.Client): Promise<boolean> {
           IF to_regclass('public.ombi_user_mappings') IS NOT NULL THEN
             ALTER TABLE "ombi_user_mappings" RENAME TO "ombi_user_mappings_legacy";
           END IF;
+          -- Renaming a table leaves its constraints and indexes under their old
+          -- names, and Postgres keeps those names in one namespace per schema.
+          -- Any of them already called media_request* would collide with what
+          -- 0097 is about to create, so they follow the table aside.
+          FOR r IN
+            SELECT conname AS name, conrelid::regclass::text AS tbl, true AS is_constraint
+              FROM pg_constraint
+             WHERE conrelid::regclass::text IN ('ombi_requests_legacy', 'ombi_user_mappings_legacy')
+               AND conname LIKE 'media\\_request%'
+            UNION ALL
+            SELECT indexname, tablename, false
+              FROM pg_indexes
+             WHERE schemaname = 'public'
+               AND tablename IN ('ombi_requests_legacy', 'ombi_user_mappings_legacy')
+               AND indexname LIKE 'media\\_request%'
+               AND indexname NOT IN (SELECT conname FROM pg_constraint WHERE conname IS NOT NULL)
+          LOOP
+            IF r.is_constraint THEN
+              EXECUTE format('ALTER TABLE %I RENAME CONSTRAINT %I TO %I', r.tbl, r.name, r.name || '_legacy');
+            ELSE
+              EXECUTE format('ALTER INDEX %I RENAME TO %I', r.name, r.name || '_legacy');
+            END IF;
+          END LOOP;
         END IF;
       END $$;
     `);
