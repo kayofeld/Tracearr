@@ -487,6 +487,8 @@ jobs:
     name: Publish npm Packages
     runs-on: ubuntu-latest
     needs: [check-release-type, merge-docker, merge-supervised]
+    # Only upstream owns the @tracearr scope on npm; a fork cannot publish to it.
+    if: github.repository == 'connorgallopo/Tracearr'
     permissions:
       contents: read
       id-token: write
@@ -530,17 +532,23 @@ jobs:
     if: needs.check-release-type.outputs.prerelease == 'false'
     permissions:
       contents: write
+    env:
+      # No PAT (any fork), no chart bump. Both steps sit this one out rather than
+      # failing the release; add the secret and they start working again.
+      HAS_RELEASE_PAT: ${{ secrets.RELEASE_PAT != '' }}
 
     steps:
       # The default token cannot push to main: the ruleset requires a pull request and
       # only the owner bypasses it. A PAT pushes as the owner, so it inherits that bypass.
       - name: Checkout main
+        if: env.HAS_RELEASE_PAT == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: main
           token: ${{ secrets.RELEASE_PAT }}
 
       - name: Sync chart version to the release and commit
+        if: env.HAS_RELEASE_PAT == 'true'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           CHART=docker/helm/tracearr/Chart.yaml
