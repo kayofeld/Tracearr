@@ -31,6 +31,9 @@ jobs:
     name: Renovate
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Self-hosted Renovate runs as upstream's GitHub App; a fork has neither the
+    # app id nor its key, so the token step fails every hour. Skip it here.
+    if: github.repository == 'connorgallopo/Tracearr'
     steps:
       - name: Generate app token
         id: app-token
