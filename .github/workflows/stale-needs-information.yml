@@ -3,8 +3,6 @@ name: Stale - needs-information
 # Issues labelled needs-information that go quiet for 14 days get a nudge,
 # then close 7 days later. Any reply resets the clock. PRs are never touched.
 on:
-  schedule:
-    - cron: '17 6 * * *'
   workflow_dispatch:
 
 permissions:
